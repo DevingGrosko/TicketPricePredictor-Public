@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Ticket Price Predictor</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/css/bootstrap.min.css"
+          rel="stylesheet"
+          integrity="sha384-LN+7fdVzj6u52u30Kp6M/trliBMCMKTyK833zpbD+pXdCLuTusPj697FH4R/5mcr"
+          crossorigin="anonymous">
+  </head>
+  <body>
+
+    <div class="px-4 py-5 my-5 text-center">
+      <h1 class="display-5 fw-bold text-body-emphasis">Ticket Price Predictor!</h1>
+      <p class="lead mb-4">Welcome to the Ticket Price Predictor. Enjoy!</p>
+
+
+      <!-- Start of many games section -->
+      <div class="container px-4 py-5" id="featured-3">
+        <div class="row g-4 py-5 row-cols-1 row-cols-lg-3">
+          <div class="feature col">
+            <div class="feature-icon d-inline-flex align-items-center justify-content-center text-bg-primary bg-gradient fs-2 mb-3">
+            </div>
+            <h3 class="fs-2 text-body-emphasis">Graph for many games</h3>
+            <p>Select an event and section to view average
+              <br>ticket price trends over many games.</p>
+
+            <!-- 🔁 Reusable Dropdown Group -->
+            <div class="dropdown-group">
+              <!-- Event Dropdown -->
+              <div class="dropdown mb-2">
+                <button class="btn btn-secondary dropdown-toggle event-dropdown" type="button"
+                        data-bs-toggle="dropdown" aria-expanded="false">
+                  Event
+                </button>
+                <ul class="dropdown-menu event-list">
+                  {% for place in event_dict %}
+                  <li>
+                    <button class="dropdown-item" type="button"
+                            onclick="updateSelectedPlaceMultiGame(this, '{{ place }}',1)">
+                      {{ place }}
+                    </button>
+                  </li>
+                  {% endfor %}
+                </ul>
+              </div>
+
+              <!-- Sections Dropdown (initially hidden) -->
+              <div class="dropdown mb-2 section-container" hidden>
+                <button class="btn btn-secondary dropdown-toggle section-dropdown" type="button"
+                        data-bs-toggle="dropdown" aria-expanded="false">
+                  Section
+                </button>
+                <ul class="dropdown-menu section-list" style="max-height: 300px; overflow-y: auto;"></ul>
+              </div>
+
+              <!-- Go Button -->
+              <a class="btn btn-primary mt-2 go-button" hidden role="button">Go</a>
+            </div>
+          </div>
+
+
+          <!-- Second Section: Graph for one game -->
+          <div class="feature col">
+            <div class="feature-icon d-inline-flex align-items-center justify-content-center text-bg-primary bg-gradient fs-2 mb-3">
+
+            </div>
+            <h3 class="fs-2 text-body-emphasis">Graph for one game</h3>
+            <p>Select a game and section to view average <br>ticket price trends for a single game.</p>
+
+            <!-- 🔁 Another Reusable Dropdown Group -->
+            <div class="dropdown-group">
+              <!-- Event Dropdown -->
+              <div class="dropdown mb-2">
+                <button class="btn btn-secondary dropdown-toggle event-dropdown" type="button"
+                        data-bs-toggle="dropdown" aria-expanded="false">
+                  Event
+                </button>
+                <ul class="dropdown-menu event-list">
+                  {% for place in event_dict %}
+                  <li>
+                    <button class="dropdown-item" type="button"
+                            onclick="updateSelectedPlaceSingleGame(this, '{{ place }}')">
+                      {{ place }}
+                    </button>
+                  </li>
+                  {% endfor %}
+                </ul>
+              </div>
+
+              <div class="dropdown mb-2 individual-game-container" hidden>
+                <button class="btn btn-secondary dropdown-toggle individual-game-dropdown" type="button"
+                        data-bs-toggle="dropdown" aria-expanded="false">
+                  Game
+                </button>
+                <ul class="dropdown-menu individual-game-list" style="max-height: 300px; overflow-y: auto;"></ul>
+              </div>
+
+              <!-- Sections Dropdown -->
+              <div class="dropdown mb-2 section-container" hidden>
+                <button class="btn btn-secondary dropdown-toggle section-dropdown" type="button"
+                        data-bs-toggle="dropdown" aria-expanded="false">
+                  Section
+                </button>
+                <ul class="dropdown-menu section-list" style="max-height: 300px; overflow-y: auto;"></ul>
+              </div>
+
+              <!-- Go Button -->
+              <a class="btn btn-primary mt-2 go-button" hidden role="button">Go</a>
+            </div>
+          </div>
+
+          <!-- Box 3: For giving the cheapest prices -->
+          <!-- header and information part -->
+          <div class="feature col">
+            <div class="feature-icon d-inline-flex align-items-center justify-content-center text-bg-primary bg-gradient fs-2 mb-3">
+            </div>
+            <h3 class="fs-2 text-body-emphasis">When to buy</h3>
+            <p>Select an event and section to find the <br>cheapest time to buy a ticket.</p>
+
+            <div class="dropdown-group">
+              <!-- Event Dropdown -->
+              <div class="dropdown mb-2">
+                <button class="btn btn-secondary dropdown-toggle event-dropdown" type="button"
+                        data-bs-toggle="dropdown" aria-expanded="false">
+                  Event
+                </button>
+                <ul class="dropdown-menu event-list">
+                  {% for place in event_dict %}
+                  <li>
+                    <button class="dropdown-item" type="button"
+                            onclick="updateSelectedPlaceMultiGame(this, '{{ place }}',3)">
+                      {{ place }}
+                    </button>
+                  </li>
+                  {% endfor %}
+                </ul>
+              </div>
+
+              <!-- Sections Dropdown (initially hidden) -->
+              <div class="dropdown mb-2 section-container" hidden>
+                <button class="btn btn-secondary dropdown-toggle section-dropdown" type="button"
+                        data-bs-toggle="dropdown" aria-expanded="false">
+                  Section
+                </button>
+                <ul class="dropdown-menu section-list" style="max-height: 300px; overflow-y: auto;"></ul>
+              </div>
+
+              <!-- Go Button -->
+              <a class="btn btn-primary mt-2 go-button" hidden role="button">Go</a>
+            </div>
+
+          </div>
+
+
+          </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+          <!-- Pass Python dict into JS -->
+    <script>
+      const placesData = {{ event_dict | tojson }};
+      const gamesData = {{ games_dict | tojson }};
+      const gameSectionsData = {{ game_sections_dict | tojson }};
+    </script>
+
+    <script src="{{ url_for('static', filename='js/script.js') }}?v=2"></script>
+
+    <!-- Bootstrap Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/js/bootstrap.bundle.min.js"
+            integrity="sha384-ndDqU0Gzau9qJ1lfW4pNLlhNTkCfHzAVBReH9diLvGRem5+R9g2FzA8ZGN954O5Q"
+            crossorigin="anonymous"></script>
+  </body>
+</html>

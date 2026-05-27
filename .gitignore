@@ -1,0 +1,21 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.idea/
+.venv/
+venv/
+.env
+
+# Local scraped data and deployment database
+Event-collection.db
+*.db
+*.sqlite*
+vivid_listings.json
+quarter.json
+
+# Local artifacts
+*.log
+*.png
+*.jpg
+*.jpeg
+

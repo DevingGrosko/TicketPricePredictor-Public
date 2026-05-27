@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Lowest Price</title>
+    <style>
+        body {
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: linear-gradient(135deg, #ece9e6, #ffffff);
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+        }
+        .card {
+            background: #fff;
+            padding: 40px 60px;
+            border-radius: 15px;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            border: 2px solid #f0f0f0;
+        }
+        h1 {
+            margin: 0;
+            font-size: 2rem;
+            color: #333;
+        }
+        .highlight {
+            color: #0073e6;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="card">
+        {% if error %}
+        <h1><span class="highlight">{{ error }}</span></h1>
+        {% else %}
+        <h1>Cheapest time is: <span class="highlight">{{time}}</span> hours before the game</h1>
+        {% endif %}
+    </div>
+</body>
+</html>

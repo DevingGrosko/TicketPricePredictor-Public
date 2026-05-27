@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Graph</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light text-center p-5">
+
+    <div class="container">
+
+        <h1 class="mb-4">
+          {% if mode == 'single' %}
+            Graph for One Game
+          {% else %}
+            Graph Across Many Games
+          {% endif %}
+        </h1>
+
+        <h2 class="chosenSection">
+          Field: {{ place }}<br>
+          Section: {{ section }}
+          {% if mode == 'single' %}
+            <br>Game: {{ request.args.get("game") }}
+          {% else %}
+            <br>
+            Average over {{totalGames}} games
+          {% endif %}
+        </h2>
+
+
+        {% if error %}
+          <div class="alert alert-warning mt-4" role="alert">
+            {{ error }}
+          </div>
+        {% else %}
+          <!-- Graph image -->
+          <img src="data:image/png;base64,{{img}}" class="img-fluid border rounded shadow" alt="Graph">
+        {% endif %}
+
+        <!-- Home button -->
+        <div class="mt-4">
+          <a class="btn btn-secondary" type="button" aria-expanded="false"
+             href="{{url_for('graph',display=displayType, event=place, section=section,mode=mode,game=game)}}">
+            Update to {{displayLabel}}
+          </a>
+          <a class="btn btn-primary" href="/" role="button">Home</a>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS (optional for interactive components) -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
