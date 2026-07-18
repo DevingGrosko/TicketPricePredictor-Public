@@ -1,0 +1,42 @@
+name: Deploy to PythonAnywhere
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "Flask_App/**"
+      - "graph_builder.py"
+      - "models.py"
+      - ".github/workflows/deploy-pythonanywhere.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: pythonanywhere-production
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure restricted deployment key
+        env:
+          PYTHONANYWHERE_SSH_KEY: ${{ secrets.PYTHONANYWHERE_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$PYTHONANYWHERE_SSH_KEY" > ~/.ssh/pythonanywhere_deploy
+          chmod 600 ~/.ssh/pythonanywhere_deploy
+          ssh-keyscan -t rsa,ed25519 -H ssh.pythonanywhere.com > ~/.ssh/known_hosts
+          ssh-keygen -lf ~/.ssh/known_hosts -E sha256 | grep -F 'SHA256:zy2jmqxNg/fs6tFZK55OjHTI3B2UofzOiUvTPtcX3/Y'
+
+      - name: Deploy website and reload web app
+        run: |
+          ssh \
+            -i ~/.ssh/pythonanywhere_deploy \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            bunnyjeff@ssh.pythonanywhere.com deploy
