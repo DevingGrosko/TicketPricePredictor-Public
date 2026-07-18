@@ -1,55 +1,41 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Graph</title>
-    <!-- Bootstrap CSS -->
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
-</head>
-<body class="bg-light text-center p-5">
+{% extends "base.html" %}
+{% block title %}Price trend — TicketSignal{% endblock %}
 
-    <div class="container">
-
-        <h1 class="mb-4">
-          {% if mode == 'single' %}
-            Graph for One Game
-          {% else %}
-            Graph Across Many Games
-          {% endif %}
-        </h1>
-
-        <h2 class="chosenSection">
-          Field: {{ place }}<br>
-          Section: {{ section }}
-          {% if mode == 'single' %}
-            <br>Game: {{ request.args.get("game") }}
-          {% else %}
-            <br>
-            Average over {{totalGames}} games
-          {% endif %}
-        </h2>
-
-
-        {% if error %}
-          <div class="alert alert-warning mt-4" role="alert">
-            {{ error }}
-          </div>
-        {% else %}
-          <!-- Graph image -->
-          <img src="data:image/png;base64,{{img}}" class="img-fluid border rounded shadow" alt="Graph">
-        {% endif %}
-
-        <!-- Home button -->
-        <div class="mt-4">
-          <a class="btn btn-secondary" type="button" aria-expanded="false"
-             href="{{url_for('graph',display=displayType, event=place, section=section,mode=mode,game=game)}}">
-            Update to {{displayLabel}}
-          </a>
-          <a class="btn btn-primary" href="/" role="button">Home</a>
-        </div>
+{% block content %}
+<section class="result-page">
+  <a class="back-link" href="{{ url_for('home') }}#explore"><span>&#8592;</span> New analysis</a>
+  <div class="result-heading">
+    <div>
+      <span class="section-kicker">{% if mode == 'single' %}Single-game analysis{% else %}Market trend{% endif %}</span>
+      <h1>{% if mode == 'single' %}Price history for one game{% else %}Average price movement{% endif %}</h1>
+      <p>{{ place }} <span>&middot;</span> Section {{ section }}{% if mode == 'single' %} <span>&middot;</span> {{ game }}{% endif %}</p>
     </div>
+    <div class="result-badge"><small>Sample</small><strong>{{ totalGames }} game{% if totalGames != 1 %}s{% endif %}</strong></div>
+  </div>
 
-    <!-- Bootstrap JS (optional for interactive components) -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
+  <div class="result-grid">
+    <article class="chart-card">
+      <div class="chart-card__top">
+        <div><span>Price timeline</span><strong>{% if displayType == 'money' %}Relative movement{% else %}Average listed price{% endif %}</strong></div>
+        <a class="view-toggle" href="{{ url_for('graph', display=displayType, event=place, section=section, mode=mode, game=game) }}">Show {{ displayLabel }} view</a>
+      </div>
+      {% if error %}
+        <div class="empty-state"><span>!</span><h2>No data available</h2><p>{{ error }}</p><a class="button button--primary" href="{{ url_for('home') }}#explore">Try another selection</a></div>
+      {% else %}
+        <img src="data:image/png;base64,{{ img }}" class="result-chart" alt="Ticket price trend for {{ place }}, section {{ section }}">
+      {% endif %}
+    </article>
+    <aside class="insight-card">
+      <span class="panel-icon">&#10022;</span>
+      <span class="section-kicker">Reading the chart</span>
+      <h2>Watch the direction, not a single point.</h2>
+      <p>Moving left to right, the chart counts down toward game time. Look for sustained changes rather than reacting to one listing snapshot.</p>
+      <dl>
+        <div><dt>48h</dt><dd>Analysis window</dd></div>
+        <div><dt>{{ totalGames }}</dt><dd>Games included</dd></div>
+      </dl>
+      <p class="disclaimer">Historical listing prices do not guarantee future results.</p>
+    </aside>
+  </div>
+</section>
+{% endblock %}

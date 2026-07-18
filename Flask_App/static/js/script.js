@@ -1,108 +1,89 @@
-  function updateSelectedPlaceMultiGame(buttonEl, place,whichBox) {
-    const group = buttonEl.closest('.dropdown-group');
-    group.querySelector('.event-dropdown').textContent = place;
-    const sectionDropdown = group.querySelector('.section-dropdown');
-    sectionDropdown.textContent = "Section";
+const tabs = document.querySelectorAll('.analysis-tab');
+const panels = document.querySelectorAll('.analysis-panel');
 
-    const sectionContainer = group.querySelector('.section-container');
-    const sectionList = group.querySelector('.section-list');
-    const goBtn = group.querySelector('.go-button');
-
-    sectionList.innerHTML = "";
-
-    const sections = placesData[place] || [];
-    sections.forEach(section => {
-      const li = document.createElement("li");
-      const btn = document.createElement("button");
-      btn.className = "dropdown-item";
-      btn.type = "button";
-      btn.textContent = section;
-
-      btn.onclick = function () {
-        sectionDropdown.textContent = section;
-        if (whichBox == 1){
-            goBtn.href = `/graph?section=${encodeURIComponent(section)}&event=${encodeURIComponent(place)}`;
-        }else{
-            goBtn.href = `/predict?section=${encodeURIComponent(section)}&event=${encodeURIComponent(place)}`;
-        }
-        goBtn.hidden = false;
-      };
-
-      li.appendChild(btn);
-      sectionList.appendChild(li);
+tabs.forEach((tab) => {
+  tab.addEventListener('click', () => {
+    tabs.forEach((item) => {
+      item.classList.remove('is-active');
+      item.setAttribute('aria-selected', 'false');
+    });
+    panels.forEach((panel) => {
+      panel.classList.remove('is-active');
+      panel.hidden = true;
     });
 
-    sectionContainer.hidden = false;
-    goBtn.hidden = true;
- }
+    tab.classList.add('is-active');
+    tab.setAttribute('aria-selected', 'true');
+    const panel = document.getElementById(tab.dataset.target);
+    panel.hidden = false;
+    requestAnimationFrame(() => panel.classList.add('is-active'));
+  });
+});
 
-   function updateSelectedPlaceSingleGame(buttonEl, place) {
-    const group = buttonEl.closest('.dropdown-group');
-    group.querySelector('.event-dropdown').textContent = place;
-    const gameDropdown = group.querySelector('.individual-game-dropdown')
-    gameDropdown.textContent = "Game";
+function replaceOptions(select, values, placeholder) {
+  select.innerHTML = '';
+  const empty = document.createElement('option');
+  empty.value = '';
+  empty.textContent = placeholder;
+  select.appendChild(empty);
 
-    const gameContainer = group.querySelector('.individual-game-container');
-    const gameList = group.querySelector('.individual-game-list');
-    const sectionContainer = group.querySelector('.section-container');
-    const sectionList = group.querySelector('.section-list');
-    const goBtn = group.querySelector('.go-button');
+  values.forEach((value) => {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = value;
+    select.appendChild(option);
+  });
+  select.disabled = values.length === 0;
+}
 
-    gameList.innerHTML = "";
-    sectionList.innerHTML = "";
-    sectionContainer.hidden = true;
-    goBtn.hidden = true;
+function updateSubmitState(form) {
+  const requiredSelects = [...form.querySelectorAll('select')];
+  form.querySelector('.submit-analysis').disabled = !requiredSelects.every((select) => select.value);
+}
 
-    const individualGame = gamesData[place] || [];
-    for (let i = 0; i < individualGame.length; i++){
-      const li = document.createElement("li");
-      const btn = document.createElement("button");
-      btn.className = "dropdown-item";
-      btn.type = "button";
-      btn.textContent = individualGame[i];
+document.querySelectorAll('.selection-form').forEach((form) => {
+  const placeSelect = form.querySelector('.place-select');
+  const gameSelect = form.querySelector('.game-select');
+  const sectionSelect = form.querySelector('.section-select');
 
-      btn.onclick = function () {
-        gameDropdown.textContent = individualGame[i];
-        RevealSections(buttonEl,place,individualGame[i])
-      };
-
-      li.appendChild(btn);
-      gameList.appendChild(li);
+  placeSelect.addEventListener('change', () => {
+    const place = placeSelect.value;
+    if (gameSelect) {
+      replaceOptions(gameSelect, gamesData[place] || [], 'Select a game');
+      replaceOptions(sectionSelect, [], 'Select a section');
+    } else {
+      replaceOptions(sectionSelect, placesData[place] || [], 'Select a section');
     }
+    updateSubmitState(form);
+  });
 
-    gameContainer.hidden = false;
- }
- function RevealSections(buttonEl,place,game){
-    const group = buttonEl.closest('.dropdown-group');
-    group.querySelector('.event-dropdown').textContent = place;
-    const sectionDropdown = group.querySelector('.section-dropdown');
-    sectionDropdown.textContent = "Section";
-
-    const sectionContainer = group.querySelector('.section-container');
-    const sectionList = group.querySelector('.section-list');
-    const goBtn = group.querySelector('.go-button');
-
-    sectionList.innerHTML = "";
-
-    const gameSections = (gameSectionsData[place] && gameSectionsData[place][game]) || [];
-    const sections = gameSections.length ? gameSections : (placesData[place] || []);
-    sections.forEach(section => {
-      const li = document.createElement("li");
-      const btn = document.createElement("button");
-      btn.className = "dropdown-item";
-      btn.type = "button";
-      btn.textContent = section;
-
-      btn.onclick = function () {
-        sectionDropdown.textContent = section;
-        goBtn.href = `/graph?section=${encodeURIComponent(section)}&event=${encodeURIComponent(place)}&game=${encodeURIComponent(game)}&mode=single`;
-        goBtn.hidden = false;
-      };
-
-      li.appendChild(btn);
-      sectionList.appendChild(li);
+  if (gameSelect) {
+    gameSelect.addEventListener('change', () => {
+      const place = placeSelect.value;
+      const game = gameSelect.value;
+      const sections = (gameSectionsData[place] && gameSectionsData[place][game]) || placesData[place] || [];
+      replaceOptions(sectionSelect, sections, 'Select a section');
+      updateSubmitState(form);
     });
+  }
 
-    sectionContainer.hidden = false;
-    goBtn.hidden = true;
- }
+  sectionSelect.addEventListener('change', () => updateSubmitState(form));
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const place = placeSelect.value;
+    const section = sectionSelect.value;
+    if (!place || !section) return;
+
+    const params = new URLSearchParams({ event: place, section });
+    if (form.dataset.analysis === 'game') {
+      params.set('game', gameSelect.value);
+      params.set('mode', 'single');
+      window.location.assign(`/graph?${params.toString()}`);
+    } else if (form.dataset.analysis === 'timing') {
+      window.location.assign(`/predict?${params.toString()}`);
+    } else {
+      window.location.assign(`/graph?${params.toString()}`);
+    }
+  });
+});

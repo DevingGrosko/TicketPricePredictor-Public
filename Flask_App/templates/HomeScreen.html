@@ -1,177 +1,138 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Ticket Price Predictor</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/css/bootstrap.min.css"
-          rel="stylesheet"
-          integrity="sha384-LN+7fdVzj6u52u30Kp6M/trliBMCMKTyK833zpbD+pXdCLuTusPj697FH4R/5mcr"
-          crossorigin="anonymous">
-  </head>
-  <body>
+{% extends "base.html" %}
+{% block title %}TicketSignal — Smarter ticket timing{% endblock %}
 
-    <div class="px-4 py-5 my-5 text-center">
-      <h1 class="display-5 fw-bold text-body-emphasis">Ticket Price Predictor!</h1>
-      <p class="lead mb-4">Welcome to the Ticket Price Predictor. Enjoy!</p>
-
-
-      <!-- Start of many games section -->
-      <div class="container px-4 py-5" id="featured-3">
-        <div class="row g-4 py-5 row-cols-1 row-cols-lg-3">
-          <div class="feature col">
-            <div class="feature-icon d-inline-flex align-items-center justify-content-center text-bg-primary bg-gradient fs-2 mb-3">
-            </div>
-            <h3 class="fs-2 text-body-emphasis">Graph for many games</h3>
-            <p>Select an event and section to view average
-              <br>ticket price trends over many games.</p>
-
-            <!-- 🔁 Reusable Dropdown Group -->
-            <div class="dropdown-group">
-              <!-- Event Dropdown -->
-              <div class="dropdown mb-2">
-                <button class="btn btn-secondary dropdown-toggle event-dropdown" type="button"
-                        data-bs-toggle="dropdown" aria-expanded="false">
-                  Event
-                </button>
-                <ul class="dropdown-menu event-list">
-                  {% for place in event_dict %}
-                  <li>
-                    <button class="dropdown-item" type="button"
-                            onclick="updateSelectedPlaceMultiGame(this, '{{ place }}',1)">
-                      {{ place }}
-                    </button>
-                  </li>
-                  {% endfor %}
-                </ul>
-              </div>
-
-              <!-- Sections Dropdown (initially hidden) -->
-              <div class="dropdown mb-2 section-container" hidden>
-                <button class="btn btn-secondary dropdown-toggle section-dropdown" type="button"
-                        data-bs-toggle="dropdown" aria-expanded="false">
-                  Section
-                </button>
-                <ul class="dropdown-menu section-list" style="max-height: 300px; overflow-y: auto;"></ul>
-              </div>
-
-              <!-- Go Button -->
-              <a class="btn btn-primary mt-2 go-button" hidden role="button">Go</a>
-            </div>
-          </div>
-
-
-          <!-- Second Section: Graph for one game -->
-          <div class="feature col">
-            <div class="feature-icon d-inline-flex align-items-center justify-content-center text-bg-primary bg-gradient fs-2 mb-3">
-
-            </div>
-            <h3 class="fs-2 text-body-emphasis">Graph for one game</h3>
-            <p>Select a game and section to view average <br>ticket price trends for a single game.</p>
-
-            <!-- 🔁 Another Reusable Dropdown Group -->
-            <div class="dropdown-group">
-              <!-- Event Dropdown -->
-              <div class="dropdown mb-2">
-                <button class="btn btn-secondary dropdown-toggle event-dropdown" type="button"
-                        data-bs-toggle="dropdown" aria-expanded="false">
-                  Event
-                </button>
-                <ul class="dropdown-menu event-list">
-                  {% for place in event_dict %}
-                  <li>
-                    <button class="dropdown-item" type="button"
-                            onclick="updateSelectedPlaceSingleGame(this, '{{ place }}')">
-                      {{ place }}
-                    </button>
-                  </li>
-                  {% endfor %}
-                </ul>
-              </div>
-
-              <div class="dropdown mb-2 individual-game-container" hidden>
-                <button class="btn btn-secondary dropdown-toggle individual-game-dropdown" type="button"
-                        data-bs-toggle="dropdown" aria-expanded="false">
-                  Game
-                </button>
-                <ul class="dropdown-menu individual-game-list" style="max-height: 300px; overflow-y: auto;"></ul>
-              </div>
-
-              <!-- Sections Dropdown -->
-              <div class="dropdown mb-2 section-container" hidden>
-                <button class="btn btn-secondary dropdown-toggle section-dropdown" type="button"
-                        data-bs-toggle="dropdown" aria-expanded="false">
-                  Section
-                </button>
-                <ul class="dropdown-menu section-list" style="max-height: 300px; overflow-y: auto;"></ul>
-              </div>
-
-              <!-- Go Button -->
-              <a class="btn btn-primary mt-2 go-button" hidden role="button">Go</a>
-            </div>
-          </div>
-
-          <!-- Box 3: For giving the cheapest prices -->
-          <!-- header and information part -->
-          <div class="feature col">
-            <div class="feature-icon d-inline-flex align-items-center justify-content-center text-bg-primary bg-gradient fs-2 mb-3">
-            </div>
-            <h3 class="fs-2 text-body-emphasis">When to buy</h3>
-            <p>Select an event and section to find the <br>cheapest time to buy a ticket.</p>
-
-            <div class="dropdown-group">
-              <!-- Event Dropdown -->
-              <div class="dropdown mb-2">
-                <button class="btn btn-secondary dropdown-toggle event-dropdown" type="button"
-                        data-bs-toggle="dropdown" aria-expanded="false">
-                  Event
-                </button>
-                <ul class="dropdown-menu event-list">
-                  {% for place in event_dict %}
-                  <li>
-                    <button class="dropdown-item" type="button"
-                            onclick="updateSelectedPlaceMultiGame(this, '{{ place }}',3)">
-                      {{ place }}
-                    </button>
-                  </li>
-                  {% endfor %}
-                </ul>
-              </div>
-
-              <!-- Sections Dropdown (initially hidden) -->
-              <div class="dropdown mb-2 section-container" hidden>
-                <button class="btn btn-secondary dropdown-toggle section-dropdown" type="button"
-                        data-bs-toggle="dropdown" aria-expanded="false">
-                  Section
-                </button>
-                <ul class="dropdown-menu section-list" style="max-height: 300px; overflow-y: auto;"></ul>
-              </div>
-
-              <!-- Go Button -->
-              <a class="btn btn-primary mt-2 go-button" hidden role="button">Go</a>
-            </div>
-
-          </div>
-
-
-          </div>
-
-          </div>
-        </div>
-      </div>
+{% block content %}
+<section class="hero">
+  <div class="hero-copy">
+    <div class="eyebrow"><span></span> Ticket price intelligence</div>
+    <h1>Know the market.<br><em>Time your tickets.</em></h1>
+    <p class="hero-lede">Explore how ticket prices move before game day and use real historical patterns to choose a smarter buying window.</p>
+    <div class="hero-actions">
+      <a class="button button--primary" href="#explore">Explore price trends <span aria-hidden="true">&#8595;</span></a>
+      <a class="text-link" href="#how-it-works">See how it works <span aria-hidden="true">&#8594;</span></a>
     </div>
-          <!-- Pass Python dict into JS -->
-    <script>
-      const placesData = {{ event_dict | tojson }};
-      const gamesData = {{ games_dict | tojson }};
-      const gameSectionsData = {{ game_sections_dict | tojson }};
-    </script>
+    <dl class="hero-stats">
+      <div><dt>{{ venue_count }}</dt><dd>Venues tracked</dd></div>
+      <div><dt>{{ event_count }}</dt><dd>Games analyzed</dd></div>
+      <div><dt>{{ section_count }}</dt><dd>Unique sections</dd></div>
+    </dl>
+  </div>
 
-    <script src="{{ url_for('static', filename='js/script.js') }}?v=2"></script>
+  <div class="hero-visual" aria-label="Example ticket price trend">
+    <div class="signal-card">
+      <div class="signal-card__header">
+        <div><span>Market signal</span><strong>Average price movement</strong></div>
+        <span class="live-pill"><i></i> Historical</span>
+      </div>
+      <div class="signal-value"><strong>-18.4%</strong><span>typical change near game day</span></div>
+      <div class="chart" aria-hidden="true">
+        <div class="chart-grid"></div>
+        <svg viewBox="0 0 620 240" preserveAspectRatio="none" role="img">
+          <defs>
+            <linearGradient id="areaGradient" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stop-color="#8b5cf6" stop-opacity=".35"/>
+              <stop offset="100%" stop-color="#8b5cf6" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <path class="chart-area" d="M0 42 C55 58,75 52,115 72 S180 95,220 86 S286 136,330 121 S400 156,445 148 S510 204,620 190 L620 240 L0 240 Z"/>
+          <path class="chart-line" d="M0 42 C55 58,75 52,115 72 S180 95,220 86 S286 136,330 121 S400 156,445 148 S510 204,620 190"/>
+          <circle cx="445" cy="148" r="7"/>
+        </svg>
+        <span class="chart-tooltip">Best window</span>
+      </div>
+      <div class="chart-labels"><span>48h</span><span>36h</span><span>24h</span><span>12h</span><span>Game time</span></div>
+    </div>
+    <div class="floating-insight">
+      <span class="insight-icon">&#10022;</span>
+      <span><small>Data-backed insight</small><strong>Prices often soften late</strong></span>
+    </div>
+  </div>
+</section>
 
-    <!-- Bootstrap Bundle -->
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.7/dist/js/bootstrap.bundle.min.js"
-            integrity="sha384-ndDqU0Gzau9qJ1lfW4pNLlhNTkCfHzAVBReH9diLvGRem5+R9g2FzA8ZGN954O5Q"
-            crossorigin="anonymous"></script>
-  </body>
-</html>
+<section class="explore-section" id="explore">
+  <div class="section-heading">
+    <div><span class="section-kicker">Explore the data</span><h2>What do you want to learn?</h2></div>
+    <p>Choose an analysis, then select a venue and section. Results are built from recorded listing history.</p>
+  </div>
+
+  <div class="analysis-tabs" role="tablist" aria-label="Analysis type">
+    <button class="analysis-tab is-active" type="button" role="tab" aria-selected="true" data-target="market-panel">
+      <span class="tab-number">01</span><span><strong>Market trend</strong><small>Across multiple games</small></span>
+    </button>
+    <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-target="game-panel">
+      <span class="tab-number">02</span><span><strong>Single game</strong><small>One event over time</small></span>
+    </button>
+    <button class="analysis-tab" type="button" role="tab" aria-selected="false" data-target="timing-panel">
+      <span class="tab-number">03</span><span><strong>Buying window</strong><small>Historical lowest point</small></span>
+    </button>
+  </div>
+
+  <div class="analysis-shell">
+    <div class="analysis-panel is-active" id="market-panel" role="tabpanel" data-mode="multi">
+      <div class="panel-copy">
+        <span class="panel-icon">&#8599;</span>
+        <span class="section-kicker">Market trend</span>
+        <h3>Compare price movement across games</h3>
+        <p>See the average price path for the same venue and section across every eligible game in the dataset.</p>
+        <ul><li>Normalized percentage view</li><li>Switch to dollar pricing</li><li>Built from multiple events</li></ul>
+      </div>
+      <form class="selection-form" data-analysis="market">
+        <div class="field"><label for="market-place">1. Choose a venue</label><select id="market-place" class="place-select"><option value="">Select a venue</option>{% for place in event_dict %}<option value="{{ place }}">{{ place }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="market-section">2. Choose a section</label><select id="market-section" class="section-select" disabled><option value="">Select a section</option></select></div>
+        <button class="button button--primary submit-analysis" type="submit" disabled>View market trend <span>&#8594;</span></button>
+        <p class="form-note"><span>&#9432;</span> Uses historical listings; not financial advice.</p>
+      </form>
+    </div>
+
+    <div class="analysis-panel" id="game-panel" role="tabpanel" data-mode="single" hidden>
+      <div class="panel-copy">
+        <span class="panel-icon">&#9678;</span>
+        <span class="section-kicker">Single game</span>
+        <h3>Follow one game's price history</h3>
+        <p>Zoom in on a specific matchup to see how its average section price changed as game time approached.</p>
+        <ul><li>Game-specific history</li><li>Section-level pricing</li><li>Dollar or percentage view</li></ul>
+      </div>
+      <form class="selection-form" data-analysis="game">
+        <div class="field"><label for="game-place">1. Choose a venue</label><select id="game-place" class="place-select"><option value="">Select a venue</option>{% for place in event_dict %}<option value="{{ place }}">{{ place }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="game-title">2. Choose a game</label><select id="game-title" class="game-select" disabled><option value="">Select a game</option></select></div>
+        <div class="field"><label for="game-section">3. Choose a section</label><select id="game-section" class="section-select" disabled><option value="">Select a section</option></select></div>
+        <button class="button button--primary submit-analysis" type="submit" disabled>View game trend <span>&#8594;</span></button>
+      </form>
+    </div>
+
+    <div class="analysis-panel" id="timing-panel" role="tabpanel" data-mode="predict" hidden>
+      <div class="panel-copy">
+        <span class="panel-icon">&#8987;</span>
+        <span class="section-kicker">Buying window</span>
+        <h3>Find the historical lowest point</h3>
+        <p>Discover when comparable tickets reached their lowest average price before game time.</p>
+        <ul><li>Based on observed history</li><li>Easy-to-read recommendation</li><li>Sample size included</li></ul>
+      </div>
+      <form class="selection-form" data-analysis="timing">
+        <div class="field"><label for="timing-place">1. Choose a venue</label><select id="timing-place" class="place-select"><option value="">Select a venue</option>{% for place in event_dict %}<option value="{{ place }}">{{ place }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="timing-section">2. Choose a section</label><select id="timing-section" class="section-select" disabled><option value="">Select a section</option></select></div>
+        <button class="button button--primary submit-analysis" type="submit" disabled>Find buying window <span>&#8594;</span></button>
+        <p class="form-note"><span>&#9432;</span> A historical signal, not a guaranteed future price.</p>
+      </form>
+    </div>
+  </div>
+</section>
+
+<section class="how-section" id="how-it-works">
+  <div class="section-heading"><div><span class="section-kicker">The method</span><h2>From listings to a clearer signal</h2></div></div>
+  <div class="steps">
+    <article><span>01</span><h3>Capture</h3><p>Ticket listings are recorded at intervals leading up to each event.</p></article>
+    <article><span>02</span><h3>Compare</h3><p>Prices are grouped by venue, game and section for consistent analysis.</p></article>
+    <article><span>03</span><h3>Analyze</h3><p>Historical patterns reveal how prices changed as game time approached.</p></article>
+    <article><span>04</span><h3>Decide</h3><p>You get a focused trend or buying-window signal backed by the dataset.</p></article>
+  </div>
+</section>
+
+<script>
+  const placesData = {{ event_dict | tojson }};
+  const gamesData = {{ games_dict | tojson }};
+  const gameSectionsData = {{ game_sections_dict | tojson }};
+</script>
+{% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', filename='js/script.js') }}?v=3"></script>{% endblock %}

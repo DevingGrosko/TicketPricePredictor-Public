@@ -122,26 +122,43 @@ class GraphBuilder:
 
 
     def create_plot(self, x, y, x_type):
-        fig, ax = plt.subplots(figsize=(8, 5))
-        ax.plot(x, y, marker='o', linestyle='-', linewidth=2)
-        ax.set_title("Average Prices Over Time")
-        ax.set_xlabel("Hours Until Event")
+        background = "#111827"
+        text_color = "#aab4c8"
+        line_color = "#a78bfa"
+
+        fig, ax = plt.subplots(figsize=(9, 5.2), facecolor=background)
+        ax.set_facecolor(background)
+        ax.plot(
+            x,
+            y,
+            marker="o",
+            markersize=4,
+            markerfacecolor=background,
+            markeredgecolor=line_color,
+            markeredgewidth=1.5,
+            color=line_color,
+            linewidth=2.4,
+        )
+        ax.fill_between(x, y, min(y), color=line_color, alpha=0.08)
+        ax.set_xlabel("Hours until event", color=text_color, labelpad=12)
         if x_type == "percentage":
-            ax.set_ylabel("Standardized Price (100 = starting)")
+            ax.set_ylabel("Relative price (100 = starting point)", color=text_color, labelpad=12)
             ax.yaxis.set_major_formatter(mticker.StrMethodFormatter("{x:,.0f}%"))
-            print("Standardized")
         else:
-            ax.set_ylabel("Average Price")
+            ax.set_ylabel("Average listed price", color=text_color, labelpad=12)
             ax.yaxis.set_major_formatter(mticker.StrMethodFormatter("${x:,.0f}"))
-            print("Average")
 
         ax.invert_xaxis()  # count down toward the event
-        ax.grid(True, linestyle="--", alpha=0.7)
+        ax.grid(True, color="#2a354b", linestyle="-", linewidth=0.7, alpha=0.72)
         ax.xaxis.set_major_locator(plt.MaxNLocator(10))
         ax.yaxis.set_major_locator(plt.MaxNLocator(8))
+        ax.tick_params(colors=text_color, labelsize=9)
+        for spine in ax.spines.values():
+            spine.set_color("#2a354b")
+        fig.tight_layout(pad=1.4)
 
         buf = io.BytesIO()
-        fig.savefig(buf, format="png", bbox_inches="tight")
+        fig.savefig(buf, format="png", bbox_inches="tight", dpi=150, facecolor=background)
         buf.seek(0)
         image_base64 = base64.b64encode(buf.getvalue()).decode("utf-8")
         plt.close(fig)
