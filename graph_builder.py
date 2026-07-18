@@ -112,6 +112,15 @@ class GraphBuilder:
             if not x_time or not y_price:
                 return [], []
 
+            usable_pairs = [
+                (hours_until, price)
+                for hours_until, price in zip(x_time, y_price)
+                if 0 < hours_until <= 96
+            ]
+            if not usable_pairs:
+                return [], []
+            x_time, y_price = map(list, zip(*usable_pairs))
+
             if x_average_or_percentage == "money":
                 pass
             else:
