@@ -8,7 +8,7 @@
     <div>
       <span class="section-kicker">{% if mode == 'single' %}Single-game analysis{% else %}Market trend{% endif %}</span>
       <h1>{% if mode == 'single' %}Price history for one game{% else %}Average price movement{% endif %}</h1>
-      <p>{{ place }} <span>&middot;</span> Section {{ section }}{% if mode == 'single' %} <span>&middot;</span> {{ game }}{% endif %}</p>
+      <p>{{ place }} <span>&middot;</span> Section {{ section }}{% if mode == 'single' %} <span>&middot;</span> {{ gameLabel }}{% endif %}</p>
     </div>
     <div class="result-badge"><small>Sample</small><strong>{{ totalGames }} game{% if totalGames != 1 %}s{% endif %}</strong></div>
   </div>

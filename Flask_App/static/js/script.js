@@ -29,8 +29,8 @@ function replaceOptions(select, values, placeholder) {
 
   values.forEach((value) => {
     const option = document.createElement('option');
-    option.value = value;
-    option.textContent = value;
+    option.value = typeof value === 'object' ? value.value : value;
+    option.textContent = typeof value === 'object' ? value.label : value;
     select.appendChild(option);
   });
   select.disabled = values.length === 0;
