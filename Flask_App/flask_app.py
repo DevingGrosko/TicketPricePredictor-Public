@@ -22,14 +22,20 @@ def home():
     SessionLocal = CreateModel().getSession()
     with SessionLocal() as session:
         data = session.query(Event).all()
-        event_dict = {}
+        section_games = {}
         game_sections_dict = {}
         for event in data:
             if not event.Place:
                 continue
-            event_dict.setdefault(event.Place, set()).update(event.event_sections or [])
-            game_sections_dict.setdefault(event.Place, {})[event.title] = sorted(event.event_sections or [])
+            sections = sorted(set(event.event_sections or []))
+            game_sections_dict.setdefault(event.Place, {})[event.title] = sections
+            for section in sections:
+                section_games.setdefault((event.Place, section), set()).add(event.id)
 
+        event_dict = {}
+        for (place, section), game_ids in section_games.items():
+            if len(game_ids) > 1:
+                event_dict.setdefault(place, []).append(section)
         event_dict = {
             place: sorted(sections)
             for place, sections in event_dict.items()
