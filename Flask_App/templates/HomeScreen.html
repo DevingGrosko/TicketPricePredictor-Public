@@ -93,7 +93,7 @@
         <ul><li>Game-specific history</li><li>Section-level pricing</li><li>Dollar or percentage view</li></ul>
       </div>
       <form class="selection-form" data-analysis="game">
-        <div class="field"><label for="game-place">1. Choose a venue</label><select id="game-place" class="place-select"><option value="">Select a venue</option>{% for place in event_dict %}<option value="{{ place }}">{{ place }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="game-place">1. Choose a venue</label><select id="game-place" class="place-select"><option value="">Select a venue</option>{% for place in games_dict %}<option value="{{ place }}">{{ place }}</option>{% endfor %}</select></div>
         <div class="field"><label for="game-title">2. Choose a game</label><select id="game-title" class="game-select" disabled><option value="">Select a game</option></select></div>
         <div class="field"><label for="game-section">3. Choose a section</label><select id="game-section" class="section-select" disabled><option value="">Select a section</option></select></div>
         <button class="button button--primary submit-analysis" type="submit" disabled>View game trend <span>&#8594;</span></button>
