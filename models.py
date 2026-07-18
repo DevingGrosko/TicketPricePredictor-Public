@@ -67,7 +67,8 @@ import os
 class CreateModel:
     def __init__(self):
         base_dir = os.path.dirname(os.path.abspath(__file__))  # directory where models.py is
-        db_path = os.path.join(base_dir, "Event-collection.db")
+        db_path = os.environ.get("DATABASE_PATH", os.path.join(base_dir, "Event-collection.db"))
+        db_path = os.path.abspath(os.path.expanduser(db_path))
         self.engine = create_engine(f"sqlite:///{db_path}", echo=False)
         # Base.metadata.create_all(self.engine) This creates a new file if it cant find it
         if not os.path.exists(db_path):

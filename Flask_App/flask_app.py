@@ -43,11 +43,18 @@ def home():
             if event.title not in games_dict[event.Place]:
                 games_dict[event.Place].append(event.title)
 
+        venue_count = len(event_dict)
+        event_count = len({event.title for event in data})
+        section_count = len({section for sections in event_dict.values() for section in sections})
+
     return render_template(
         "HomeScreen.html",
         event_dict=event_dict,
         games_dict=games_dict,
         game_sections_dict=game_sections_dict,
+        venue_count=venue_count,
+        event_count=event_count,
+        section_count=section_count,
     )
 
 
@@ -109,7 +116,13 @@ def predict():
     y_index = y.index(y_min)
     x_index = x[y_index]
 
-    return render_template("lowestPrice.html",time=x_index)
+    return render_template(
+        "lowestPrice.html",
+        time=x_index,
+        place=place,
+        section=section,
+        totalGames=total,
+    )
 
 
 def normalize_display_mode(raw_mode):

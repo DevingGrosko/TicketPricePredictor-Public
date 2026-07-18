@@ -1,44 +1,27 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>Lowest Price</title>
-    <style>
-        body {
-            margin: 0;
-            height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            background: linear-gradient(135deg, #ece9e6, #ffffff);
-            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
-        }
-        .card {
-            background: #fff;
-            padding: 40px 60px;
-            border-radius: 15px;
-            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
-            text-align: center;
-            border: 2px solid #f0f0f0;
-        }
-        h1 {
-            margin: 0;
-            font-size: 2rem;
-            color: #333;
-        }
-        .highlight {
-            color: #0073e6;
-            font-weight: bold;
-        }
-    </style>
-</head>
-<body>
-    <div class="card">
-        {% if error %}
-        <h1><span class="highlight">{{ error }}</span></h1>
-        {% else %}
-        <h1>Cheapest time is: <span class="highlight">{{time}}</span> hours before the game</h1>
-        {% endif %}
+{% extends "base.html" %}
+{% block title %}Buying window — TicketSignal{% endblock %}
+
+{% block content %}
+<section class="result-page result-page--recommendation">
+  <a class="back-link" href="{{ url_for('home') }}#explore"><span>&#8592;</span> New analysis</a>
+  {% if error %}
+    <div class="recommendation-card empty-state"><span>!</span><h1>No recommendation available</h1><p>{{ error }}</p><a class="button button--primary" href="{{ url_for('home') }}#explore">Try another selection</a></div>
+  {% else %}
+    <div class="recommendation-card">
+      <div class="recommendation-copy">
+        <span class="section-kicker">Historical buying window</span>
+        <h1>The lowest average price appeared around</h1>
+        <div class="time-value"><strong>{{ "%.1f"|format(time|float) }}</strong><span>hours<br>before game time</span></div>
+        <p>For <strong>{{ place }}</strong>, section <strong>{{ section }}</strong>, this was the lowest point in the observed multi-game price history.</p>
+        <div class="recommendation-actions"><a class="button button--primary" href="{{ url_for('graph', event=place, section=section) }}">View the full trend <span>&#8594;</span></a><a class="text-link" href="{{ url_for('home') }}#explore">Start over</a></div>
+      </div>
+      <div class="recommendation-visual">
+        <div class="radar"><span class="radar-ring radar-ring--one"></span><span class="radar-ring radar-ring--two"></span><span class="radar-ring radar-ring--three"></span><span class="radar-core">&#10022;</span></div>
+        <div class="confidence-row"><span>Dataset</span><strong>{{ totalGames }} game{% if totalGames != 1 %}s{% endif %} analyzed</strong></div>
+        <div class="confidence-row"><span>Signal type</span><strong>Historical minimum</strong></div>
+        <p class="disclaimer">This is a historical observation, not a guarantee or live purchasing recommendation.</p>
+      </div>
     </div>
-</body>
-</html>
+  {% endif %}
+</section>
+{% endblock %}
