@@ -100,9 +100,10 @@ def graph():
 
     img = new_graph.create_plot(x, y, display_mode)
 
-    return render_template("graph.html", img=img, place=place, section=section, mode=mode,
-                           game=game,displayType=toggle_display_mode(display_mode),
-                           displayLabel=toggle_display_label(display_mode),totalGames=totalGames)
+    return render_template("graph.html", img=img, chartX=x, chartY=y, displayMode=display_mode,
+                           place=place, section=section, mode=mode, game=game,
+                           displayType=toggle_display_mode(display_mode),
+                           displayLabel=toggle_display_label(display_mode), totalGames=totalGames)
 
 @app.route("/predict", methods=['GET', 'POST'])
 def predict():

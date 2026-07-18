@@ -26,7 +26,13 @@
           <div class="empty-state"><span>!</span><h2>Not enough comparable data</h2><p>This section does not yet have enough overlapping price history across multiple games. Try another section.</p><a class="button button--primary" href="{{ url_for('home') }}#explore">Check another section</a></div>
         {% endif %}
       {% else %}
-        <img src="data:image/png;base64,{{ img }}" class="result-chart" alt="Ticket price trend for {{ place }}, section {{ section }}">
+        <div class="interactive-chart" data-display-mode="{{ displayMode }}">
+          <script type="application/json" class="interactive-chart__data">{{ {"x": chartX, "y": chartY} | tojson }}</script>
+          <svg class="interactive-chart__svg" viewBox="0 0 900 520" role="img" aria-label="Interactive ticket price trend for {{ place }}, section {{ section }}"></svg>
+          <div class="interactive-chart__tooltip" role="status" hidden></div>
+          <p class="interactive-chart__hint"><span aria-hidden="true">&#9432;</span> Hover over the line to inspect each price point.</p>
+        </div>
+        <noscript><img src="data:image/png;base64,{{ img }}" class="result-chart" alt="Ticket price trend for {{ place }}, section {{ section }}"></noscript>
       {% endif %}
     </article>
     <aside class="insight-card">
@@ -43,3 +49,5 @@
   </div>
 </section>
 {% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', filename='js/graph.js') }}?v=1"></script>{% endblock %}
