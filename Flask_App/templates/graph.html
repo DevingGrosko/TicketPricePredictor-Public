@@ -20,7 +20,11 @@
         <a class="view-toggle" href="{{ url_for('graph', display=displayType, event=place, section=section, mode=mode, game=game) }}">Show {{ displayLabel }} view</a>
       </div>
       {% if error %}
-        <div class="empty-state"><span>!</span><h2>No data available</h2><p>{{ error }}</p><a class="button button--primary" href="{{ url_for('home') }}#explore">Try another selection</a></div>
+        {% if mode == 'single' %}
+          <div class="empty-state"><span>!</span><h2>No data available</h2><p>{{ error }}</p><a class="button button--primary" href="{{ url_for('home') }}#explore">Try another selection</a></div>
+        {% else %}
+          <div class="empty-state"><span>!</span><h2>Not enough comparable data</h2><p>This section does not yet have enough overlapping price history across multiple games. Try another section.</p><a class="button button--primary" href="{{ url_for('home') }}#explore">Check another section</a></div>
+        {% endif %}
       {% else %}
         <img src="data:image/png;base64,{{ img }}" class="result-chart" alt="Ticket price trend for {{ place }}, section {{ section }}">
       {% endif %}
