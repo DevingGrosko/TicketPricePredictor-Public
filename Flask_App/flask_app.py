@@ -132,9 +132,9 @@ def predict():
 
 
 def normalize_display_mode(raw_mode):
-    if raw_mode in {"money", "$"}:
-        return "money"
-    return "percentage"
+    if raw_mode in {"percentage", "%"}:
+        return "percentage"
+    return "money"
 
 
 def toggle_display_mode(display_mode):
