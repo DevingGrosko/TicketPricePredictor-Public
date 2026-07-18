@@ -3,6 +3,7 @@ from sqlalchemy import select
 from graph_builder import GraphBuilder
 from models import CreateModel, Event
 import os
+import re
 
 # Load .env ONLY in local dev (PythonAnywhere won’t need it)
 try:
@@ -17,18 +18,47 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'development-only-secret-key')
 
 
+def clean_event_title(title):
+    title = re.sub(r"\s*\([^)]*\)\s*$", "", title or "").strip()
+    return re.sub(
+        r"\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s*\d{1,2}$",
+        "",
+        title,
+        flags=re.IGNORECASE,
+    ).strip()
+
+
+def format_event_title(event):
+    event_date = event.event_date
+    hour = event_date.hour % 12 or 12
+    date_label = f"{event_date:%b} {event_date.day}, {event_date.year}"
+    time_label = f"{hour}:{event_date.minute:02d} {event_date:%p}"
+    return f"{clean_event_title(event.title)} — {date_label} · {time_label}"
+
+
+def find_event(place, identifier):
+    if not identifier:
+        return None
+    SessionLocal = CreateModel().getSession()
+    with SessionLocal() as session:
+        query = session.query(Event).filter(Event.Place == place)
+        if str(identifier).isdigit():
+            return query.filter(Event.id == int(identifier)).first()
+        return query.filter(Event.title == identifier).order_by(Event.event_date).first()
+
+
 @app.route("/", methods=['GET', 'POST'])
 def home():
     SessionLocal = CreateModel().getSession()
     with SessionLocal() as session:
-        data = session.query(Event).all()
+        data = session.query(Event).order_by(Event.event_date).all()
         section_games = {}
         game_sections_dict = {}
         for event in data:
             if not event.Place:
                 continue
             sections = sorted(set(event.event_sections or []))
-            game_sections_dict.setdefault(event.Place, {})[event.title] = sections
+            game_sections_dict.setdefault(event.Place, {})[str(event.id)] = sections
             for section in sections:
                 section_games.setdefault((event.Place, section), set()).add(event.id)
 
@@ -45,12 +75,12 @@ def home():
         for event in data:
             if not event.Place:
                 continue
-            games_dict.setdefault(event.Place, [])
-            if event.title not in games_dict[event.Place]:
-                games_dict[event.Place].append(event.title)
+            games_dict.setdefault(event.Place, []).append(
+                {"value": str(event.id), "label": format_event_title(event)}
+            )
 
         venue_count = len(event_dict)
-        event_count = len({event.title for event in data})
+        event_count = len(data)
         section_count = len({section for sections in event_dict.values() for section in sections})
 
     return render_template(
@@ -75,8 +105,10 @@ def graph():
     new_graph = GraphBuilder()
 
     if mode == "single":
-        game = request.args.get("game")
-        y, x = new_graph.singleGameGraph(place, game, section, display_mode)
+        selected_event = find_event(place, request.args.get("game"))
+        game = str(selected_event.id) if selected_event else request.args.get("game", "")
+        game_label = format_event_title(selected_event) if selected_event else "Unknown game"
+        y, x = new_graph.singleGameGraph(place, selected_event.id, section, display_mode) if selected_event else ([], [])
         totalGames = 1 if y else 0
     else:
         # physical time to choose, if you choose a higher time and the event doesn't start there it won't include it in
@@ -84,6 +116,7 @@ def graph():
         y, x,total = new_graph.allEventsForStadium(place, section, 48, display_mode)
         totalGames = total
         game = ""
+        game_label = ""
 
     if not x or not y:
         return render_template(
@@ -93,6 +126,7 @@ def graph():
             section=section,
             mode=mode,
             game=game,
+            gameLabel=game_label,
             displayType=toggle_display_mode(display_mode),
             displayLabel=toggle_display_label(display_mode),
             totalGames=totalGames,
@@ -101,7 +135,7 @@ def graph():
     img = new_graph.create_plot(x, y, display_mode)
 
     return render_template("graph.html", img=img, chartX=x, chartY=y, displayMode=display_mode,
-                           place=place, section=section, mode=mode, game=game,
+                           place=place, section=section, mode=mode, game=game, gameLabel=game_label,
                            displayType=toggle_display_mode(display_mode),
                            displayLabel=toggle_display_label(display_mode), totalGames=totalGames)
 

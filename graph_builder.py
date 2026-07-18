@@ -41,7 +41,7 @@ class GraphBuilder:
 
             for event in events:
 
-                x_time,y_price = self.eachEventGraphList(section,event.title)
+                x_time,y_price = self.eachEventGraphList(section,event.id)
                 if not x_time or not y_price:
                     continue
 
@@ -101,14 +101,14 @@ class GraphBuilder:
         return total / len(key_list)
 
 
-    def singleGameGraph(self,stadium,game,section,x_average_or_percentage):
+    def singleGameGraph(self,stadium,event_id,section,x_average_or_percentage):
         SessionLocal = CreateModel().getSession()
         with SessionLocal() as s:
-            event = s.query(Event).filter(Event.Place == stadium,Event.title == game).first()
+            event = s.query(Event).filter(Event.Place == stadium, Event.id == event_id).first()
             if event is None:
                 return [], []
 
-            x_time, y_price = self.eachEventGraphList(section, event.title)
+            x_time, y_price = self.eachEventGraphList(section, event.id)
             if not x_time or not y_price:
                 return [], []
 
@@ -164,7 +164,7 @@ class GraphBuilder:
         plt.close(fig)
         return image_base64
 
-    def eachEventGraphList(self, section,event_title):
+    def eachEventGraphList(self, section,event_id):
         SessionLocal = CreateModel().getSession()
         x = []
         y = []
@@ -175,7 +175,7 @@ class GraphBuilder:
                 .join(Iteration.event)
                 .filter(
                     Ticket.section == section,
-                    Event.title == event_title).all())
+                    Event.id == event_id).all())
 
             for t in tickets:
                 # 1) Iteration for this ticket
