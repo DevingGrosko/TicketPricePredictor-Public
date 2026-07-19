@@ -10,6 +10,7 @@ from collector import (
     EventSnapshot,
     SectionSnapshot,
     SnapshotParser,
+    VENUE_FEEDS,
     add_urls,
     browser_failure_requires_immediate_cooldown,
     cpu_budget_allows_capture,
@@ -20,6 +21,7 @@ from collector import (
     load_registry,
     load_runtime_state,
     record_cycle_result,
+    registry_row_is_excluded,
     retire_url,
     run_collector,
     select_due_urls,
@@ -88,6 +90,28 @@ class SnapshotParserTests(unittest.TestCase):
 
 
 class ScheduleTests(unittest.TestCase):
+    def test_excluded_parks_are_never_discovered_or_collected(self):
+        self.assertNotIn("Citi Field", VENUE_FEEDS)
+        self.assertNotIn("Truist Park", VENUE_FEEDS)
+        self.assertTrue(registry_row_is_excluded({"venue": "Citi Field", "url": ""}))
+        self.assertTrue(registry_row_is_excluded({"venue": "Truist Park", "url": ""}))
+        self.assertTrue(
+            registry_row_is_excluded(
+                {
+                    "venue": "",
+                    "url": "https://www.vividseats.com/game-tickets-george-m-steinbrenner-field-7-20-2026--sports-mlb-baseball/production/123",
+                }
+            )
+        )
+        self.assertFalse(
+            registry_row_is_excluded(
+                {
+                    "venue": "Citizens Bank Park",
+                    "url": "https://www.vividseats.com/game-tickets-citizens-bank-park-7-20-2026--sports-mlb-baseball/production/456",
+                }
+            )
+        )
+
     def test_collection_frequency_increases_near_game_time(self):
         self.assertIsNone(collection_interval(200))
         self.assertEqual(collection_interval(96), timedelta(hours=4))
