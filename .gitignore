@@ -12,10 +12,13 @@ Event-collection.db
 *.sqlite*
 vivid_listings.json
 quarter.json
+collector_audit/
+collector_backups/
+collector_health.json
+collector_state.json
 
 # Local artifacts
 *.log
 *.png
 *.jpg
 *.jpeg
-

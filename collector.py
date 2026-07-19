@@ -17,6 +17,8 @@ import re
 import sqlite3
 import sys
 import time
+import urllib.error
+import urllib.request
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -35,6 +37,7 @@ DEFAULT_REGISTRY = PROJECT_DIR / "collector_events.json"
 DEFAULT_AUDIT_DIR = PROJECT_DIR / "collector_audit"
 DEFAULT_BACKUP_DIR = PROJECT_DIR / "collector_backups"
 DEFAULT_HEALTH_FILE = PROJECT_DIR / "collector_health.json"
+DEFAULT_STATE_FILE = PROJECT_DIR / "collector_state.json"
 DEFAULT_CAPTURE_TIMEOUT = 25
 CAPTURE_WINDOW_DAYS = 4
 DISCOVERY_WINDOW_DAYS = 30
@@ -42,6 +45,12 @@ DISCOVERY_INTERVAL = timedelta(days=1)
 MIN_USABLE_SECTIONS = 10
 AUDIT_RETENTION_DAYS = 30
 BACKUP_RETENTION_DAYS = 7
+MAX_EVENTS_PER_CYCLE = 2
+MAX_CONSECUTIVE_FAILED_CYCLES = 2
+FAILURE_COOLDOWN = timedelta(hours=6)
+CPU_USAGE_STOP_FRACTION = Decimal("0.70")
+CPU_MINIMUM_HEADROOM_SECONDS = Decimal("750")
+CPU_API_TIMEOUT_SECONDS = 5
 NEW_YORK = ZoneInfo("America/New_York")
 VENUE_FEEDS = {
     "Nationals Park": "https://www.vividseats.com/nationals-park-tickets/venue/5597",
@@ -163,12 +172,17 @@ class VividBrowser:
     def __init__(self, headless: bool = False, timeout: int = DEFAULT_CAPTURE_TIMEOUT):
         try:
             from selenium import webdriver
+            from selenium.webdriver.remote.remote_connection import RemoteConnection
         except ModuleNotFoundError as exc:
             raise RuntimeError(
                 "Selenium is not installed. Run: pip install -r requirements.txt"
             ) from exc
 
         self.timeout = timeout
+        # Selenium otherwise waits up to 120 seconds for a frozen local
+        # ChromeDriver command, which caused failed cycles to consume hours of
+        # wall time.  Keep the transport timeout close to our capture timeout.
+        RemoteConnection.set_timeout(timeout + 5)
         options = webdriver.ChromeOptions()
         profile_root = os.environ.get("VIVID_CHROME_PROFILE")
         if profile_root:
@@ -183,9 +197,11 @@ class VividBrowser:
         options.add_argument("--disable-dev-shm-usage")
         options.add_argument("--disable-gpu")
         options.add_argument("--disable-background-networking")
+        options.add_argument("--disable-extensions")
         options.add_argument("--disable-notifications")
+        options.add_argument("--no-first-run")
         options.add_argument("--window-size=1400,1000")
-        options.page_load_strategy = "eager"
+        options.page_load_strategy = "none"
         options.set_capability("goog:loggingPrefs", {"performance": "ALL"})
         options.add_experimental_option(
             "prefs",
@@ -461,7 +477,14 @@ def discover_events(registry_path: Path, headless: bool, timeout: int) -> tuple[
                 failures += 1
                 print(f"DISCOVERY FAILED: {venue}: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
     finally:
-        browser.close()
+        try:
+            browser.close()
+        except Exception as exc:
+            print(
+                f"Browser cleanup warning: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
 
     registry["last_discovery_at"] = now.isoformat()
     save_registry(registry_path, registry)
@@ -635,6 +658,136 @@ def show_health(health_file: Path = DEFAULT_HEALTH_FILE) -> None:
     print(json.dumps(value, indent=2))
 
 
+def load_runtime_state(state_file: Path = DEFAULT_STATE_FILE) -> dict[str, Any]:
+    if not state_file.exists():
+        return {"consecutive_failed_cycles": 0, "cooldown_until": None}
+    try:
+        value = json.loads(state_file.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"consecutive_failed_cycles": 0, "cooldown_until": None}
+    return {
+        "consecutive_failed_cycles": int(value.get("consecutive_failed_cycles", 0)),
+        "cooldown_until": value.get("cooldown_until"),
+        "last_failure": value.get("last_failure"),
+    }
+
+
+def save_runtime_state(state: dict[str, Any], state_file: Path = DEFAULT_STATE_FILE) -> None:
+    state_file.parent.mkdir(parents=True, exist_ok=True)
+    temporary = state_file.with_suffix(state_file.suffix + ".tmp")
+    temporary.write_text(json.dumps(state, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(state_file)
+
+
+def circuit_cooldown_until(state: dict[str, Any], now: datetime) -> datetime | None:
+    cooldown = parse_iso_datetime(str(state.get("cooldown_until") or ""))
+    if cooldown is None or as_utc(cooldown) <= now:
+        return None
+    return as_utc(cooldown)
+
+
+def open_failure_circuit(
+    state: dict[str, Any],
+    now: datetime,
+    reason: str,
+    state_file: Path = DEFAULT_STATE_FILE,
+) -> datetime:
+    cooldown_until = now + FAILURE_COOLDOWN
+    state.update(
+        {
+            "consecutive_failed_cycles": MAX_CONSECUTIVE_FAILED_CYCLES,
+            "cooldown_until": cooldown_until.isoformat(),
+            "last_failure": reason,
+        }
+    )
+    save_runtime_state(state, state_file)
+    return cooldown_until
+
+
+def record_cycle_result(
+    state: dict[str, Any],
+    now: datetime,
+    succeeded: int,
+    failed: int,
+    reason: str | None = None,
+    state_file: Path = DEFAULT_STATE_FILE,
+) -> datetime | None:
+    if succeeded:
+        state.update({"consecutive_failed_cycles": 0, "cooldown_until": None})
+        save_runtime_state(state, state_file)
+        return None
+    if not failed:
+        return None
+
+    failed_cycles = int(state.get("consecutive_failed_cycles", 0)) + 1
+    state["consecutive_failed_cycles"] = failed_cycles
+    state["last_failure"] = reason
+    if failed_cycles >= MAX_CONSECUTIVE_FAILED_CYCLES:
+        return open_failure_circuit(state, now, reason or "collection failures", state_file)
+    save_runtime_state(state, state_file)
+    return None
+
+
+def pythonanywhere_cpu_usage() -> dict[str, Any] | None:
+    """Read the account CPU quota without exposing the API token in logs."""
+    token = os.environ.get("API_TOKEN")
+    username = os.environ.get("PYTHONANYWHERE_USERNAME") or os.environ.get("USER")
+    if not token or not username:
+        return None
+    host = os.environ.get("PYTHONANYWHERE_HOST", "www.pythonanywhere.com")
+    request = urllib.request.Request(
+        f"https://{host}/api/v0/user/{username}/cpu/",
+        headers={"Authorization": f"Token {token}"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=CPU_API_TIMEOUT_SECONDS) as response:
+            value = json.loads(response.read().decode("utf-8"))
+    except (OSError, urllib.error.URLError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def cpu_budget_allows_capture(usage: dict[str, Any] | None) -> tuple[bool, str]:
+    if not usage:
+        return True, "CPU quota API unavailable"
+    try:
+        limit = Decimal(str(usage["daily_cpu_limit_seconds"]))
+        used = Decimal(str(usage["daily_cpu_total_usage_seconds"]))
+    except (KeyError, InvalidOperation, TypeError, ValueError):
+        return True, "CPU quota response invalid"
+
+    stop_at = min(
+        limit * CPU_USAGE_STOP_FRACTION,
+        max(Decimal("0"), limit - CPU_MINIMUM_HEADROOM_SECONDS),
+    )
+    remaining = max(Decimal("0"), limit - used)
+    if used >= stop_at:
+        return False, (
+            f"CPU safety stop: {used:.0f}/{limit:.0f} seconds used; "
+            f"{remaining:.0f} seconds remain"
+        )
+    return True, f"CPU budget healthy: {used:.0f}/{limit:.0f} seconds used"
+
+
+def browser_failure_requires_immediate_cooldown(exc: Exception) -> bool:
+    fatal_names = {
+        "InvalidSessionIdException",
+        "NoSuchWindowException",
+        "ReadTimeoutError",
+        "SessionNotCreatedException",
+    }
+    return type(exc).__name__ in fatal_names
+
+
+def select_due_urls(due_urls: list[str]) -> tuple[list[str], int]:
+    ordered = sorted(
+        due_urls,
+        key=lambda url: event_date_from_url(url) or datetime.max.replace(tzinfo=NEW_YORK),
+    )
+    selected = ordered[:MAX_EVENTS_PER_CYCLE]
+    return selected, len(ordered) - len(selected)
+
+
 def show_audit(event_id: int | None, section: str | None, limit: int) -> None:
     matches: list[tuple[dict[str, Any], dict[str, Any]]] = []
     normalized_section = " ".join((section or "").lower().split())
@@ -678,8 +831,10 @@ def prune_finished_events(registry_path: Path, registry: dict[str, Any], now: da
             event = session.query(Event).filter(Event.URL == row["url"]).first()
             finished = event is not None and as_utc(event.event_date) <= now
             hint = event_date_from_url(row["url"])
-            expired_uncaptured = event is None and hint is not None and hint.date() < today
-            if finished or expired_uncaptured:
+            # The URL date is an independent hard stop.  This retires stale
+            # links even when older database rows contain a bad event time.
+            expired_url = hint is not None and hint.date() < today
+            if finished or expired_url:
                 removed += 1
             else:
                 kept.append(row)
@@ -734,13 +889,72 @@ def run_collector(registry_path: Path, force: bool, headless: bool, timeout: int
         )
         return 0
 
-    browser = VividBrowser(headless=headless, timeout=timeout)
+    state = load_runtime_state()
+    cooldown_until = circuit_cooldown_until(state, now)
+    if cooldown_until is not None:
+        reason = f"Failure circuit open until {cooldown_until.astimezone(NEW_YORK):%Y-%m-%d %H:%M %Z}"
+        print(f"PAUSED: {reason}", flush=True)
+        write_health(
+            "paused",
+            reason=reason,
+            due=len(due_urls),
+            backup=str(backup_path),
+            next_retry_at=cooldown_until.isoformat(),
+        )
+        return 0
+
+    cpu_usage = pythonanywhere_cpu_usage()
+    cpu_allowed, cpu_reason = cpu_budget_allows_capture(cpu_usage)
+    print(cpu_reason, flush=True)
+    if not cpu_allowed:
+        write_health(
+            "paused",
+            reason=cpu_reason,
+            due=len(due_urls),
+            backup=str(backup_path),
+            cpu=cpu_usage,
+        )
+        return 0
+
+    selected_urls, deferred = select_due_urls(due_urls)
+    if deferred:
+        print(
+            f"SAFETY LIMIT: capturing {len(selected_urls)} of {len(due_urls)} due events; "
+            f"deferring {deferred} to a later cycle.",
+            flush=True,
+        )
+
+    try:
+        browser = VividBrowser(headless=headless, timeout=timeout)
+    except Exception as exc:
+        reason = f"{type(exc).__name__}: {exc}"
+        cooldown_until = open_failure_circuit(state, now, reason)
+        print(
+            f"BROWSER START FAILED: {reason}\n"
+            f"Circuit opened until {cooldown_until.astimezone(NEW_YORK):%Y-%m-%d %H:%M %Z}.",
+            file=sys.stderr,
+            flush=True,
+        )
+        write_health(
+            "paused",
+            reason=reason,
+            due=len(due_urls),
+            failed=1,
+            deferred=len(due_urls),
+            backup=str(backup_path),
+            next_retry_at=cooldown_until.isoformat(),
+        )
+        return 1
+
     failures = 0
     audit_failures = 0
     retired = 0
+    succeeded = 0
+    last_failure: str | None = None
+    stopped_early = False
     try:
-        for index, url in enumerate(due_urls, start=1):
-            print(f"[{index}/{len(due_urls)}] Capturing {url}")
+        for index, url in enumerate(selected_urls, start=1):
+            print(f"[{index}/{len(selected_urls)}] Capturing {url}")
             try:
                 payload, event_date = browser.capture(url)
                 if as_utc(event_date) <= datetime.now(timezone.utc):
@@ -771,26 +985,58 @@ def run_collector(registry_path: Path, force: bool, headless: bool, timeout: int
                     f"Saved {len(snapshot.sections)} sections for {snapshot.title} "
                     f"(event {event_id}, iteration {iteration_id})."
                 )
+                succeeded += 1
             except Exception as exc:
                 failures += 1
-                print(f"FAILED: {url}\n  {type(exc).__name__}: {exc}", file=sys.stderr)
+                last_failure = f"{type(exc).__name__}: {exc}"
+                print(f"FAILED: {url}\n  {last_failure}", file=sys.stderr, flush=True)
+                if browser_failure_requires_immediate_cooldown(exc):
+                    stopped_early = True
+                    cooldown_until = open_failure_circuit(state, now, last_failure)
+                    print(
+                        "Browser session is unhealthy; stopping this cycle immediately. "
+                        f"Next retry after {cooldown_until.astimezone(NEW_YORK):%Y-%m-%d %H:%M %Z}.",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    break
     finally:
-        browser.close()
+        try:
+            browser.close()
+        except Exception as exc:
+            print(
+                f"Browser cleanup warning: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
 
-    succeeded = len(due_urls) - failures - retired
+    if not stopped_early:
+        cooldown_until = record_cycle_result(
+            state,
+            now,
+            succeeded=succeeded,
+            failed=failures,
+            reason=last_failure,
+        )
+    deferred += len(selected_urls) - succeeded - failures - retired
     status = "healthy" if failures == 0 and audit_failures == 0 else "degraded"
+    if cooldown_until is not None:
+        status = "paused"
     write_health(
         status,
         due=len(due_urls),
         succeeded=succeeded,
         retired=retired,
         failed=failures,
+        deferred=deferred,
         audit_failed=audit_failures,
         backup=str(backup_path),
+        cpu=cpu_usage,
+        next_retry_at=cooldown_until.isoformat() if cooldown_until else None,
     )
     print(
         f"Finished: {succeeded} succeeded, {retired} retired, {failures} failed, "
-        f"{audit_failures} audit failures."
+        f"{deferred} deferred, {audit_failures} audit failures."
     )
     return 1 if failures or audit_failures else 0
 
@@ -809,7 +1055,12 @@ def show_status(registry_path: Path) -> None:
             print(f"{label}\n  {state}; {'due' if due else reason}\n  {url}")
 
 
-def watch_collector(registry_path: Path, check_every: int, timeout: int) -> int:
+def watch_collector(
+    registry_path: Path,
+    check_every: int,
+    timeout: int,
+    discover_automatically: bool = False,
+) -> int:
     """Keep checking for due events for an always-on cloud task."""
     print(f"Collector service started; checking every {check_every} seconds.", flush=True)
     while True:
@@ -817,7 +1068,7 @@ def watch_collector(registry_path: Path, check_every: int, timeout: int) -> int:
         print(f"\n[{started:%Y-%m-%d %H:%M:%S %Z}] Checking events...", flush=True)
         try:
             registry = load_registry(registry_path)
-            if discovery_due(registry, datetime.now(timezone.utc)):
+            if discover_automatically and discovery_due(registry, datetime.now(timezone.utc)):
                 print("Refreshing the next 30 days of stadium schedules...", flush=True)
                 discover_events(registry_path, headless=True, timeout=timeout)
             run_collector(registry_path, force=False, headless=True, timeout=timeout)
@@ -842,6 +1093,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     watch_parser.add_argument("--check-every", type=int, default=900)
     watch_parser.add_argument("--timeout", type=int, default=DEFAULT_CAPTURE_TIMEOUT)
+    watch_parser.add_argument(
+        "--discover-events",
+        action="store_true",
+        help="Also run the more expensive daily venue discovery inside this service.",
+    )
     discover_parser = subparsers.add_parser(
         "discover", help="Find the next 30 days of MLB games at the configured stadiums."
     )
@@ -868,7 +1124,12 @@ def main() -> int:
     if args.command == "watch":
         if args.check_every < 60:
             raise ValueError("--check-every must be at least 60 seconds")
-        return watch_collector(args.registry, args.check_every, args.timeout)
+        return watch_collector(
+            args.registry,
+            args.check_every,
+            args.timeout,
+            discover_automatically=args.discover_events,
+        )
     if args.command == "discover":
         _, failures = discover_events(args.registry, args.headless, args.timeout)
         return 1 if failures == len(VENUE_FEEDS) else 0
