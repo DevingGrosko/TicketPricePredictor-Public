@@ -74,4 +74,6 @@ The collector protects the account by:
 - retiring links whose URL date is already in the past;
 - keeping daily database backups and per-price audit records.
 
+New-game collection is currently disabled for Citi Field, Truist Park, and George M. Steinbrenner Field. Their historical database records remain available to the website; exclusion only removes their links from the future collection queue.
+
 Use `python collector.py health` to inspect the current state. A `paused` status is a deliberate safety stop, not an always-on task crash.

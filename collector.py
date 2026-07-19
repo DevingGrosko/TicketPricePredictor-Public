@@ -54,12 +54,22 @@ CPU_API_TIMEOUT_SECONDS = 5
 NEW_YORK = ZoneInfo("America/New_York")
 VENUE_FEEDS = {
     "Nationals Park": "https://www.vividseats.com/nationals-park-tickets/venue/5597",
-    "Citi Field": "https://www.vividseats.com/citi-field-tickets/venue/6134",
     "Citizens Bank Park": "https://www.vividseats.com/citizens-bank-park-tickets/venue/3125",
     "Yankee Stadium": "https://www.vividseats.com/yankee-stadium-tickets/venue/6135",
     "Fenway Park": "https://www.vividseats.com/fenway-park-tickets/venue/551",
-    "Truist Park": "https://www.vividseats.com/truist-park-tickets/venue/14658",
     "Oriole Park at Camden Yards": "https://www.vividseats.com/camden-yards-tickets/venue/261",
+}
+EXCLUDED_VENUES = {
+    "citi field",
+    "george m. steinbrenner field",
+    "steinbrenner field",
+    "truist park",
+}
+EXCLUDED_URL_MARKERS = {
+    "citi-field",
+    "george-m-steinbrenner-field",
+    "steinbrenner-field",
+    "truist-park",
 }
 
 
@@ -386,6 +396,14 @@ def event_date_from_url(url: str) -> datetime | None:
         return None
 
 
+def registry_row_is_excluded(row: dict[str, Any]) -> bool:
+    venue = " ".join(str(row.get("venue") or "").lower().split())
+    if venue in EXCLUDED_VENUES:
+        return True
+    url = str(row.get("url") or "").lower()
+    return any(marker in url for marker in EXCLUDED_URL_MARKERS)
+
+
 def extract_mlb_event_urls(page_html: str, base_url: str = "https://www.vividseats.com") -> set[str]:
     links: set[str] = set()
     pattern = r'''href=["']([^"']+--sports-mlb-baseball/production/\d+)[^"']*["']'''
@@ -417,6 +435,9 @@ def add_urls(urls: list[str], registry_path: Path) -> int:
     added = 0
     for raw in urls:
         url = validated_vivid_url(raw)
+        if registry_row_is_excluded({"url": url}):
+            print(f"Excluded venue; not registered: {url}")
+            continue
         if url in existing:
             print(f"Already registered: {url}")
             continue
@@ -834,14 +855,18 @@ def prune_finished_events(registry_path: Path, registry: dict[str, Any], now: da
             # The URL date is an independent hard stop.  This retires stale
             # links even when older database rows contain a bad event time.
             expired_url = hint is not None and hint.date() < today
-            if finished or expired_url:
+            excluded_venue = registry_row_is_excluded(row)
+            if finished or expired_url or excluded_venue:
                 removed += 1
             else:
                 kept.append(row)
     if removed:
         registry["events"] = kept
         save_registry(registry_path, registry)
-        print(f"Retired {removed} finished links; historical database data was kept.", flush=True)
+        print(
+            f"Retired {removed} finished or excluded links; historical database data was kept.",
+            flush=True,
+        )
     return removed
 
 
