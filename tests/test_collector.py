@@ -252,7 +252,7 @@ class GuardrailTests(unittest.TestCase):
         self.assertFalse(allowed)
         self.assertIn("CPU safety stop", reason)
 
-    def test_limits_each_cycle_to_two_earliest_due_events(self):
+    def test_runs_every_due_event_in_soonest_game_order(self):
         urls = [
             f"https://www.vividseats.com/team-tickets-7-{day}-2026--sports-mlb-baseball/production/{day}"
             for day in (22, 19, 21, 20)
@@ -260,8 +260,52 @@ class GuardrailTests(unittest.TestCase):
 
         selected, deferred = select_due_urls(urls)
 
-        self.assertEqual([event_date_from_url(url).day for url in selected], [19, 20])
-        self.assertEqual(deferred, 2)
+        self.assertEqual([event_date_from_url(url).day for url in selected], [19, 20, 21, 22])
+        self.assertEqual(deferred, 0)
+
+    @patch("collector.record_cycle_result", return_value=None)
+    @patch("collector.write_health")
+    @patch("collector.pythonanywhere_cpu_usage", return_value=None)
+    @patch("collector.create_daily_backup", return_value=Path("/tmp/test-backup.db"))
+    @patch("collector.prune_finished_events", return_value=0)
+    @patch("collector.is_due", return_value=(True, "scheduled"))
+    @patch("collector.CreateModel")
+    @patch("collector.VividBrowser")
+    def test_stops_a_broken_cycle_after_two_capture_failures(
+        self,
+        vivid_browser,
+        create_model,
+        _is_due,
+        _prune,
+        _backup,
+        _cpu,
+        write_health,
+        _record_result,
+    ):
+        class DummySession:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        create_model.return_value.getSession.return_value = DummySession
+        vivid_browser.return_value.capture.side_effect = TimeoutError("no listings")
+        urls = [
+            f"https://www.vividseats.com/team-tickets-7-{day}-2026--sports-mlb-baseball/production/{day}"
+            for day in (19, 20, 21, 22)
+        ]
+
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "events.json"
+            registry.write_text(
+                json.dumps({"events": [{"url": url, "active": True} for url in urls]})
+            )
+            result = run_collector(registry, False, True, 25)
+
+        self.assertEqual(result, 1)
+        self.assertEqual(vivid_browser.return_value.capture.call_count, 2)
+        self.assertEqual(write_health.call_args.kwargs["deferred"], 2)
 
     def test_opens_six_hour_circuit_after_two_failed_cycles(self):
         now = datetime(2026, 7, 19, 15, tzinfo=timezone.utc)

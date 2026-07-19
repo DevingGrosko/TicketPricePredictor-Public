@@ -45,7 +45,7 @@ DISCOVERY_INTERVAL = timedelta(days=1)
 MIN_USABLE_SECTIONS = 10
 AUDIT_RETENTION_DAYS = 30
 BACKUP_RETENTION_DAYS = 7
-MAX_EVENTS_PER_CYCLE = 2
+MAX_CAPTURE_FAILURES_PER_CYCLE = 2
 MAX_CONSECUTIVE_FAILED_CYCLES = 2
 FAILURE_COOLDOWN = timedelta(hours=6)
 CPU_USAGE_STOP_FRACTION = Decimal("0.70")
@@ -801,12 +801,12 @@ def browser_failure_requires_immediate_cooldown(exc: Exception) -> bool:
 
 
 def select_due_urls(due_urls: list[str]) -> tuple[list[str], int]:
+    """Run every due event, ordered by the soonest game first."""
     ordered = sorted(
         due_urls,
         key=lambda url: event_date_from_url(url) or datetime.max.replace(tzinfo=NEW_YORK),
     )
-    selected = ordered[:MAX_EVENTS_PER_CYCLE]
-    return selected, len(ordered) - len(selected)
+    return ordered, 0
 
 
 def show_audit(event_id: int | None, section: str | None, limit: int) -> None:
@@ -942,12 +942,6 @@ def run_collector(registry_path: Path, force: bool, headless: bool, timeout: int
         return 0
 
     selected_urls, deferred = select_due_urls(due_urls)
-    if deferred:
-        print(
-            f"SAFETY LIMIT: capturing {len(selected_urls)} of {len(due_urls)} due events; "
-            f"deferring {deferred} to a later cycle.",
-            flush=True,
-        )
 
     try:
         browser = VividBrowser(headless=headless, timeout=timeout)
@@ -1021,6 +1015,15 @@ def run_collector(registry_path: Path, force: bool, headless: bool, timeout: int
                     print(
                         "Browser session is unhealthy; stopping this cycle immediately. "
                         f"Next retry after {cooldown_until.astimezone(NEW_YORK):%Y-%m-%d %H:%M %Z}.",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    break
+                if failures >= MAX_CAPTURE_FAILURES_PER_CYCLE:
+                    remaining = len(selected_urls) - index
+                    print(
+                        f"FAILURE LIMIT: stopping after {failures} failed captures; "
+                        f"{remaining} due events will retry next cycle.",
                         file=sys.stderr,
                         flush=True,
                     )
@@ -1100,7 +1103,8 @@ def watch_collector(
         except Exception as exc:
             print(f"SERVICE ERROR: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
             write_health("error", error=f"{type(exc).__name__}: {exc}")
-        time.sleep(check_every)
+        elapsed = (datetime.now().astimezone() - started).total_seconds()
+        time.sleep(max(0, check_every - elapsed))
 
 
 def build_parser() -> argparse.ArgumentParser:
