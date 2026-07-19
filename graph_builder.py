@@ -130,7 +130,7 @@ class GraphBuilder:
 
 
 
-    def create_plot(self, x, y, x_type):
+    def create_plot(self, x, y, x_type, analysis_mode="multi"):
         background = "#111827"
         text_color = "#aab4c8"
         line_color = "#a78bfa"
@@ -154,7 +154,8 @@ class GraphBuilder:
             ax.set_ylabel("Relative price (100 = starting point)", color=text_color, labelpad=12)
             ax.yaxis.set_major_formatter(mticker.StrMethodFormatter("{x:,.0f}%"))
         else:
-            ax.set_ylabel("Average listed price", color=text_color, labelpad=12)
+            price_label = "Lowest listed price" if analysis_mode == "single" else "Average lowest listed price"
+            ax.set_ylabel(price_label, color=text_color, labelpad=12)
             ax.yaxis.set_major_formatter(mticker.StrMethodFormatter("${x:,.0f}"))
 
         ax.invert_xaxis()  # count down toward the event
