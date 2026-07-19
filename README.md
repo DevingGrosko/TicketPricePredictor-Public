@@ -29,13 +29,14 @@ Live app: https://bunnyjeff.pythonanywhere.com/
 - `Flask_App/`: Flask routes, templates, static JavaScript, and graph pages.
 - `models.py`: SQLAlchemy models for events, scrape iterations, and tickets.
 - `graph_builder.py`: chart-building and time-series aggregation logic.
+- `collector.py`: guarded Vivid snapshot collection, audit logging, health reporting, and backups.
 - `Prediction.py`: model-training utilities for price forecasting experiments.
-- `WebBrowsing.py`: lightweight browser helper; production collection internals are excluded from the public repo.
+- `WebBrowsing.py`: lightweight browser helper.
 - `DataBaseSQL.py` and `SortTickets.py`: parsing and database-ingestion helpers.
 
 ## Data Policy
 
-The production SQLite database, scraped JSON listing files, local browser profiles, and source-specific collection internals are intentionally excluded from this public repository.
+The production SQLite database, scraped JSON listing files, local browser profiles, runtime audit records, and API credentials are intentionally excluded from this public repository.
 
 The live deployed app uses a private database on PythonAnywhere, while this repo shows the application code and architecture.
 
@@ -52,3 +53,25 @@ To run locally, provide an `Event-collection.db` SQLite database matching the sc
 ```bash
 flask --app Flask_App.flask_app run
 ```
+
+## Safe collector operation
+
+The PythonAnywhere always-on command should run the capture service without automatic discovery:
+
+```bash
+cd /home/bunnyjeff/TicketPricePredictor && /home/bunnyjeff/venv/bin/python -u collector.py watch --check-every 900 --timeout 25
+```
+
+Automatic venue discovery is deliberately separate because it launches additional browser work. Run `collector.py discover --headless` only when schedules need refreshing.
+
+The collector protects the account by:
+
+- stopping browser work after 70% of the daily PythonAnywhere CPU allowance;
+- preserving at least 750 CPU seconds of headroom;
+- processing at most two due events per cycle;
+- opening a six-hour circuit breaker immediately when Chrome fails to start or ChromeDriver hangs;
+- opening the same circuit after two fully failed cycles;
+- retiring links whose URL date is already in the past;
+- keeping daily database backups and per-price audit records.
+
+Use `python collector.py health` to inspect the current state. A `paused` status is a deliberate safety stop, not an always-on task crash.

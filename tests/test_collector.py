@@ -11,13 +11,18 @@ from collector import (
     SectionSnapshot,
     SnapshotParser,
     add_urls,
+    browser_failure_requires_immediate_cooldown,
+    cpu_budget_allows_capture,
     collection_interval,
     create_daily_backup,
     event_date_from_url,
     extract_mlb_event_urls,
     load_registry,
+    load_runtime_state,
+    record_cycle_result,
     retire_url,
     run_collector,
+    select_due_urls,
     write_capture_audit,
 )
 
@@ -146,6 +151,123 @@ class ScheduleTests(unittest.TestCase):
 
 
 class GuardrailTests(unittest.TestCase):
+    def test_browser_start_and_driver_hangs_trigger_immediate_cooldown(self):
+        SessionNotCreatedException = type("SessionNotCreatedException", (Exception,), {})
+        ReadTimeoutError = type("ReadTimeoutError", (Exception,), {})
+
+        self.assertTrue(browser_failure_requires_immediate_cooldown(SessionNotCreatedException()))
+        self.assertTrue(browser_failure_requires_immediate_cooldown(ReadTimeoutError()))
+        self.assertFalse(browser_failure_requires_immediate_cooldown(TimeoutError()))
+
+    @patch("collector.write_health")
+    @patch("collector.open_failure_circuit")
+    @patch("collector.VividBrowser")
+    @patch("collector.CreateModel")
+    @patch("collector.is_due", return_value=(True, "scheduled"))
+    @patch("collector.prune_finished_events", return_value=0)
+    @patch("collector.create_daily_backup", return_value=Path("/tmp/test-backup.db"))
+    @patch(
+        "collector.pythonanywhere_cpu_usage",
+        return_value={
+            "daily_cpu_limit_seconds": 5000,
+            "daily_cpu_total_usage_seconds": 100,
+        },
+    )
+    def test_browser_start_failure_pauses_without_retrying(
+        self,
+        _cpu,
+        _backup,
+        _prune,
+        _is_due,
+        create_model,
+        vivid_browser,
+        open_circuit,
+        write_health,
+    ):
+        class DummySession:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        SessionNotCreatedException = type("SessionNotCreatedException", (Exception,), {})
+        create_model.return_value.getSession.return_value = DummySession
+        vivid_browser.side_effect = SessionNotCreatedException("Chrome failed to start")
+        open_circuit.return_value = datetime.now(timezone.utc) + timedelta(hours=6)
+
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "events.json"
+            registry.write_text(
+                json.dumps(
+                    {
+                        "events": [
+                            {
+                                "url": "https://www.vividseats.com/game-tickets/production/123",
+                                "active": True,
+                            }
+                        ]
+                    }
+                )
+            )
+            result = run_collector(registry, False, True, 25)
+
+        self.assertEqual(result, 1)
+        vivid_browser.assert_called_once()
+        open_circuit.assert_called_once()
+        self.assertEqual(write_health.call_args.args[0], "paused")
+
+    def test_stops_before_pythonanywhere_cpu_quota_is_exhausted(self):
+        allowed, reason = cpu_budget_allows_capture(
+            {
+                "daily_cpu_limit_seconds": 5000,
+                "daily_cpu_total_usage_seconds": 3500,
+            }
+        )
+
+        self.assertFalse(allowed)
+        self.assertIn("CPU safety stop", reason)
+
+    def test_limits_each_cycle_to_two_earliest_due_events(self):
+        urls = [
+            f"https://www.vividseats.com/team-tickets-7-{day}-2026--sports-mlb-baseball/production/{day}"
+            for day in (22, 19, 21, 20)
+        ]
+
+        selected, deferred = select_due_urls(urls)
+
+        self.assertEqual([event_date_from_url(url).day for url in selected], [19, 20])
+        self.assertEqual(deferred, 2)
+
+    def test_opens_six_hour_circuit_after_two_failed_cycles(self):
+        now = datetime(2026, 7, 19, 15, tzinfo=timezone.utc)
+        with tempfile.TemporaryDirectory() as directory:
+            state_file = Path(directory) / "state.json"
+            state = load_runtime_state(state_file)
+            self.assertIsNone(
+                record_cycle_result(
+                    state,
+                    now,
+                    succeeded=0,
+                    failed=1,
+                    reason="timeout",
+                    state_file=state_file,
+                )
+            )
+            cooldown = record_cycle_result(
+                load_runtime_state(state_file),
+                now,
+                succeeded=0,
+                failed=1,
+                reason="timeout",
+                state_file=state_file,
+            )
+
+            saved = load_runtime_state(state_file)
+
+        self.assertEqual(cooldown, now + timedelta(hours=6))
+        self.assertEqual(saved["cooldown_until"], cooldown.isoformat())
+
     def test_writes_auditable_winning_listing_details(self):
         section = SectionSnapshot(
             section="Baseline 113",
