@@ -4,4 +4,4 @@ matplotlib>=3.8
 python-dotenv>=1.0
 numpy
 scikit-learn
-selenium
+selenium==4.25.0

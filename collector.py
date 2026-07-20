@@ -192,7 +192,15 @@ class VividBrowser:
         # Selenium otherwise waits up to 120 seconds for a frozen local
         # ChromeDriver command, which caused failed cycles to consume hours of
         # wall time.  Keep the transport timeout close to our capture timeout.
-        RemoteConnection.set_timeout(timeout + 5)
+        try:
+            RemoteConnection.set_timeout(timeout + 5)
+        except AttributeError:
+            # Selenium 4.26+ no longer initializes the class-level client
+            # configuration until ChromeDriver is constructed.  Calling the
+            # deprecated setter before then raises instead of setting a
+            # timeout.  The failure guards below still bound the cycle, and
+            # requirements.txt pins the release that supports this setter.
+            pass
         options = webdriver.ChromeOptions()
         profile_root = os.environ.get("VIVID_CHROME_PROFILE")
         if profile_root:
