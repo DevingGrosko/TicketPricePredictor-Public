@@ -40,6 +40,7 @@ DEFAULT_HEALTH_FILE = PROJECT_DIR / "collector_health.json"
 DEFAULT_STATE_FILE = PROJECT_DIR / "collector_state.json"
 DEFAULT_CAPTURE_TIMEOUT = 25
 CAPTURE_WINDOW_HOURS = 72
+CAPTURE_SCHEDULE_GRACE = timedelta(minutes=5)
 DISCOVERY_WINDOW_DAYS = 30
 DISCOVERY_INTERVAL = timedelta(days=1)
 MIN_USABLE_SECTIONS = 10
@@ -572,9 +573,13 @@ def is_due(session: Any, url: str, now: datetime, force: bool = False) -> tuple[
     if latest is None:
         return True, "no snapshots"
     next_capture = as_utc(latest) + interval
-    if now >= next_capture:
+    # A batch can take several minutes because games are captured one after
+    # another. Treat games due shortly after the cycle starts as due now so
+    # they do not miss this slot and wait a full extra 30 minutes.
+    due_at = next_capture - CAPTURE_SCHEDULE_GRACE
+    if now >= due_at:
         return True, "scheduled"
-    return False, f"next capture after {next_capture.astimezone().strftime('%Y-%m-%d %H:%M')}"
+    return False, f"next capture after {due_at.astimezone().strftime('%Y-%m-%d %H:%M')}"
 
 
 def store_snapshot(url: str, event_date: datetime, snapshot: EventSnapshot) -> tuple[int, int]:

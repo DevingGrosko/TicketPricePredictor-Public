@@ -19,6 +19,7 @@ from collector import (
     create_daily_backup,
     event_date_from_url,
     extract_mlb_event_urls,
+    is_due,
     load_registry,
     load_runtime_state,
     record_cycle_result,
@@ -109,6 +110,42 @@ class SnapshotParserTests(unittest.TestCase):
 
 
 class ScheduleTests(unittest.TestCase):
+    def test_batch_timing_grace_keeps_games_in_the_next_thirty_minute_cycle(self):
+        now = datetime(2026, 7, 20, 17, 20, tzinfo=timezone.utc)
+        event = SimpleNamespace(
+            id=42,
+            event_date=now + timedelta(hours=24),
+        )
+
+        class Query:
+            def __init__(self, value):
+                self.value = value
+
+            def filter(self, *_args):
+                return self
+
+            def first(self):
+                return self.value
+
+            def scalar(self):
+                return self.value
+
+        class Session:
+            def __init__(self, latest):
+                self.values = iter((event, latest))
+
+            def query(self, *_args):
+                return Query(next(self.values))
+
+        url = "https://www.vividseats.com/game-tickets/production/123"
+        due, reason = is_due(Session(now - timedelta(minutes=28)), url, now)
+        self.assertTrue(due)
+        self.assertEqual(reason, "scheduled")
+
+        due, reason = is_due(Session(now - timedelta(minutes=20)), url, now)
+        self.assertFalse(due)
+        self.assertIn("next capture after", reason)
+
     def test_known_incomplete_july_games_are_not_public(self):
         self.assertFalse(
             event_has_complete_public_data(
