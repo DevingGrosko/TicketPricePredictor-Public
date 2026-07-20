@@ -280,12 +280,22 @@ class GuardrailTests(unittest.TestCase):
         allowed, reason = cpu_budget_allows_capture(
             {
                 "daily_cpu_limit_seconds": 5000,
-                "daily_cpu_total_usage_seconds": 3500,
+                "daily_cpu_total_usage_seconds": 4750,
             }
         )
 
         self.assertFalse(allowed)
         self.assertIn("CPU safety stop", reason)
+
+        allowed, reason = cpu_budget_allows_capture(
+            {
+                "daily_cpu_limit_seconds": 5000,
+                "daily_cpu_total_usage_seconds": 4600,
+            }
+        )
+
+        self.assertTrue(allowed)
+        self.assertIn("healthy", reason)
 
     def test_runs_every_due_event_in_soonest_game_order(self):
         urls = [
