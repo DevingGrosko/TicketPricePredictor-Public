@@ -29,7 +29,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import func
 
-from models import CreateModel, Event, Iteration, Ticket
+from models import CreateModel, Event, Iteration, Ticket, clean_event_title
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -103,7 +103,7 @@ class SnapshotParser:
             raise ValueError("Listings response does not contain event metadata.")
 
         metadata = global_rows[0]
-        title = str(metadata.get("productionName") or "").strip()
+        title = clean_event_title(str(metadata.get("productionName") or ""))
         venue = str(metadata.get("mapTitle") or "").strip()
         source_id = str(metadata.get("productionId") or "").strip()
         if not title or not venue:

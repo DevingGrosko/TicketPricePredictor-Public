@@ -2,6 +2,7 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -27,9 +28,27 @@ from collector import (
     select_due_urls,
     write_capture_audit,
 )
+from models import clean_event_title, event_has_complete_public_data
 
 
 class SnapshotParserTests(unittest.TestCase):
+    def test_removes_trailing_giveaway_from_event_title(self):
+        payload = {
+            "global": [{
+                "productionName": "Pirates at Yankees (Yankees T-Shirt Night)",
+                "mapTitle": "Yankee Stadium",
+                "productionId": "123",
+            }],
+            "tickets": [
+                {"l": f"Section {index}", "p": "50.00"}
+                for index in range(10)
+            ],
+        }
+
+        snapshot = SnapshotParser.parse(payload)
+
+        self.assertEqual(snapshot.title, "Pirates at Yankees")
+
     def test_uses_the_displayed_price_when_alternate_price_is_higher(self):
         tickets = [
             {"l": f"Baseline {100 + index}", "p": "80.00", "aip": "110.00"}
@@ -90,6 +109,22 @@ class SnapshotParserTests(unittest.TestCase):
 
 
 class ScheduleTests(unittest.TestCase):
+    def test_known_incomplete_july_games_are_not_public(self):
+        self.assertFalse(
+            event_has_complete_public_data(
+                SimpleNamespace(event_date=datetime(2026, 7, 19, 13, 35))
+            )
+        )
+        self.assertTrue(
+            event_has_complete_public_data(
+                SimpleNamespace(event_date=datetime(2026, 7, 20, 13, 35))
+            )
+        )
+        self.assertEqual(
+            clean_event_title("Pirates at Yankees (Yankees T-Shirt Night)"),
+            "Pirates at Yankees",
+        )
+
     def test_excluded_parks_are_never_discovered_or_collected(self):
         self.assertNotIn("Citi Field", VENUE_FEEDS)
         self.assertNotIn("Truist Park", VENUE_FEEDS)

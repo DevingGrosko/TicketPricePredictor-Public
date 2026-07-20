@@ -1,6 +1,6 @@
 from itertools import zip_longest
 
-from models import CreateModel, Ticket, Iteration, Event
+from models import CreateModel, Ticket, Iteration, Event, event_has_complete_public_data
 import io
 import base64
 import matplotlib
@@ -30,7 +30,11 @@ class GraphBuilder:
     def allEventsForStadium(self,stadium,section,time:int,x_average_or_percentage):
         SessionLocal = CreateModel().getSession()
         with SessionLocal() as s:
-            events = s.query(Event).filter(Event.Place == stadium).all()
+            events = [
+                event
+                for event in s.query(Event).filter(Event.Place == stadium).all()
+                if event_has_complete_public_data(event)
+            ]
             bins = {}
             total = 0
             for i in reversed(range(time)):

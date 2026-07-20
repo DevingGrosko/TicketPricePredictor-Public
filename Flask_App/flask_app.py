@@ -1,9 +1,8 @@
 from flask import Flask, render_template, request
 from sqlalchemy import select
 from graph_builder import GraphBuilder
-from models import CreateModel, Event
+from models import CreateModel, Event, clean_event_title, event_has_complete_public_data
 import os
-import re
 
 # Load .env ONLY in local dev (PythonAnywhere won’t need it)
 try:
@@ -16,16 +15,6 @@ app = Flask(__name__)
 
 # Use an environment value in production; the fallback is only for local demos.
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'development-only-secret-key')
-
-
-def clean_event_title(title):
-    title = re.sub(r"\s*\([^)]*\)\s*$", "", title or "").strip()
-    return re.sub(
-        r"\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s*\d{1,2}$",
-        "",
-        title,
-        flags=re.IGNORECASE,
-    ).strip()
 
 
 def format_event_title(event):
@@ -43,15 +32,21 @@ def find_event(place, identifier):
     with SessionLocal() as session:
         query = session.query(Event).filter(Event.Place == place)
         if str(identifier).isdigit():
-            return query.filter(Event.id == int(identifier)).first()
-        return query.filter(Event.title == identifier).order_by(Event.event_date).first()
+            event = query.filter(Event.id == int(identifier)).first()
+        else:
+            event = query.filter(Event.title == identifier).order_by(Event.event_date).first()
+        return event if event and event_has_complete_public_data(event) else None
 
 
 @app.route("/", methods=['GET', 'POST'])
 def home():
     SessionLocal = CreateModel().getSession()
     with SessionLocal() as session:
-        data = session.query(Event).order_by(Event.event_date).all()
+        data = [
+            event
+            for event in session.query(Event).order_by(Event.event_date).all()
+            if event_has_complete_public_data(event)
+        ]
         section_games = {}
         game_sections_dict = {}
         for event in data:

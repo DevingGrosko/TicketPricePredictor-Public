@@ -1,5 +1,5 @@
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 from sqlalchemy import JSON
 from sqlalchemy.ext.mutable import MutableList
@@ -8,6 +8,34 @@ from sqlalchemy import create_engine, ForeignKey
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, sessionmaker, relationship
 from sqlalchemy import Integer, String
 import json
+import re
+
+
+INCOMPLETE_PUBLIC_EVENT_DATES = frozenset(
+    {
+        date(2026, 7, 18),
+        date(2026, 7, 19),
+    }
+)
+
+
+def clean_event_title(title: str) -> str:
+    """Remove Vivid's trailing promotion label from a matchup name."""
+    title = re.sub(r"\s*\([^)]*\)\s*$", "", title or "").strip()
+    return re.sub(
+        r"\s+(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s*\d{1,2}$",
+        "",
+        title,
+        flags=re.IGNORECASE,
+    ).strip()
+
+
+def event_has_complete_public_data(event: "Event") -> bool:
+    """Keep known incomplete collection days out of public views and analysis."""
+    return bool(
+        event.event_date
+        and event.event_date.date() not in INCOMPLETE_PUBLIC_EVENT_DATES
+    )
 
 
 class Base(DeclarativeBase):
