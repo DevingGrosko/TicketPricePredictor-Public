@@ -39,7 +39,7 @@ DEFAULT_BACKUP_DIR = PROJECT_DIR / "collector_backups"
 DEFAULT_HEALTH_FILE = PROJECT_DIR / "collector_health.json"
 DEFAULT_STATE_FILE = PROJECT_DIR / "collector_state.json"
 DEFAULT_CAPTURE_TIMEOUT = 25
-CAPTURE_WINDOW_DAYS = 4
+CAPTURE_WINDOW_HOURS = 72
 DISCOVERY_WINDOW_DAYS = 30
 DISCOVERY_INTERVAL = timedelta(days=1)
 MIN_USABLE_SECTIONS = 10
@@ -547,21 +547,17 @@ def as_utc(value: datetime) -> datetime:
 
 
 def collection_interval(hours_until_event: float) -> timedelta | None:
-    if hours_until_event > CAPTURE_WINDOW_DAYS * 24:
+    if hours_until_event > CAPTURE_WINDOW_HOURS:
         return None
-    if hours_until_event <= 48:
-        return timedelta(minutes=15)
-    if hours_until_event <= 72:
-        return timedelta(hours=1)
-    return timedelta(hours=4)
+    return timedelta(minutes=30)
 
 
 def is_due(session: Any, url: str, now: datetime, force: bool = False) -> tuple[bool, str]:
     event = session.query(Event).filter(Event.URL == url).first()
     if event is None:
         hint = event_date_from_url(url)
-        if hint and hint.date() > now.astimezone(NEW_YORK).date() + timedelta(days=CAPTURE_WINDOW_DAYS):
-            return False, "outside four-day capture window"
+        if hint and (as_utc(hint) - now).total_seconds() / 3600 > CAPTURE_WINDOW_HOURS:
+            return False, "outside 72-hour capture window"
         return True, "new event"
     event_time = as_utc(event.event_date)
     hours_until = (event_time - now).total_seconds() / 3600
@@ -571,7 +567,7 @@ def is_due(session: Any, url: str, now: datetime, force: bool = False) -> tuple[
         return True, "forced"
     interval = collection_interval(hours_until)
     if interval is None:
-        return False, "outside four-day capture window"
+        return False, "outside 72-hour capture window"
     latest = session.query(func.max(Iteration.captured_at)).filter(Iteration.event_id == event.id).scalar()
     if latest is None:
         return True, "no snapshots"

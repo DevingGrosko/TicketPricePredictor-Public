@@ -147,13 +147,13 @@ class ScheduleTests(unittest.TestCase):
             )
         )
 
-    def test_collection_frequency_increases_near_game_time(self):
+    def test_collects_every_thirty_minutes_inside_seventy_two_hours(self):
         self.assertIsNone(collection_interval(200))
-        self.assertEqual(collection_interval(96), timedelta(hours=4))
-        self.assertEqual(collection_interval(72), timedelta(hours=1))
-        self.assertEqual(collection_interval(48), timedelta(minutes=15))
-        self.assertEqual(collection_interval(24), timedelta(minutes=15))
-        self.assertEqual(collection_interval(1), timedelta(minutes=15))
+        self.assertIsNone(collection_interval(96))
+        self.assertEqual(collection_interval(72), timedelta(minutes=30))
+        self.assertEqual(collection_interval(48), timedelta(minutes=30))
+        self.assertEqual(collection_interval(24), timedelta(minutes=30))
+        self.assertEqual(collection_interval(1), timedelta(minutes=30))
 
     def test_extracts_and_dates_mlb_links_from_venue_page(self):
         page = '''

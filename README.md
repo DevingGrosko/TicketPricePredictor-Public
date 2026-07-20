@@ -68,7 +68,7 @@ The collector protects the account by:
 
 - using up to 97% of the daily CPU allowance while preserving at least 150 CPU seconds of headroom;
 - processing every due event during each 15-minute cycle when captures are healthy;
-- capturing each game every 15 minutes inside 48 hours, hourly from 48–72 hours, and every four hours from 72–96 hours;
+- capturing each game every 30 minutes during its final 72 hours and never earlier;
 - stopping the cycle after two capture failures so a broken browser cannot exhaust the CPU allowance;
 - opening a six-hour circuit breaker immediately when Chrome fails to start or ChromeDriver hangs;
 - opening the same circuit after two fully failed cycles;
