@@ -1117,6 +1117,13 @@ def watch_collector(
     discover_automatically: bool = False,
 ) -> int:
     """Keep checking for due events for an always-on cloud task."""
+    # Always-on task output is redirected to a file rather than a terminal.
+    # Make every newline visible immediately instead of buffering an entire
+    # cycle's capture results indefinitely.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(line_buffering=True)
     print(f"Collector service started; checking every {check_every} seconds.", flush=True)
     while True:
         started = datetime.now().astimezone()
