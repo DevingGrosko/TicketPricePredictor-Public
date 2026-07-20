@@ -280,7 +280,7 @@ class GuardrailTests(unittest.TestCase):
         allowed, reason = cpu_budget_allows_capture(
             {
                 "daily_cpu_limit_seconds": 5000,
-                "daily_cpu_total_usage_seconds": 4750,
+                "daily_cpu_total_usage_seconds": 4850,
             }
         )
 
@@ -290,7 +290,7 @@ class GuardrailTests(unittest.TestCase):
         allowed, reason = cpu_budget_allows_capture(
             {
                 "daily_cpu_limit_seconds": 5000,
-                "daily_cpu_total_usage_seconds": 4600,
+                "daily_cpu_total_usage_seconds": 4800,
             }
         )
 

@@ -67,7 +67,7 @@ Automatic venue discovery is deliberately separate because it launches additiona
 The collector protects the account by:
 
 - stopping browser work after 70% of the daily PythonAnywhere CPU allowance;
-- using up to 95% of the daily CPU allowance while preserving at least 250 CPU seconds of headroom;
+- using up to 97% of the daily CPU allowance while preserving at least 150 CPU seconds of headroom;
 - processing every due event during each 15-minute cycle when captures are healthy;
 - stopping the cycle after two capture failures so a broken browser cannot exhaust the CPU allowance;
 - opening a six-hour circuit breaker immediately when Chrome fails to start or ChromeDriver hangs;
