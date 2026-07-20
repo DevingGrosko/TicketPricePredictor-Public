@@ -151,6 +151,7 @@ class ScheduleTests(unittest.TestCase):
         self.assertIsNone(collection_interval(200))
         self.assertEqual(collection_interval(96), timedelta(hours=4))
         self.assertEqual(collection_interval(72), timedelta(hours=1))
+        self.assertEqual(collection_interval(48), timedelta(minutes=15))
         self.assertEqual(collection_interval(24), timedelta(minutes=15))
         self.assertEqual(collection_interval(1), timedelta(minutes=15))
 

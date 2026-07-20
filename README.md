@@ -66,9 +66,9 @@ Automatic venue discovery is deliberately separate because it launches additiona
 
 The collector protects the account by:
 
-- stopping browser work after 70% of the daily PythonAnywhere CPU allowance;
 - using up to 97% of the daily CPU allowance while preserving at least 150 CPU seconds of headroom;
 - processing every due event during each 15-minute cycle when captures are healthy;
+- capturing each game every 15 minutes inside 48 hours, hourly from 48–72 hours, and every four hours from 72–96 hours;
 - stopping the cycle after two capture failures so a broken browser cannot exhaust the CPU allowance;
 - opening a six-hour circuit breaker immediately when Chrome fails to start or ChromeDriver hangs;
 - opening the same circuit after two fully failed cycles;

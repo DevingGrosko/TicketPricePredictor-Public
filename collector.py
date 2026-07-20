@@ -549,7 +549,7 @@ def as_utc(value: datetime) -> datetime:
 def collection_interval(hours_until_event: float) -> timedelta | None:
     if hours_until_event > CAPTURE_WINDOW_DAYS * 24:
         return None
-    if hours_until_event <= 24:
+    if hours_until_event <= 48:
         return timedelta(minutes=15)
     if hours_until_event <= 72:
         return timedelta(hours=1)
