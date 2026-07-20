@@ -59,7 +59,7 @@ flask --app Flask_App.flask_app run
 The PythonAnywhere always-on command should run the capture service without automatic discovery:
 
 ```bash
-cd /home/bunnyjeff/TicketPricePredictor && /home/bunnyjeff/venv/bin/python -u collector.py watch --check-every 900 --timeout 25
+cd /home/bunnyjeff/TicketPricePredictor && /home/bunnyjeff/venv/bin/python -u collector.py watch --check-every 1800 --timeout 25
 ```
 
 Automatic venue discovery is deliberately separate because it launches additional browser work. Run `collector.py discover --headless` only when schedules need refreshing.

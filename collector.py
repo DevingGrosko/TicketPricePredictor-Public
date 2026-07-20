@@ -1150,7 +1150,7 @@ def build_parser() -> argparse.ArgumentParser:
     watch_parser = subparsers.add_parser(
         "watch", help="Continuously check for due events (for an always-on task)."
     )
-    watch_parser.add_argument("--check-every", type=int, default=900)
+    watch_parser.add_argument("--check-every", type=int, default=1800)
     watch_parser.add_argument("--timeout", type=int, default=DEFAULT_CAPTURE_TIMEOUT)
     watch_parser.add_argument(
         "--discover-events",
