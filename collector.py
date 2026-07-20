@@ -266,11 +266,21 @@ class VividBrowser:
         except TimeoutException:
             self.driver.execute_script("window.stop();")
 
-        event_date = self._event_datetime(url)
         deadline = time.monotonic() + self.timeout
         candidate_ids: set[str] = set()
+        event_date: datetime | None = None
+        captured_payload: dict[str, Any] | None = None
 
         while time.monotonic() < deadline:
+            if event_date is None:
+                try:
+                    event_date = self._event_datetime(url)
+                except ValueError:
+                    # page_load_strategy="none" returns before Vivid has
+                    # necessarily rendered its event metadata. Keep polling
+                    # while the listings request is loading.
+                    pass
+
             for entry in self.driver.get_log("performance"):
                 try:
                     message = json.loads(entry["message"])["message"]
@@ -287,10 +297,18 @@ class VividBrowser:
                 if method == "Network.loadingFinished" and params.get("requestId") in candidate_ids:
                     payload = self._response_json(params["requestId"])
                     if payload and payload.get("tickets") and payload.get("global"):
-                        return payload, event_date
+                        captured_payload = payload
+
+            if captured_payload is not None and event_date is not None:
+                return captured_payload, event_date
 
             time.sleep(0.15)
 
+        if captured_payload is not None:
+            raise ValueError(
+                f"Listings loaded, but the event date and time did not appear "
+                f"within {self.timeout} seconds."
+            )
         raise TimeoutError(f"No Vivid listings response appeared within {self.timeout} seconds.")
 
     def discover_event_urls(self, venue_url: str) -> set[str]:
@@ -345,7 +363,8 @@ class VividBrowser:
                     return parsed
 
         date_match = re.search(r"-(\d{1,2})-(\d{1,2})-(\d{4})--", url)
-        page_text = self.driver.find_element("tag name", "body").text
+        bodies = self.driver.find_elements("tag name", "body")
+        page_text = bodies[0].text if bodies else ""
         time_match = re.search(r"\b(\d{1,2}:\d{2}\s*[ap]m)\b", page_text, re.IGNORECASE)
         if date_match and time_match:
             month, day, year = map(int, date_match.groups())
