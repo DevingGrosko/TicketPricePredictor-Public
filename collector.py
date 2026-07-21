@@ -47,6 +47,7 @@ MIN_USABLE_SECTIONS = 10
 AUDIT_RETENTION_DAYS = 30
 BACKUP_RETENTION_DAYS = 7
 MAX_CAPTURE_FAILURES_PER_CYCLE = 2
+MAX_BROWSER_RESTARTS_PER_CYCLE = 2
 MAX_CONSECUTIVE_FAILED_CYCLES = 2
 FAILURE_COOLDOWN = timedelta(minutes=30)
 CPU_USAGE_STOP_FRACTION = Decimal("0.97")
@@ -256,7 +257,18 @@ class VividBrowser:
         )
 
     def close(self) -> None:
-        self.driver.quit()
+        service = getattr(self.driver, "service", None)
+        try:
+            self.driver.quit()
+        finally:
+            # A crashed tab can make quit() fail before ChromeDriver itself is
+            # stopped. Explicitly stop the service so repeated cycles do not
+            # accumulate abandoned driver processes.
+            if service is not None:
+                try:
+                    service.stop()
+                except Exception:
+                    pass
 
     def capture(self, url: str) -> tuple[dict[str, Any], datetime]:
         from selenium.common.exceptions import TimeoutException
@@ -825,7 +837,19 @@ def browser_failure_requires_immediate_cooldown(exc: Exception) -> bool:
         "ReadTimeoutError",
         "SessionNotCreatedException",
     }
-    return type(exc).__name__ in fatal_names
+    if type(exc).__name__ in fatal_names:
+        return True
+    message = str(exc).lower()
+    fatal_messages = (
+        "invalid session id",
+        "session deleted because of page crash",
+        "tab crashed",
+        "chrome not reachable",
+        "not connected to devtools",
+        "failed to create chrome process",
+        "chromedriver unexpectedly exited",
+    )
+    return any(marker in message for marker in fatal_messages)
 
 
 def select_due_urls(due_urls: list[str]) -> tuple[list[str], int]:
@@ -1014,6 +1038,7 @@ def run_collector(registry_path: Path, force: bool, headless: bool, timeout: int
     succeeded = 0
     last_failure: str | None = None
     stopped_early = False
+    browser_restarts = 0
     try:
         for index, url in enumerate(selected_urls, start=1):
             print(f"[{index}/{len(selected_urls)}] Capturing {url}")
@@ -1021,11 +1046,16 @@ def run_collector(registry_path: Path, force: bool, headless: bool, timeout: int
                 try:
                     payload, event_date = browser.capture(url)
                 except Exception as first_exc:
-                    if not browser_failure_requires_immediate_cooldown(first_exc):
+                    if (
+                        not browser_failure_requires_immediate_cooldown(first_exc)
+                        or browser_restarts >= MAX_BROWSER_RESTARTS_PER_CYCLE
+                    ):
                         raise
+                    browser_restarts += 1
                     print(
                         f"Chrome session was lost while capturing {url}. "
-                        "Restarting Chrome and retrying this game once...",
+                        f"Restarting Chrome and retrying this game once "
+                        f"({browser_restarts}/{MAX_BROWSER_RESTARTS_PER_CYCLE} cycle restarts)...",
                         file=sys.stderr,
                         flush=True,
                     )

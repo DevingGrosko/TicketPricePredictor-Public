@@ -251,9 +251,15 @@ class GuardrailTests(unittest.TestCase):
     def test_identifies_browser_session_failures_for_restart(self):
         SessionNotCreatedException = type("SessionNotCreatedException", (Exception,), {})
         ReadTimeoutError = type("ReadTimeoutError", (Exception,), {})
+        WebDriverException = type("WebDriverException", (Exception,), {})
 
         self.assertTrue(browser_failure_requires_immediate_cooldown(SessionNotCreatedException()))
         self.assertTrue(browser_failure_requires_immediate_cooldown(ReadTimeoutError()))
+        self.assertTrue(
+            browser_failure_requires_immediate_cooldown(
+                WebDriverException("session deleted because of page crash")
+            )
+        )
         self.assertFalse(browser_failure_requires_immediate_cooldown(TimeoutError()))
 
     @patch("collector.write_health")

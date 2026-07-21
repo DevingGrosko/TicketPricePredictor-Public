@@ -70,7 +70,8 @@ The collector protects the account by:
 - processing every due event during each 15-minute cycle when captures are healthy;
 - capturing every eligible game in each 30-minute cycle during its final 72 hours, with scheduling grace for games processed later in a batch;
 - stopping the cycle after two capture failures so a broken browser cannot exhaust the CPU allowance;
-- restarting Chrome once and retrying the current game when its browser session is lost;
+- recognizing both Selenium session errors and page-crash messages, then restarting Chrome and retrying the current game;
+- limiting browser recovery to two restarts per cycle and explicitly stopping crashed ChromeDriver services;
 - stopping only the current cycle if that retry fails, then trying again at the next 30-minute check;
 - opening a 30-minute circuit after two fully failed non-browser cycles;
 - retiring links whose URL date is already in the past;
