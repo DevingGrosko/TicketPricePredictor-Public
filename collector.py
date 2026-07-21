@@ -288,10 +288,14 @@ class VividBrowser:
             if event_date is None:
                 try:
                     event_date = self._event_datetime(url)
-                except ValueError:
+                except Exception as exc:
+                    if not event_metadata_is_still_rendering(exc):
+                        raise
                     # page_load_strategy="none" returns before Vivid has
-                    # necessarily rendered its event metadata. Keep polling
-                    # while the listings request is loading.
+                    # necessarily rendered stable event metadata. Vivid can
+                    # also replace those DOM nodes while the page hydrates,
+                    # making a Selenium element reference briefly stale.
+                    # Keep polling the new DOM while listings are loading.
                     pass
 
             for entry in self.driver.get_log("performance"):
@@ -401,6 +405,11 @@ def find_nested_value(value: Any, key: str) -> Any | None:
             if found is not None:
                 return found
     return None
+
+
+def event_metadata_is_still_rendering(exc: Exception) -> bool:
+    """Return whether Vivid's event metadata should simply be polled again."""
+    return isinstance(exc, ValueError) or type(exc).__name__ == "StaleElementReferenceException"
 
 
 def parse_iso_datetime(raw: str) -> datetime | None:

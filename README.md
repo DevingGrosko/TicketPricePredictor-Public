@@ -72,6 +72,7 @@ The collector protects the account by:
 - stopping the cycle after two capture failures so a broken browser cannot exhaust the CPU allowance;
 - recognizing both Selenium session errors and page-crash messages, then restarting Chrome and retrying the current game;
 - limiting browser recovery to two restarts per cycle and explicitly stopping crashed ChromeDriver services;
+- retrying brief stale-element reads when Vivid rerenders event metadata, without restarting Chrome or failing the game;
 - stopping only the current cycle if that retry fails, then trying again at the next 30-minute check;
 - opening a 30-minute circuit after two fully failed non-browser cycles;
 - retiring links whose URL date is already in the past;

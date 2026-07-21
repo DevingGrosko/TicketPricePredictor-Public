@@ -18,6 +18,7 @@ from collector import (
     collection_interval,
     create_daily_backup,
     event_date_from_url,
+    event_metadata_is_still_rendering,
     extract_mlb_event_urls,
     is_due,
     load_registry,
@@ -248,6 +249,18 @@ class ScheduleTests(unittest.TestCase):
 
 
 class GuardrailTests(unittest.TestCase):
+    def test_stale_event_metadata_is_polled_again(self):
+        StaleElementReferenceException = type(
+            "StaleElementReferenceException", (Exception,), {}
+        )
+        self.assertTrue(
+            event_metadata_is_still_rendering(
+                StaleElementReferenceException("Vivid replaced the element")
+            )
+        )
+        self.assertTrue(event_metadata_is_still_rendering(ValueError("not rendered yet")))
+        self.assertFalse(event_metadata_is_still_rendering(TimeoutError("listings missing")))
+
     def test_identifies_browser_session_failures_for_restart(self):
         SessionNotCreatedException = type("SessionNotCreatedException", (Exception,), {})
         ReadTimeoutError = type("ReadTimeoutError", (Exception,), {})
