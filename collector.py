@@ -240,7 +240,19 @@ class VividBrowser:
         if driver_path:
             from selenium.webdriver.chrome.service import Service
 
-            self.driver = webdriver.Chrome(service=Service(driver_path), options=options)
+            service = Service(driver_path)
+            try:
+                self.driver = webdriver.Chrome(service=service, options=options)
+            except Exception:
+                # webdriver.Chrome can fail after ChromeDriver has already
+                # been spawned (for example while creating the Chrome
+                # process). In that case __init__ never returns and close()
+                # cannot run, so stop the partially-created service here.
+                try:
+                    service.stop()
+                except Exception:
+                    pass
+                raise
         else:
             self.driver = webdriver.Chrome(options=options)
         self.driver.set_page_load_timeout(timeout)
@@ -1021,6 +1033,9 @@ def run_collector(registry_path: Path, force: bool, headless: bool, timeout: int
                     file=sys.stderr,
                     flush=True,
                 )
+                # Give ChromeDriver termination and OS process accounting a
+                # moment to settle before attempting another browser.
+                time.sleep(2)
 
     if browser is None:
         reason = f"{type(start_error).__name__}: {start_error}"
@@ -1072,6 +1087,7 @@ def run_collector(registry_path: Path, force: bool, headless: bool, timeout: int
                         browser.close()
                     except Exception:
                         pass
+                    time.sleep(1)
                     browser = VividBrowser(headless=headless, timeout=timeout)
                     payload, event_date = browser.capture(url)
                 if as_utc(event_date) <= datetime.now(timezone.utc):
