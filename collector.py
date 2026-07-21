@@ -48,7 +48,7 @@ AUDIT_RETENTION_DAYS = 30
 BACKUP_RETENTION_DAYS = 7
 MAX_CAPTURE_FAILURES_PER_CYCLE = 2
 MAX_CONSECUTIVE_FAILED_CYCLES = 2
-FAILURE_COOLDOWN = timedelta(hours=6)
+FAILURE_COOLDOWN = timedelta(minutes=30)
 CPU_USAGE_STOP_FRACTION = Decimal("0.97")
 CPU_MINIMUM_HEADROOM_SECONDS = Decimal("150")
 CPU_API_TIMEOUT_SECONDS = 5
@@ -971,25 +971,40 @@ def run_collector(registry_path: Path, force: bool, headless: bool, timeout: int
 
     selected_urls, deferred = select_due_urls(due_urls)
 
-    try:
-        browser = VividBrowser(headless=headless, timeout=timeout)
-    except Exception as exc:
-        reason = f"{type(exc).__name__}: {exc}"
-        cooldown_until = open_failure_circuit(state, now, reason)
+    browser: VividBrowser | None = None
+    start_error: Exception | None = None
+    for start_attempt in range(2):
+        try:
+            browser = VividBrowser(headless=headless, timeout=timeout)
+            if start_attempt:
+                print("Chrome restarted successfully; continuing this cycle.", flush=True)
+            break
+        except Exception as exc:
+            start_error = exc
+            if start_attempt == 0:
+                print(
+                    f"BROWSER START FAILED: {type(exc).__name__}: {exc}\n"
+                    "Retrying Chrome once...",
+                    file=sys.stderr,
+                    flush=True,
+                )
+
+    if browser is None:
+        reason = f"{type(start_error).__name__}: {start_error}"
         print(
             f"BROWSER START FAILED: {reason}\n"
-            f"Circuit opened until {cooldown_until.astimezone(NEW_YORK):%Y-%m-%d %H:%M %Z}.",
+            "This cycle is stopping; Chrome will be tried again next cycle.",
             file=sys.stderr,
             flush=True,
         )
         write_health(
-            "paused",
+            "degraded",
             reason=reason,
             due=len(due_urls),
             failed=1,
             deferred=len(due_urls),
             backup=str(backup_path),
-            next_retry_at=cooldown_until.isoformat(),
+            next_retry_at=(now + timedelta(minutes=30)).isoformat(),
         )
         return 1
 
@@ -1003,7 +1018,23 @@ def run_collector(registry_path: Path, force: bool, headless: bool, timeout: int
         for index, url in enumerate(selected_urls, start=1):
             print(f"[{index}/{len(selected_urls)}] Capturing {url}")
             try:
-                payload, event_date = browser.capture(url)
+                try:
+                    payload, event_date = browser.capture(url)
+                except Exception as first_exc:
+                    if not browser_failure_requires_immediate_cooldown(first_exc):
+                        raise
+                    print(
+                        f"Chrome session was lost while capturing {url}. "
+                        "Restarting Chrome and retrying this game once...",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                    try:
+                        browser.close()
+                    except Exception:
+                        pass
+                    browser = VividBrowser(headless=headless, timeout=timeout)
+                    payload, event_date = browser.capture(url)
                 if as_utc(event_date) <= datetime.now(timezone.utc):
                     retire_url(registry_path, url)
                     retired += 1
@@ -1039,10 +1070,9 @@ def run_collector(registry_path: Path, force: bool, headless: bool, timeout: int
                 print(f"FAILED: {url}\n  {last_failure}", file=sys.stderr, flush=True)
                 if browser_failure_requires_immediate_cooldown(exc):
                     stopped_early = True
-                    cooldown_until = open_failure_circuit(state, now, last_failure)
                     print(
-                        "Browser session is unhealthy; stopping this cycle immediately. "
-                        f"Next retry after {cooldown_until.astimezone(NEW_YORK):%Y-%m-%d %H:%M %Z}.",
+                        "Chrome was still unhealthy after its retry; stopping only this cycle. "
+                        "It will be tried again at the next 30-minute check.",
                         file=sys.stderr,
                         flush=True,
                     )

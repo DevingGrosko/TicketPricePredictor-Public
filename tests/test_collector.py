@@ -248,7 +248,7 @@ class ScheduleTests(unittest.TestCase):
 
 
 class GuardrailTests(unittest.TestCase):
-    def test_browser_start_and_driver_hangs_trigger_immediate_cooldown(self):
+    def test_identifies_browser_session_failures_for_restart(self):
         SessionNotCreatedException = type("SessionNotCreatedException", (Exception,), {})
         ReadTimeoutError = type("ReadTimeoutError", (Exception,), {})
 
@@ -270,7 +270,7 @@ class GuardrailTests(unittest.TestCase):
             "daily_cpu_total_usage_seconds": 100,
         },
     )
-    def test_browser_start_failure_pauses_without_retrying(
+    def test_browser_start_failure_retries_once_then_defers_to_next_cycle(
         self,
         _cpu,
         _backup,
@@ -291,8 +291,6 @@ class GuardrailTests(unittest.TestCase):
         SessionNotCreatedException = type("SessionNotCreatedException", (Exception,), {})
         create_model.return_value.getSession.return_value = DummySession
         vivid_browser.side_effect = SessionNotCreatedException("Chrome failed to start")
-        open_circuit.return_value = datetime.now(timezone.utc) + timedelta(hours=6)
-
         with tempfile.TemporaryDirectory() as directory:
             registry = Path(directory) / "events.json"
             registry.write_text(
@@ -310,9 +308,9 @@ class GuardrailTests(unittest.TestCase):
             result = run_collector(registry, False, True, 25)
 
         self.assertEqual(result, 1)
-        vivid_browser.assert_called_once()
-        open_circuit.assert_called_once()
-        self.assertEqual(write_health.call_args.args[0], "paused")
+        self.assertEqual(vivid_browser.call_count, 2)
+        open_circuit.assert_not_called()
+        self.assertEqual(write_health.call_args.args[0], "degraded")
 
     def test_stops_before_pythonanywhere_cpu_quota_is_exhausted(self):
         allowed, reason = cpu_budget_allows_capture(
@@ -390,7 +388,7 @@ class GuardrailTests(unittest.TestCase):
         self.assertEqual(vivid_browser.return_value.capture.call_count, 2)
         self.assertEqual(write_health.call_args.kwargs["deferred"], 2)
 
-    def test_opens_six_hour_circuit_after_two_failed_cycles(self):
+    def test_opens_thirty_minute_circuit_after_two_failed_cycles(self):
         now = datetime(2026, 7, 19, 15, tzinfo=timezone.utc)
         with tempfile.TemporaryDirectory() as directory:
             state_file = Path(directory) / "state.json"
@@ -416,8 +414,47 @@ class GuardrailTests(unittest.TestCase):
 
             saved = load_runtime_state(state_file)
 
-        self.assertEqual(cooldown, now + timedelta(hours=6))
+        self.assertEqual(cooldown, now + timedelta(minutes=30))
         self.assertEqual(saved["cooldown_until"], cooldown.isoformat())
+
+    @patch("collector.write_health")
+    @patch("collector.create_daily_backup", return_value=Path("/tmp/test-backup.db"))
+    @patch("collector.is_due", return_value=(True, "scheduled"))
+    @patch("collector.prune_finished_events", return_value=0)
+    @patch("collector.CreateModel")
+    @patch("collector.VividBrowser")
+    def test_lost_browser_session_restarts_and_retries_the_same_game(
+        self, vivid_browser, create_model, _prune, _is_due, _backup, _health
+    ):
+        class DummySession:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        InvalidSessionIdException = type("InvalidSessionIdException", (Exception,), {})
+        first_browser = Mock()
+        first_browser.capture.side_effect = InvalidSessionIdException("session died")
+        replacement_browser = Mock()
+        replacement_browser.capture.return_value = (
+            {"global": [], "tickets": []},
+            datetime.now(timezone.utc) - timedelta(minutes=1),
+        )
+        vivid_browser.side_effect = [first_browser, replacement_browser]
+        create_model.return_value.getSession.return_value = DummySession
+        url = "https://www.vividseats.com/game-tickets/production/123"
+
+        with tempfile.TemporaryDirectory() as directory:
+            registry = Path(directory) / "events.json"
+            registry.write_text(json.dumps({"events": [{"url": url, "active": True}]}))
+            result = run_collector(registry, False, True, 25)
+
+        self.assertEqual(result, 0)
+        self.assertEqual(vivid_browser.call_count, 2)
+        first_browser.close.assert_called_once()
+        replacement_browser.capture.assert_called_once_with(url)
+        replacement_browser.close.assert_called_once()
 
     def test_writes_auditable_winning_listing_details(self):
         section = SectionSnapshot(
