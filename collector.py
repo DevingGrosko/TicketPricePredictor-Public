@@ -15,6 +15,7 @@ import json
 import os
 import re
 import sqlite3
+import subprocess
 import sys
 import time
 import urllib.error
@@ -401,6 +402,39 @@ class VividBrowser:
             return datetime(year, month, day, clock.hour, clock.minute, tzinfo=ZoneInfo("America/New_York"))
 
         raise ValueError("Could not determine the event date and time from the Vivid page.")
+
+
+def cleanup_stale_pythonanywhere_chrome() -> bool:
+    """Terminate detached collector Chrome processes before starting a new browser.
+
+    PythonAnywhere's Chrome can detach from ChromeDriver after a tab crash. Those
+    processes survive driver.quit(), eventually exhausting the account's process
+    allowance and making ChromeDriver exit with status -5. This is deliberately
+    restricted to Linux hosts with PythonAnywhere's published driver path.
+    """
+    if not sys.platform.startswith("linux"):
+        return False
+    if not Path("/usr/local/bin/chromedriver").exists():
+        return False
+
+    killed = False
+    for pattern in ("[c]hromedriver", "[c]hrome", "[c]hromium"):
+        try:
+            result = subprocess.run(
+                ["pkill", "-TERM", "-u", str(os.getuid()), "-f", pattern],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        killed = killed or result.returncode == 0
+
+    if killed:
+        print("Cleaned up stale Chrome processes before browser startup.", flush=True)
+        time.sleep(1)
+    return killed
 
 
 def find_nested_value(value: Any, key: str) -> Any | None:
@@ -1016,6 +1050,7 @@ def run_collector(registry_path: Path, force: bool, headless: bool, timeout: int
 
     selected_urls, deferred = select_due_urls(due_urls)
 
+    cleanup_stale_pythonanywhere_chrome()
     browser: VividBrowser | None = None
     start_error: Exception | None = None
     for start_attempt in range(2):
@@ -1035,6 +1070,7 @@ def run_collector(registry_path: Path, force: bool, headless: bool, timeout: int
                 )
                 # Give ChromeDriver termination and OS process accounting a
                 # moment to settle before attempting another browser.
+                cleanup_stale_pythonanywhere_chrome()
                 time.sleep(2)
 
     if browser is None:
@@ -1087,6 +1123,7 @@ def run_collector(registry_path: Path, force: bool, headless: bool, timeout: int
                         browser.close()
                     except Exception:
                         pass
+                    cleanup_stale_pythonanywhere_chrome()
                     time.sleep(1)
                     browser = VividBrowser(headless=headless, timeout=timeout)
                     payload, event_date = browser.capture(url)
@@ -1150,6 +1187,7 @@ def run_collector(registry_path: Path, force: bool, headless: bool, timeout: int
                 file=sys.stderr,
                 flush=True,
             )
+        cleanup_stale_pythonanywhere_chrome()
 
     if not stopped_early:
         cooldown_until = record_cycle_result(

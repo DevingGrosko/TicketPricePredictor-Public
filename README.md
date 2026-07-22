@@ -73,6 +73,7 @@ The collector protects the account by:
 - recognizing both Selenium session errors and page-crash messages, then restarting Chrome and retrying the current game;
 - limiting browser recovery to two restarts per cycle and explicitly stopping crashed ChromeDriver services;
 - cleaning up partially-created ChromeDriver services when Chrome fails during startup, then briefly waiting before a retry;
+- automatically terminating detached collector Chrome/ChromeDriver processes on PythonAnywhere before each browser startup and after each cycle;
 - retrying brief stale-element reads when Vivid rerenders event metadata, without restarting Chrome or failing the game;
 - stopping only the current cycle if that retry fails, then trying again at the next 30-minute check;
 - opening a 30-minute circuit after two fully failed non-browser cycles;

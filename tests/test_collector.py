@@ -16,6 +16,7 @@ from collector import (
     browser_failure_requires_immediate_cooldown,
     cpu_budget_allows_capture,
     collection_interval,
+    cleanup_stale_pythonanywhere_chrome,
     create_daily_backup,
     event_date_from_url,
     event_metadata_is_still_rendering,
@@ -249,6 +250,24 @@ class ScheduleTests(unittest.TestCase):
 
 
 class GuardrailTests(unittest.TestCase):
+    @patch("collector.time.sleep")
+    @patch("collector.os.getuid", return_value=12345)
+    @patch("collector.Path.exists", return_value=True)
+    @patch("collector.sys.platform", "linux")
+    @patch("collector.subprocess.run")
+    def test_pythonanywhere_preflight_cleans_detached_chrome_processes(
+        self, run, _exists, _getuid, sleep
+    ):
+        run.side_effect = [
+            SimpleNamespace(returncode=1),
+            SimpleNamespace(returncode=0),
+            SimpleNamespace(returncode=1),
+        ]
+
+        self.assertTrue(cleanup_stale_pythonanywhere_chrome())
+        self.assertEqual(run.call_count, 3)
+        sleep.assert_called_once_with(1)
+
     def test_stale_event_metadata_is_polled_again(self):
         StaleElementReferenceException = type(
             "StaleElementReferenceException", (Exception,), {}
