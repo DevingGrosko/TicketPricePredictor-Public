@@ -75,6 +75,7 @@ The collector protects the account by:
 - cleaning up partially-created ChromeDriver services when Chrome fails during startup, then briefly waiting before a retry;
 - automatically terminating detached collector Chrome/ChromeDriver processes on PythonAnywhere before each browser startup and after each cycle;
 - running every always-on capture cycle in a fresh, fully-reaped Python child process so Selenium and Chrome state cannot accumulate across the day;
+- using PythonAnywhere's supported Selenium 4.26.1 release and platform-managed ChromeDriver instead of forcing a potentially mismatched driver path;
 - retrying brief stale-element reads when Vivid rerenders event metadata, without restarting Chrome or failing the game;
 - stopping only the current cycle if that retry fails, then trying again at the next 30-minute check;
 - opening a 30-minute circuit after two fully failed non-browser cycles;

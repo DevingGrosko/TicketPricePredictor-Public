@@ -185,6 +185,7 @@ class VividBrowser:
     def __init__(self, headless: bool = False, timeout: int = DEFAULT_CAPTURE_TIMEOUT):
         try:
             from selenium import webdriver
+            from selenium import __version__ as selenium_version
             from selenium.webdriver.remote.remote_connection import RemoteConnection
         except ModuleNotFoundError as exc:
             raise RuntimeError(
@@ -234,9 +235,18 @@ class VividBrowser:
         if headless:
             options.add_argument("--headless" if sys.platform.startswith("linux") else "--headless=new")
 
+        # PythonAnywhere requires Selenium to select its platform-matched
+        # ChromeDriver. Hard-coding /usr/local/bin/chromedriver can bypass that
+        # matching and produces intermittent DevToolsActivePort/start failures.
+        # Keep an explicit override only for environments that intentionally
+        # provide CHROMEDRIVER_PATH.
         driver_path = os.environ.get("CHROMEDRIVER_PATH")
-        if not driver_path and Path("/usr/local/bin/chromedriver").exists():
-            driver_path = "/usr/local/bin/chromedriver"
+        driver_mode = driver_path or "platform managed"
+        print(
+            f"Starting Chrome with Selenium {selenium_version} "
+            f"(driver: {driver_mode}).",
+            flush=True,
+        )
 
         if driver_path:
             from selenium.webdriver.chrome.service import Service
