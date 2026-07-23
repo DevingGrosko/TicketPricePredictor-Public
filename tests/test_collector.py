@@ -1,5 +1,6 @@
 import json
 import sqlite3
+import sys
 import tempfile
 import unittest
 from types import SimpleNamespace
@@ -27,6 +28,7 @@ from collector import (
     record_cycle_result,
     registry_row_is_excluded,
     retire_url,
+    run_isolated_collector_command,
     run_collector,
     select_due_urls,
     write_capture_audit,
@@ -250,6 +252,19 @@ class ScheduleTests(unittest.TestCase):
 
 
 class GuardrailTests(unittest.TestCase):
+    @patch("collector.subprocess.run")
+    def test_always_on_cycle_uses_a_fresh_python_process(self, run):
+        run.return_value = SimpleNamespace(returncode=0)
+
+        status = run_isolated_collector_command(Path("/tmp/events.json"), "run", 25)
+
+        self.assertEqual(status, 0)
+        argv = run.call_args.args[0]
+        self.assertEqual(argv[:2], [sys.executable, "-u"])
+        self.assertIn("/tmp/events.json", argv)
+        self.assertEqual(argv[-4:], ["run", "--headless", "--timeout", "25"])
+        self.assertFalse(run.call_args.kwargs["check"])
+
     @patch("collector.time.sleep")
     @patch("collector.os.getuid", return_value=12345)
     @patch("collector.Path.exists", return_value=True)

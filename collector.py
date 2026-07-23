@@ -1234,6 +1234,29 @@ def show_status(registry_path: Path) -> None:
             print(f"{label}\n  {state}; {'due' if due else reason}\n  {url}")
 
 
+def run_isolated_collector_command(
+    registry_path: Path,
+    command: str,
+    timeout: int,
+) -> int:
+    """Run one browser-using command in a fresh, fully-reaped Python process."""
+    if command not in {"run", "discover"}:
+        raise ValueError(f"Unsupported isolated collector command: {command}")
+    argv = [
+        sys.executable,
+        "-u",
+        str(Path(__file__).resolve()),
+        "--registry",
+        str(registry_path),
+        command,
+        "--headless",
+        "--timeout",
+        str(timeout),
+    ]
+    completed = subprocess.run(argv, check=False)
+    return completed.returncode
+
+
 def watch_collector(
     registry_path: Path,
     check_every: int,
@@ -1256,8 +1279,24 @@ def watch_collector(
             registry = load_registry(registry_path)
             if discover_automatically and discovery_due(registry, datetime.now(timezone.utc)):
                 print("Refreshing the next 30 days of stadium schedules...", flush=True)
-                discover_events(registry_path, headless=True, timeout=timeout)
-            run_collector(registry_path, force=False, headless=True, timeout=timeout)
+                discovery_status = run_isolated_collector_command(
+                    registry_path, "discover", timeout
+                )
+                if discovery_status:
+                    print(
+                        f"Discovery process exited with status {discovery_status}; "
+                        "the next service cycle will try again.",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+            cycle_status = run_isolated_collector_command(registry_path, "run", timeout)
+            if cycle_status:
+                print(
+                    f"Collector cycle exited with status {cycle_status}; "
+                    "the service remains running and will retry when due.",
+                    file=sys.stderr,
+                    flush=True,
+                )
         except Exception as exc:
             print(f"SERVICE ERROR: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
             write_health("error", error=f"{type(exc).__name__}: {exc}")
