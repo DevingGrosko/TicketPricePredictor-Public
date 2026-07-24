@@ -7,7 +7,7 @@
   <div class="result-heading">
     <div>
       <span class="section-kicker">{% if mode == 'single' %}Single-game analysis{% else %}Market trend{% endif %}</span>
-      <h1>{% if mode == 'single' %}Price history for one game{% else %}Average price movement{% endif %}</h1>
+      <h1>{% if mode == 'single' %}Price history for one game{% else %}Average lowest-price movement{% endif %}</h1>
       <p>{{ place }} <span>&middot;</span> Section {{ section }}{% if mode == 'single' %} <span>&middot;</span> {{ gameLabel }}{% endif %}</p>
     </div>
     <div class="result-badge"><small>Sample</small><strong>{{ totalGames }} game{% if totalGames != 1 %}s{% endif %}</strong></div>
@@ -16,7 +16,7 @@
   <div class="result-grid">
     <article class="chart-card">
       <div class="chart-card__top">
-        <div><span>Price timeline</span><strong>{% if displayType == 'money' %}Relative movement{% else %}Average listed price{% endif %}</strong></div>
+        <div><span>Price timeline</span><strong>{% if displayType == 'money' %}Relative movement{% elif mode == 'single' %}Lowest listed price{% else %}Average lowest listed price{% endif %}</strong></div>
         <a class="view-toggle" href="{{ url_for('graph', display=displayType, event=place, section=section, mode=mode, game=game) }}">Show {{ displayLabel }} view</a>
       </div>
       {% if error %}
@@ -26,7 +26,7 @@
           <div class="empty-state"><span>!</span><h2>Not enough comparable data</h2><p>This section does not yet have enough overlapping price history across multiple games. Try another section.</p><a class="button button--primary" href="{{ url_for('home') }}#explore">Check another section</a></div>
         {% endif %}
       {% else %}
-        <div class="interactive-chart" data-display-mode="{{ displayMode }}">
+        <div class="interactive-chart" data-display-mode="{{ displayMode }}" data-analysis-mode="{{ mode }}">
           <script type="application/json" class="interactive-chart__data">{{ {"x": chartX, "y": chartY} | tojson }}</script>
           <svg class="interactive-chart__svg" viewBox="0 0 900 520" role="img" aria-label="Interactive ticket price trend for {{ place }}, section {{ section }}"></svg>
           <div class="interactive-chart__tooltip" role="status" hidden></div>
@@ -50,4 +50,4 @@
 </section>
 {% endblock %}
 
-{% block scripts %}<script src="{{ url_for('static', filename='js/graph.js') }}?v=1"></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/graph.js') }}?v=2"></script>{% endblock %}

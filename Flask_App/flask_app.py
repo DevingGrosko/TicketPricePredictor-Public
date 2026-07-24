@@ -127,7 +127,7 @@ def graph():
             totalGames=totalGames,
         )
 
-    img = new_graph.create_plot(x, y, display_mode)
+    img = new_graph.create_plot(x, y, display_mode, mode)
 
     return render_template("graph.html", img=img, chartX=x, chartY=y, displayMode=display_mode,
                            place=place, section=section, mode=mode, game=game, gameLabel=game_label,
