@@ -355,6 +355,10 @@ class VividBrowser:
         """Load a Vivid venue page and return its MLB event links."""
         from selenium.common.exceptions import TimeoutException
 
+        # page_load_strategy="none" can leave the previous venue's DOM visible
+        # briefly after get(). Clear it first so we never return stale links
+        # from the stadium visited immediately before this one.
+        self.driver.get("about:blank")
         try:
             self.driver.get(venue_url)
         except TimeoutException:
@@ -1065,7 +1069,24 @@ def run_remote_collector(
         f"{len(failures)} capture failures, {len(discovery_failures)} discovery failures.",
         flush=True,
     )
-    return 1 if failures or discovery_failures else 0
+    return remote_cycle_exit_code(
+        due=len(due_urls),
+        succeeded=succeeded,
+        failures=len(failures),
+        discovery_failures=len(discovery_failures),
+    )
+
+
+def remote_cycle_exit_code(
+    due: int,
+    succeeded: int,
+    failures: int,
+    discovery_failures: int,
+) -> int:
+    """Fail only when a cycle produced no usable collection result."""
+    all_discovery_failed = discovery_failures >= len(VENUE_FEEDS)
+    all_due_captures_failed = due > 0 and succeeded == 0 and failures > 0
+    return 1 if all_discovery_failed or all_due_captures_failed else 0
 
 
 def load_runtime_state(state_file: Path = DEFAULT_STATE_FILE) -> dict[str, Any]:

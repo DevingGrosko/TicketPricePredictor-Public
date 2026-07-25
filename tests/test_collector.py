@@ -3,7 +3,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -13,6 +13,7 @@ from collector import (
     SectionSnapshot,
     SnapshotParser,
     VENUE_FEEDS,
+    VividBrowser,
     add_urls,
     browser_failure_requires_immediate_cooldown,
     cpu_budget_allows_capture,
@@ -26,6 +27,7 @@ from collector import (
     load_registry,
     load_runtime_state,
     record_cycle_result,
+    remote_cycle_exit_code,
     registry_row_is_excluded,
     retire_url,
     run_isolated_collector_command,
@@ -114,6 +116,71 @@ class SnapshotParserTests(unittest.TestCase):
 
 
 class ScheduleTests(unittest.TestCase):
+    def test_venue_discovery_clears_the_previous_stadium_page(self):
+        requested = "https://www.vividseats.com/citizens-bank-park-tickets/venue/3125"
+        expected = (
+            "https://www.vividseats.com/philadelphia-phillies-tickets-"
+            "citizens-bank-park-7-25-2026--sports-mlb-baseball/production/5966580"
+        )
+
+        class FakeDriver:
+            def __init__(self):
+                self.urls = []
+                self.current = "old"
+
+            def get(self, url):
+                self.urls.append(url)
+                self.current = url
+
+            @property
+            def page_source(self):
+                if self.current == requested:
+                    return f'<a href="{expected}">game</a>'
+                return '<a href="/old--sports-mlb-baseball/production/1">old</a>'
+
+        browser = VividBrowser.__new__(VividBrowser)
+        browser.driver = FakeDriver()
+        browser.timeout = 1
+
+        selenium = ModuleType("selenium")
+        selenium_common = ModuleType("selenium.common")
+        selenium_exceptions = ModuleType("selenium.common.exceptions")
+        selenium_exceptions.TimeoutException = TimeoutError
+        with patch.dict(
+            sys.modules,
+            {
+                "selenium": selenium,
+                "selenium.common": selenium_common,
+                "selenium.common.exceptions": selenium_exceptions,
+            },
+        ):
+            urls = browser.discover_event_urls(requested)
+
+        self.assertEqual(browser.driver.urls[:2], ["about:blank", requested])
+        self.assertEqual(urls, {expected})
+
+    def test_remote_cycle_allows_partial_success_to_retry_later(self):
+        self.assertEqual(
+            remote_cycle_exit_code(
+                due=4,
+                succeeded=3,
+                failures=1,
+                discovery_failures=0,
+            ),
+            0,
+        )
+
+    def test_remote_cycle_fails_when_every_due_capture_fails(self):
+        self.assertEqual(
+            remote_cycle_exit_code(
+                due=4,
+                succeeded=0,
+                failures=4,
+                discovery_failures=0,
+            ),
+            1,
+        )
+
     def test_batch_timing_grace_keeps_games_in_the_next_thirty_minute_cycle(self):
         now = datetime(2026, 7, 20, 17, 20, tzinfo=timezone.utc)
         event = SimpleNamespace(
