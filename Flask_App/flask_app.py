@@ -16,7 +16,10 @@ from models import CreateModel, Event, Iteration, clean_event_title, event_has_c
 # Load .env ONLY in local dev (PythonAnywhere won’t need it)
 try:
     from dotenv import load_dotenv
-    load_dotenv()  # no-op if python-dotenv not installed
+    # PythonAnywhere reloads workers without necessarily clearing values that
+    # an earlier worker loaded. The server-owned .env file is authoritative
+    # for rotated collector credentials.
+    load_dotenv(override=True)  # no-op if python-dotenv is not installed
 except Exception:
     pass
 
