@@ -659,7 +659,12 @@ def is_due(session: Any, url: str, now: datetime, force: bool = False) -> tuple[
     return False, f"next capture after {due_at.astimezone().strftime('%Y-%m-%d %H:%M')}"
 
 
-def store_snapshot(url: str, event_date: datetime, snapshot: EventSnapshot) -> tuple[int, int]:
+def store_snapshot(
+    url: str,
+    event_date: datetime,
+    snapshot: EventSnapshot,
+    captured_at: datetime | None = None,
+) -> tuple[int, int]:
     SessionLocal = CreateModel().getSession()
     with SessionLocal() as session:
         event = session.query(Event).filter(Event.URL == url).first()
@@ -681,6 +686,8 @@ def store_snapshot(url: str, event_date: datetime, snapshot: EventSnapshot) -> t
             event.event_sections = list(event.event_sections or []) + [s for s in section_names if s not in known]
 
         iteration = Iteration(event=event)
+        if captured_at is not None:
+            iteration.captured_at = captured_at
         session.add(iteration)
         session.add_all(
             Ticket(
@@ -693,6 +700,122 @@ def store_snapshot(url: str, event_date: datetime, snapshot: EventSnapshot) -> t
         )
         session.commit()
         return event.id, iteration.id
+
+
+def snapshot_to_payload(
+    url: str,
+    event_date: datetime,
+    captured_at: datetime,
+    snapshot: EventSnapshot,
+) -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "captured_at": captured_at.isoformat(),
+        "event_date": event_date.isoformat(),
+        "source_url": validated_vivid_url(url),
+        "source_id": snapshot.source_id,
+        "title": snapshot.title,
+        "venue": snapshot.venue,
+        "section_count": len(snapshot.sections),
+        "sections": [asdict(section) for section in snapshot.sections],
+    }
+
+
+def snapshot_from_payload(payload: dict[str, Any]) -> tuple[str, datetime, datetime, EventSnapshot]:
+    """Validate a remotely captured snapshot before it reaches the database."""
+    if payload.get("schema_version") != 1:
+        raise ValueError("Unsupported snapshot schema version.")
+
+    url = validated_vivid_url(str(payload.get("source_url") or ""))
+    event_date = parse_iso_datetime(str(payload.get("event_date") or ""))
+    captured_at = parse_iso_datetime(str(payload.get("captured_at") or ""))
+    if event_date is None or captured_at is None:
+        raise ValueError("Snapshot is missing a valid event or capture time.")
+
+    title = clean_event_title(str(payload.get("title") or ""))
+    venue = str(payload.get("venue") or "").strip()
+    source_id = str(payload.get("source_id") or "").strip()
+    production_match = re.search(r"/production/(\d+)", url)
+    if not title or not venue or not source_id:
+        raise ValueError("Snapshot is missing its title, venue, or source ID.")
+    if production_match is None or production_match.group(1) != source_id:
+        raise ValueError("Snapshot source ID does not match its Vivid URL.")
+
+    raw_sections = payload.get("sections")
+    if not isinstance(raw_sections, list):
+        raise ValueError("Snapshot sections must be a list.")
+    sections: list[SectionSnapshot] = []
+    seen: set[str] = set()
+    for raw in raw_sections:
+        if not isinstance(raw, dict):
+            raise ValueError("Snapshot contains an invalid section row.")
+        section = " ".join(str(raw.get("section") or "").split())
+        normalized = section.lower()
+        if not section or normalized in seen:
+            raise ValueError("Snapshot contains a blank or duplicate section.")
+        seen.add(normalized)
+        try:
+            price = int(raw["price"])
+            listing_count = int(raw["listing_count"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("Snapshot contains an invalid price or listing count.") from exc
+        if price < 0 or listing_count < 1:
+            raise ValueError("Snapshot prices and listing counts must be positive.")
+        if str(raw.get("price_source") or "p") != "p":
+            raise ValueError("Snapshot price source must be Vivid's displayed price.")
+        sections.append(
+            SectionSnapshot(
+                section=section,
+                price=price,
+                listing_count=listing_count,
+                row=str(raw.get("row") or ""),
+                quantity=str(raw.get("quantity") or ""),
+                displayed_price=str(raw.get("displayed_price") or ""),
+                alternate_price=str(raw.get("alternate_price") or ""),
+                price_source="p",
+            )
+        )
+
+    if len(sections) < MIN_USABLE_SECTIONS:
+        raise ValueError(
+            f"Capture rejected: only {len(sections)} usable sections; "
+            f"minimum is {MIN_USABLE_SECTIONS}."
+        )
+    if payload.get("section_count") != len(sections):
+        raise ValueError("Snapshot section count does not match its contents.")
+    return (
+        url,
+        event_date,
+        captured_at,
+        EventSnapshot(
+            source_id=source_id,
+            title=title,
+            venue=venue,
+            sections=tuple(sections),
+        ),
+    )
+
+
+def post_snapshot(endpoint: str, token: str, payload: dict[str, Any], timeout: int = 30) -> dict[str, Any]:
+    request = urllib.request.Request(
+        endpoint,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+            "User-Agent": "TicketPricePredictor-Collector/1.0",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            result = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"Snapshot upload failed with HTTP {exc.code}: {detail}") from exc
+    if not isinstance(result, dict) or result.get("status") not in {"stored", "duplicate"}:
+        raise RuntimeError(f"Unexpected snapshot upload response: {result!r}")
+    return result
 
 
 def database_path() -> Path:
@@ -782,6 +905,167 @@ def show_health(health_file: Path = DEFAULT_HEALTH_FILE) -> None:
         return
     value = json.loads(health_file.read_text(encoding="utf-8"))
     print(json.dumps(value, indent=2))
+
+
+def run_smoke_capture(url: str, headless: bool, timeout: int, output: Path) -> int:
+    """Capture and validate one event without touching the production database."""
+    browser: VividBrowser | None = None
+    try:
+        browser = VividBrowser(headless=headless, timeout=timeout)
+        payload, event_date = browser.capture(url)
+        snapshot = SnapshotParser.parse(payload)
+        result = {
+            "status": "success",
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "event_date": event_date.isoformat(),
+            "source_url": url,
+            "source_id": snapshot.source_id,
+            "title": snapshot.title,
+            "venue": snapshot.venue,
+            "section_count": len(snapshot.sections),
+            "lowest_section_price": min(section.price for section in snapshot.sections),
+            "highest_section_price": max(section.price for section in snapshot.sections),
+            "sections": [asdict(section) for section in snapshot.sections],
+        }
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(result, indent=2), encoding="utf-8")
+        print(
+            f"SMOKE TEST PASSED: captured {len(snapshot.sections)} sections for "
+            f"{snapshot.title} at {snapshot.venue}.",
+            flush=True,
+        )
+        print(f"Result written to {output}", flush=True)
+        return 0
+    finally:
+        if browser is not None:
+            browser.close()
+
+
+def run_remote_collector(
+    endpoint: str,
+    token: str,
+    headless: bool,
+    timeout: int,
+    health_output: Path,
+) -> int:
+    """Discover, capture, and upload due games from an ephemeral runner."""
+    started_at = datetime.now(timezone.utc)
+    today = started_at.astimezone(NEW_YORK).date()
+    horizon = today + timedelta(days=3)
+    discovered: set[str] = set()
+    discovery_failures: list[str] = []
+
+    browser: VividBrowser | None = None
+    try:
+        browser = VividBrowser(headless=headless, timeout=timeout)
+        for venue, venue_url in VENUE_FEEDS.items():
+            try:
+                venue_urls = browser.discover_event_urls(venue_url)
+                discovered.update(venue_urls)
+                print(f"{venue}: discovered {len(venue_urls)} MLB event links.", flush=True)
+            except Exception as exc:
+                message = f"{venue}: {type(exc).__name__}: {exc}"
+                discovery_failures.append(message)
+                print(f"DISCOVERY FAILED: {message}", file=sys.stderr, flush=True)
+    finally:
+        if browser is not None:
+            try:
+                browser.close()
+            except Exception as exc:
+                print(
+                    f"Discovery browser cleanup warning: {type(exc).__name__}: {exc}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+
+    due_urls = sorted(
+        url
+        for url in discovered
+        if not registry_row_is_excluded({"url": url})
+        and (hint := event_date_from_url(url)) is not None
+        and today <= hint.date() <= horizon
+    )
+    print(f"{len(due_urls)} candidate games fall within the rolling date window.", flush=True)
+
+    capture_slot = started_at.replace(
+        minute=0 if started_at.minute < 30 else 30,
+        second=0,
+        microsecond=0,
+    )
+    succeeded = 0
+    skipped = 0
+    failures: list[str] = []
+    uploaded: list[dict[str, Any]] = []
+    for index, url in enumerate(due_urls, start=1):
+        event_browser: VividBrowser | None = None
+        try:
+            print(f"[{index}/{len(due_urls)}] Capturing {url}", flush=True)
+            event_browser = VividBrowser(headless=headless, timeout=timeout)
+            raw_payload, event_date = event_browser.capture(url)
+            hours_until_event = (as_utc(event_date) - datetime.now(timezone.utc)).total_seconds() / 3600
+            if hours_until_event <= 0:
+                skipped += 1
+                print(f"SKIP: event has started: {url}", flush=True)
+                continue
+            if hours_until_event > CAPTURE_WINDOW_HOURS:
+                skipped += 1
+                print(f"SKIP: event is outside the exact 72-hour window: {url}", flush=True)
+                continue
+
+            snapshot = SnapshotParser.parse(raw_payload)
+            payload = snapshot_to_payload(url, event_date, capture_slot, snapshot)
+            response = post_snapshot(endpoint, token, payload)
+            uploaded.append(
+                {
+                    "url": url,
+                    "title": snapshot.title,
+                    "venue": snapshot.venue,
+                    "sections": len(snapshot.sections),
+                    "result": response["status"],
+                }
+            )
+            succeeded += 1
+            print(
+                f"UPLOADED: {len(snapshot.sections)} sections for {snapshot.title} "
+                f"({response['status']}).",
+                flush=True,
+            )
+        except Exception as exc:
+            message = f"{url}: {type(exc).__name__}: {exc}"
+            failures.append(message)
+            print(f"FAILED: {message}", file=sys.stderr, flush=True)
+        finally:
+            if event_browser is not None:
+                try:
+                    event_browser.close()
+                except Exception as exc:
+                    print(
+                        f"Browser cleanup warning: {type(exc).__name__}: {exc}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+
+    result = {
+        "status": "healthy" if not failures and not discovery_failures else "degraded",
+        "started_at": started_at.isoformat(),
+        "capture_slot": capture_slot.isoformat(),
+        "discovered": len(discovered),
+        "due": len(due_urls),
+        "succeeded": succeeded,
+        "skipped": skipped,
+        "failed": len(failures),
+        "discovery_failed": len(discovery_failures),
+        "uploads": uploaded,
+        "errors": discovery_failures + failures,
+    }
+    health_output.parent.mkdir(parents=True, exist_ok=True)
+    health_output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    print(
+        f"Remote collection finished: {succeeded} uploaded, {skipped} skipped, "
+        f"{len(failures)} capture failures, {len(discovery_failures)} discovery failures.",
+        flush=True,
+    )
+    return 1 if failures or discovery_failures else 0
 
 
 def load_runtime_state(state_file: Path = DEFAULT_STATE_FILE) -> dict[str, Any]:
@@ -1347,6 +1631,28 @@ def build_parser() -> argparse.ArgumentParser:
     audit_parser.add_argument("--event-id", type=int)
     audit_parser.add_argument("--section")
     audit_parser.add_argument("--limit", type=int, default=20)
+    smoke_parser = subparsers.add_parser(
+        "smoke", help="Capture and validate one event without writing to the database."
+    )
+    smoke_parser.add_argument("url")
+    smoke_parser.add_argument("--headless", action="store_true")
+    smoke_parser.add_argument("--timeout", type=int, default=DEFAULT_CAPTURE_TIMEOUT)
+    smoke_parser.add_argument(
+        "--output", type=Path, default=PROJECT_DIR / "collector_smoke_result.json"
+    )
+    remote_parser = subparsers.add_parser(
+        "remote-run",
+        help="Discover and upload due snapshots without using a local database.",
+    )
+    remote_parser.add_argument("--endpoint", required=True)
+    remote_parser.add_argument("--token-env", default="COLLECTOR_INGEST_TOKEN")
+    remote_parser.add_argument("--headless", action="store_true")
+    remote_parser.add_argument("--timeout", type=int, default=45)
+    remote_parser.add_argument(
+        "--health-output",
+        type=Path,
+        default=PROJECT_DIR / "collector_remote_health.json",
+    )
     return parser
 
 
@@ -1380,6 +1686,19 @@ def main() -> int:
             raise ValueError("--limit must be at least 1")
         show_audit(args.event_id, args.section, args.limit)
         return 0
+    if args.command == "smoke":
+        return run_smoke_capture(args.url, args.headless, args.timeout, args.output)
+    if args.command == "remote-run":
+        token = os.environ.get(args.token_env, "")
+        if not token:
+            raise RuntimeError(f"Required secret environment variable is missing: {args.token_env}")
+        return run_remote_collector(
+            args.endpoint,
+            token,
+            args.headless,
+            args.timeout,
+            args.health_output,
+        )
     return 2
 
 

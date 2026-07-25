@@ -1,8 +1,17 @@
-from flask import Flask, render_template, request
-from sqlalchemy import select
-from graph_builder import GraphBuilder
-from models import CreateModel, Event, clean_event_title, event_has_complete_public_data
+from datetime import datetime, timedelta, timezone
+import hmac
 import os
+
+from flask import Flask, jsonify, render_template, request
+from sqlalchemy import select
+from collector import (
+    create_daily_backup,
+    snapshot_from_payload,
+    store_snapshot,
+    write_capture_audit,
+)
+from graph_builder import GraphBuilder
+from models import CreateModel, Event, Iteration, clean_event_title, event_has_complete_public_data
 
 # Load .env ONLY in local dev (PythonAnywhere won’t need it)
 try:
@@ -12,9 +21,93 @@ except Exception:
     pass
 
 app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 3 * 1024 * 1024
 
 # Use an environment value in production; the fallback is only for local demos.
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'development-only-secret-key')
+
+
+def authorized_collector_request():
+    configured = os.environ.get("COLLECTOR_INGEST_TOKEN", "")
+    supplied = request.headers.get("Authorization", "")
+    if not configured:
+        return False
+    expected = f"Bearer {configured}"
+    return hmac.compare_digest(supplied, expected)
+
+
+@app.post("/api/collector/snapshot")
+def ingest_collector_snapshot():
+    """Validate and atomically store one snapshot from the GitHub collector."""
+    if not authorized_collector_request():
+        return jsonify({"status": "error", "error": "unauthorized"}), 401
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        return jsonify({"status": "error", "error": "invalid JSON body"}), 400
+
+    try:
+        url, event_date, captured_at, snapshot = snapshot_from_payload(payload)
+        now = datetime.now(timezone.utc)
+        if abs((captured_at.astimezone(timezone.utc) - now).total_seconds()) > 2 * 3600:
+            raise ValueError("Snapshot capture time is outside the accepted two-hour clock window.")
+        if event_date.astimezone(timezone.utc) <= captured_at.astimezone(timezone.utc):
+            raise ValueError("The event had already started at the capture time.")
+        if event_date.astimezone(timezone.utc) - captured_at.astimezone(timezone.utc) > timedelta(
+            hours=72
+        ):
+            raise ValueError("The event is outside the 72-hour capture window.")
+
+        SessionLocal = CreateModel().getSession()
+        with SessionLocal() as session:
+            event = session.query(Event).filter(Event.URL == url).first()
+            duplicate = (
+                event is not None
+                and session.query(Iteration)
+                .filter(
+                    Iteration.event_id == event.id,
+                    Iteration.captured_at >= captured_at,
+                    Iteration.captured_at < captured_at + timedelta(seconds=1),
+                )
+                .first()
+                is not None
+            )
+            if duplicate:
+                return jsonify(
+                    {
+                        "status": "duplicate",
+                        "event_id": event.id,
+                        "captured_at": captured_at.isoformat(),
+                    }
+                )
+
+        create_daily_backup(now=now)
+        event_id, iteration_id = store_snapshot(
+            url,
+            event_date,
+            snapshot,
+            captured_at=captured_at,
+        )
+        write_capture_audit(
+            url,
+            event_date,
+            snapshot,
+            event_id,
+            iteration_id,
+            captured_at=captured_at,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        return jsonify({"status": "error", "error": str(exc)}), 400
+
+    return jsonify(
+        {
+            "status": "stored",
+            "event_id": event_id,
+            "iteration_id": iteration_id,
+            "sections": len(snapshot.sections),
+            "captured_at": captured_at.isoformat(),
+        }
+    ), 201
 
 
 def format_event_title(event):

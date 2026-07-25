@@ -16,6 +16,7 @@ collector_audit/
 collector_backups/
 collector_health.json
 collector_state.json
+collector_remote_health.json
 
 # Local artifacts
 *.log
