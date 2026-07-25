@@ -784,6 +784,40 @@ def show_health(health_file: Path = DEFAULT_HEALTH_FILE) -> None:
     print(json.dumps(value, indent=2))
 
 
+def run_smoke_capture(url: str, headless: bool, timeout: int, output: Path) -> int:
+    """Capture and validate one event without touching the production database."""
+    browser: VividBrowser | None = None
+    try:
+        browser = VividBrowser(headless=headless, timeout=timeout)
+        payload, event_date = browser.capture(url)
+        snapshot = SnapshotParser.parse(payload)
+        result = {
+            "status": "success",
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+            "event_date": event_date.isoformat(),
+            "source_url": url,
+            "source_id": snapshot.source_id,
+            "title": snapshot.title,
+            "venue": snapshot.venue,
+            "section_count": len(snapshot.sections),
+            "lowest_section_price": min(section.price for section in snapshot.sections),
+            "highest_section_price": max(section.price for section in snapshot.sections),
+            "sections": [asdict(section) for section in snapshot.sections],
+        }
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(result, indent=2), encoding="utf-8")
+        print(
+            f"SMOKE TEST PASSED: captured {len(snapshot.sections)} sections for "
+            f"{snapshot.title} at {snapshot.venue}.",
+            flush=True,
+        )
+        print(f"Result written to {output}", flush=True)
+        return 0
+    finally:
+        if browser is not None:
+            browser.close()
+
+
 def load_runtime_state(state_file: Path = DEFAULT_STATE_FILE) -> dict[str, Any]:
     if not state_file.exists():
         return {"consecutive_failed_cycles": 0, "cooldown_until": None}
@@ -1347,6 +1381,15 @@ def build_parser() -> argparse.ArgumentParser:
     audit_parser.add_argument("--event-id", type=int)
     audit_parser.add_argument("--section")
     audit_parser.add_argument("--limit", type=int, default=20)
+    smoke_parser = subparsers.add_parser(
+        "smoke", help="Capture and validate one event without writing to the database."
+    )
+    smoke_parser.add_argument("url")
+    smoke_parser.add_argument("--headless", action="store_true")
+    smoke_parser.add_argument("--timeout", type=int, default=DEFAULT_CAPTURE_TIMEOUT)
+    smoke_parser.add_argument(
+        "--output", type=Path, default=PROJECT_DIR / "collector_smoke_result.json"
+    )
     return parser
 
 
@@ -1380,6 +1423,8 @@ def main() -> int:
             raise ValueError("--limit must be at least 1")
         show_audit(args.event_id, args.section, args.limit)
         return 0
+    if args.command == "smoke":
+        return run_smoke_capture(args.url, args.headless, args.timeout, args.output)
     return 2
 
 
