@@ -959,28 +959,30 @@ def run_remote_collector(
     discovered: set[str] = set()
     discovery_failures: list[str] = []
 
-    browser: VividBrowser | None = None
-    try:
-        browser = VividBrowser(headless=headless, timeout=timeout)
-        for venue, venue_url in VENUE_FEEDS.items():
-            try:
-                venue_urls = browser.discover_event_urls(venue_url)
-                discovered.update(venue_urls)
-                print(f"{venue}: discovered {len(venue_urls)} MLB event links.", flush=True)
-            except Exception as exc:
-                message = f"{venue}: {type(exc).__name__}: {exc}"
-                discovery_failures.append(message)
-                print(f"DISCOVERY FAILED: {message}", file=sys.stderr, flush=True)
-    finally:
-        if browser is not None:
-            try:
-                browser.close()
-            except Exception as exc:
-                print(
-                    f"Discovery browser cleanup warning: {type(exc).__name__}: {exc}",
-                    file=sys.stderr,
-                    flush=True,
-                )
+    for venue, venue_url in VENUE_FEEDS.items():
+        venue_browser: VividBrowser | None = None
+        try:
+            # Vivid can retain the previous stadium DOM during a client-side
+            # navigation. A separate Chrome session per venue makes stale
+            # cross-stadium discovery impossible.
+            venue_browser = VividBrowser(headless=headless, timeout=timeout)
+            venue_urls = venue_browser.discover_event_urls(venue_url)
+            discovered.update(venue_urls)
+            print(f"{venue}: discovered {len(venue_urls)} MLB event links.", flush=True)
+        except Exception as exc:
+            message = f"{venue}: {type(exc).__name__}: {exc}"
+            discovery_failures.append(message)
+            print(f"DISCOVERY FAILED: {message}", file=sys.stderr, flush=True)
+        finally:
+            if venue_browser is not None:
+                try:
+                    venue_browser.close()
+                except Exception as exc:
+                    print(
+                        f"{venue} browser cleanup warning: {type(exc).__name__}: {exc}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
 
     due_urls = sorted(
         url
