@@ -39,6 +39,7 @@ DEFAULT_AUDIT_DIR = PROJECT_DIR / "collector_audit"
 DEFAULT_BACKUP_DIR = PROJECT_DIR / "collector_backups"
 DEFAULT_HEALTH_FILE = PROJECT_DIR / "collector_health.json"
 DEFAULT_STATE_FILE = PROJECT_DIR / "collector_state.json"
+DEFAULT_PENDING_DIR = PROJECT_DIR / "collector_pending"
 DEFAULT_CAPTURE_TIMEOUT = 25
 CAPTURE_WINDOW_HOURS = 72
 CAPTURE_SCHEDULE_GRACE = timedelta(minutes=5)
@@ -55,6 +56,7 @@ FAILURE_COOLDOWN = timedelta(minutes=30)
 CPU_USAGE_STOP_FRACTION = Decimal("0.97")
 CPU_MINIMUM_HEADROOM_SECONDS = Decimal("150")
 CPU_API_TIMEOUT_SECONDS = 5
+UPLOAD_RETRY_DELAYS_SECONDS = (2, 5, 10)
 NEW_YORK = ZoneInfo("America/New_York")
 VENUE_FEEDS = {
     "Nationals Park": "https://www.vividseats.com/nationals-park-tickets/venue/5597",
@@ -813,7 +815,22 @@ def snapshot_from_payload(payload: dict[str, Any]) -> tuple[str, datetime, datet
     )
 
 
-def post_snapshot(endpoint: str, token: str, payload: dict[str, Any], timeout: int = 30) -> dict[str, Any]:
+class SnapshotUploadError(RuntimeError):
+    """An upload failure that records whether retrying can succeed."""
+
+    def __init__(self, message: str, *, retryable: bool):
+        super().__init__(message)
+        self.retryable = retryable
+
+
+def post_snapshot(
+    endpoint: str,
+    token: str,
+    payload: dict[str, Any],
+    timeout: int = 30,
+    *,
+    opener: Any = urllib.request.urlopen,
+) -> dict[str, Any]:
     request = urllib.request.Request(
         endpoint,
         data=json.dumps(payload).encode("utf-8"),
@@ -825,14 +842,112 @@ def post_snapshot(endpoint: str, token: str, payload: dict[str, Any], timeout: i
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with opener(request, timeout=timeout) as response:
             result = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Snapshot upload failed with HTTP {exc.code}: {detail}") from exc
+        retryable = exc.code in {408, 425, 429} or 500 <= exc.code <= 599
+        summary = " ".join(detail.split())[:500]
+        raise SnapshotUploadError(
+            f"Snapshot upload failed with HTTP {exc.code}: {summary}",
+            retryable=retryable,
+        ) from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise SnapshotUploadError(
+            f"Snapshot upload transport failed: {exc}",
+            retryable=True,
+        ) from exc
     if not isinstance(result, dict) or result.get("status") not in {"stored", "duplicate"}:
-        raise RuntimeError(f"Unexpected snapshot upload response: {result!r}")
+        raise SnapshotUploadError(
+            f"Unexpected snapshot upload response: {result!r}",
+            retryable=False,
+        )
     return result
+
+
+def post_snapshot_with_retry(
+    endpoint: str,
+    token: str,
+    payload: dict[str, Any],
+    *,
+    timeout: int = 30,
+    retry_delays: tuple[int, ...] = UPLOAD_RETRY_DELAYS_SECONDS,
+    sleep: Any = time.sleep,
+    opener: Any = urllib.request.urlopen,
+) -> dict[str, Any]:
+    """Retry temporary PythonAnywhere failures without recapturing the event."""
+    for attempt, delay in enumerate((0, *retry_delays), start=1):
+        if delay:
+            print(f"Retrying snapshot upload in {delay} seconds.", flush=True)
+            sleep(delay)
+        try:
+            return post_snapshot(
+                endpoint,
+                token,
+                payload,
+                timeout=timeout,
+                opener=opener,
+            )
+        except SnapshotUploadError as exc:
+            if not exc.retryable or attempt > len(retry_delays):
+                raise
+            print(
+                f"Temporary snapshot upload failure on attempt {attempt}: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+    raise AssertionError("Upload retry loop exited unexpectedly.")
+
+
+def queue_snapshot(payload: dict[str, Any], pending_dir: Path) -> Path:
+    """Persist a validated snapshot before attempting network delivery."""
+    _url, _event_date, captured_at, snapshot = snapshot_from_payload(payload)
+    captured_utc = as_utc(captured_at)
+    filename = f"{captured_utc:%Y%m%dT%H%M%SZ}-{snapshot.source_id}.json"
+    pending_dir.mkdir(parents=True, exist_ok=True)
+    path = pending_dir / filename
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(json.dumps(payload, separators=(",", ":")) + "\n", encoding="utf-8")
+    temporary.replace(path)
+    return path
+
+
+def replay_pending_snapshots(
+    endpoint: str,
+    token: str,
+    pending_dir: Path,
+) -> tuple[int, bool, list[str]]:
+    """Deliver cached snapshots in order and retain anything still unavailable."""
+    pending_dir.mkdir(parents=True, exist_ok=True)
+    replayed = 0
+    errors: list[str] = []
+    for path in sorted(pending_dir.glob("*.json")):
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            snapshot_from_payload(payload)
+        except Exception as exc:
+            invalid = path.with_suffix(".invalid.json")
+            path.replace(invalid)
+            message = f"Invalid pending snapshot {path.name}: {type(exc).__name__}: {exc}"
+            errors.append(message)
+            print(f"QUEUE INVALID: {message}", file=sys.stderr, flush=True)
+            continue
+
+        try:
+            response = post_snapshot_with_retry(endpoint, token, payload)
+        except Exception as exc:
+            message = f"Pending snapshot {path.name}: {type(exc).__name__}: {exc}"
+            errors.append(message)
+            print(f"QUEUE DEFERRED: {message}", file=sys.stderr, flush=True)
+            return replayed, False, errors
+
+        path.unlink()
+        replayed += 1
+        print(
+            f"QUEUE DELIVERED: {path.name} ({response['status']}).",
+            flush=True,
+        )
+    return replayed, True, errors
 
 
 def database_path() -> Path:
@@ -1040,6 +1155,7 @@ def run_remote_collector(
     headless: bool,
     timeout: int,
     health_output: Path,
+    pending_dir: Path,
 ) -> int:
     """Discover, capture, and upload due games from an ephemeral runner."""
     started_at = datetime.now(timezone.utc)
@@ -1047,6 +1163,11 @@ def run_remote_collector(
     horizon = today + timedelta(days=3)
     discovered: set[str] = set()
     discovery_failures: list[str] = []
+    replayed, endpoint_available, queue_errors = replay_pending_snapshots(
+        endpoint,
+        token,
+        pending_dir,
+    )
 
     for venue, venue_url in VENUE_FEEDS.items():
         venue_browser: VividBrowser | None = None
@@ -1088,6 +1209,8 @@ def run_remote_collector(
         microsecond=0,
     )
     succeeded = 0
+    captured = 0
+    queued = 0
     skipped = 0
     failures: list[str] = []
     uploaded: list[dict[str, Any]] = []
@@ -1109,22 +1232,44 @@ def run_remote_collector(
 
             snapshot = SnapshotParser.parse(raw_payload)
             payload = snapshot_to_payload(url, event_date, capture_slot, snapshot)
-            response = post_snapshot(endpoint, token, payload)
-            uploaded.append(
-                {
-                    "url": url,
-                    "title": snapshot.title,
-                    "venue": snapshot.venue,
-                    "sections": len(snapshot.sections),
-                    "result": response["status"],
-                }
-            )
-            succeeded += 1
-            print(
-                f"UPLOADED: {len(snapshot.sections)} sections for {snapshot.title} "
-                f"({response['status']}).",
-                flush=True,
-            )
+            pending_path = queue_snapshot(payload, pending_dir)
+            captured += 1
+            if endpoint_available:
+                try:
+                    response = post_snapshot_with_retry(endpoint, token, payload)
+                except Exception as exc:
+                    endpoint_available = False
+                    queued += 1
+                    message = (
+                        f"Snapshot retained as {pending_path.name}: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+                    queue_errors.append(message)
+                    print(f"QUEUED: {message}", file=sys.stderr, flush=True)
+                else:
+                    pending_path.unlink()
+                    uploaded.append(
+                        {
+                            "url": url,
+                            "title": snapshot.title,
+                            "venue": snapshot.venue,
+                            "sections": len(snapshot.sections),
+                            "result": response["status"],
+                        }
+                    )
+                    succeeded += 1
+                    print(
+                        f"UPLOADED: {len(snapshot.sections)} sections for {snapshot.title} "
+                        f"({response['status']}).",
+                        flush=True,
+                    )
+            else:
+                queued += 1
+                print(
+                    f"QUEUED: {len(snapshot.sections)} sections for {snapshot.title} "
+                    f"as {pending_path.name}; endpoint is temporarily unavailable.",
+                    flush=True,
+                )
         except Exception as exc:
             message = f"{url}: {type(exc).__name__}: {exc}"
             failures.append(message)
@@ -1140,29 +1285,41 @@ def run_remote_collector(
                         flush=True,
                     )
 
+    pending_count = len(list(pending_dir.glob("*.json")))
+    if failures or discovery_failures:
+        status = "degraded"
+    elif pending_count:
+        status = "queued"
+    else:
+        status = "healthy"
     result = {
-        "status": "healthy" if not failures and not discovery_failures else "degraded",
+        "status": status,
         "started_at": started_at.isoformat(),
         "capture_slot": capture_slot.isoformat(),
         "discovered": len(discovered),
         "due": len(due_urls),
         "succeeded": succeeded,
+        "captured": captured,
+        "queued": queued,
+        "replayed": replayed,
+        "pending": pending_count,
         "skipped": skipped,
         "failed": len(failures),
         "discovery_failed": len(discovery_failures),
         "uploads": uploaded,
-        "errors": discovery_failures + failures,
+        "errors": discovery_failures + failures + queue_errors,
     }
     health_output.parent.mkdir(parents=True, exist_ok=True)
     health_output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
     print(
-        f"Remote collection finished: {succeeded} uploaded, {skipped} skipped, "
+        f"Remote collection finished: {succeeded} uploaded, {queued} queued, "
+        f"{replayed} replayed, {skipped} skipped, "
         f"{len(failures)} capture failures, {len(discovery_failures)} discovery failures.",
         flush=True,
     )
     return remote_cycle_exit_code(
         due=len(due_urls),
-        succeeded=succeeded,
+        succeeded=captured,
         failures=len(failures),
         discovery_failures=len(discovery_failures),
     )
@@ -1769,6 +1926,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=PROJECT_DIR / "collector_remote_health.json",
     )
+    remote_parser.add_argument(
+        "--pending-dir",
+        type=Path,
+        default=DEFAULT_PENDING_DIR,
+        help="Durable queue restored and saved by GitHub Actions.",
+    )
     return parser
 
 
@@ -1816,6 +1979,7 @@ def main() -> int:
             args.headless,
             args.timeout,
             args.health_output,
+            args.pending_dir,
         )
     return 2
 

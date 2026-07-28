@@ -19,6 +19,7 @@ collector_state.json
 collector_remote_health.json
 dispatcher_state.json
 dispatcher.lock
+collector_pending/
 
 # Local artifacts
 *.log
