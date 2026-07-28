@@ -159,6 +159,56 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual(browser.driver.urls[:2], ["about:blank", requested])
         self.assertEqual(urls, {expected})
 
+    def test_venue_discovery_waits_for_incremental_links_to_settle(self):
+        requested = "https://www.vividseats.com/yankee-stadium-tickets/venue/6135"
+        first = (
+            "https://www.vividseats.com/new-york-yankees-tickets-"
+            "yankee-stadium-7-28-2026--sports-mlb-baseball/production/1"
+        )
+        second = (
+            "https://www.vividseats.com/new-york-yankees-tickets-"
+            "yankee-stadium-7-29-2026--sports-mlb-baseball/production/2"
+        )
+
+        class IncrementalDriver:
+            def __init__(self):
+                self.reads = 0
+
+            def get(self, _url):
+                pass
+
+            @property
+            def page_source(self):
+                self.reads += 1
+                links = [first] if self.reads == 1 else [first, second]
+                return "".join(f'<a href="{url}">game</a>' for url in links)
+
+        browser = VividBrowser.__new__(VividBrowser)
+        browser.driver = IncrementalDriver()
+        browser.timeout = 10
+        clock = [0.0]
+
+        selenium = ModuleType("selenium")
+        selenium_common = ModuleType("selenium.common")
+        selenium_exceptions = ModuleType("selenium.common.exceptions")
+        selenium_exceptions.TimeoutException = TimeoutError
+        with (
+            patch.dict(
+                sys.modules,
+                {
+                    "selenium": selenium,
+                    "selenium.common": selenium_common,
+                    "selenium.common.exceptions": selenium_exceptions,
+                },
+            ),
+            patch("collector.time.monotonic", side_effect=lambda: clock[0]),
+            patch("collector.time.sleep", side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)),
+        ):
+            urls = browser.discover_event_urls(requested)
+
+        self.assertEqual(urls, {first, second})
+        self.assertGreaterEqual(clock[0], 2.0)
+
     def test_remote_cycle_allows_partial_success_to_retry_later(self):
         self.assertEqual(
             remote_cycle_exit_code(

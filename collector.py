@@ -44,6 +44,7 @@ CAPTURE_WINDOW_HOURS = 72
 CAPTURE_SCHEDULE_GRACE = timedelta(minutes=5)
 DISCOVERY_WINDOW_DAYS = 30
 DISCOVERY_INTERVAL = timedelta(days=1)
+DISCOVERY_SETTLE_SECONDS = 2.0
 MIN_USABLE_SECTIONS = 10
 AUDIT_RETENTION_DAYS = 30
 BACKUP_RETENTION_DAYS = 7
@@ -365,11 +366,23 @@ class VividBrowser:
             self.driver.execute_script("window.stop();")
 
         deadline = time.monotonic() + self.timeout
+        best_links: set[str] = set()
+        last_new_link_at: float | None = None
         while time.monotonic() < deadline:
             links = extract_mlb_event_urls(self.driver.page_source, venue_url)
-            if links:
-                return links
+            new_links = links - best_links
+            if new_links:
+                best_links.update(new_links)
+                last_new_link_at = time.monotonic()
+            elif (
+                best_links
+                and last_new_link_at is not None
+                and time.monotonic() - last_new_link_at >= DISCOVERY_SETTLE_SECONDS
+            ):
+                return best_links
             time.sleep(0.5)
+        if best_links:
+            return best_links
         raise TimeoutError(f"No MLB event links appeared within {self.timeout} seconds.")
 
     def _response_json(self, request_id: str) -> dict[str, Any] | None:
