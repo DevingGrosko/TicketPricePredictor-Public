@@ -1,10 +1,19 @@
 name: Collect ticket prices
 
+run-name: Collect ticket prices (${{ inputs.dispatch_source || github.event_name }})
+
 on:
   schedule:
-    # Offset from the top of the hour to avoid GitHub's busiest scheduler window.
-    - cron: "8,38 * * * *"
+    # Best-effort recovery trigger. PythonAnywhere dispatches the reliable
+    # :08/:38 cadence. Minute 23 maps to the same data slot, so ingest dedupes
+    # this backup if the normal dispatch already succeeded.
+    - cron: "23 */6 * * *"
   workflow_dispatch:
+    inputs:
+      dispatch_source:
+        description: Service that requested this collection cycle
+        required: false
+        default: manual
 
 concurrency:
   group: ticket-price-collector
