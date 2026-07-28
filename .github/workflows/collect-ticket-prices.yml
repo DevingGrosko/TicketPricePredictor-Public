@@ -5,8 +5,9 @@ run-name: Collect ticket prices (${{ inputs.dispatch_source || github.event_name
 on:
   schedule:
     # Best-effort recovery trigger. PythonAnywhere dispatches the reliable
-    # :08/:38 cadence because GitHub documents that cron runs may be dropped.
-    - cron: "8,38 * * * *"
+    # :08/:38 cadence. Minute 23 maps to the same data slot, so ingest dedupes
+    # this backup if the normal dispatch already succeeded.
+    - cron: "23 */6 * * *"
   workflow_dispatch:
     inputs:
       dispatch_source:

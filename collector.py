@@ -945,6 +945,82 @@ def run_smoke_capture(url: str, headless: bool, timeout: int, output: Path) -> i
             browser.close()
 
 
+def smoke_candidates(urls: set[str], now: datetime, limit: int = 5) -> list[str]:
+    """Return the nearest upcoming event URLs suitable for a live smoke test."""
+    today = now.astimezone(NEW_YORK).date()
+    horizon = today + timedelta(days=DISCOVERY_WINDOW_DAYS)
+    eligible = [
+        url
+        for url in urls
+        if not registry_row_is_excluded({"url": url})
+        and (hint := event_date_from_url(url)) is not None
+        and today <= hint.date() <= horizon
+    ]
+    return sorted(
+        eligible,
+        key=lambda url: (event_date_from_url(url), url),
+    )[:limit]
+
+
+def run_auto_smoke_capture(headless: bool, timeout: int, output: Path) -> int:
+    """Discover and capture the nearest live event without a hard-coded URL."""
+    errors: list[str] = []
+    candidates: list[str] = []
+
+    for venue, venue_url in VENUE_FEEDS.items():
+        browser: VividBrowser | None = None
+        try:
+            browser = VividBrowser(headless=headless, timeout=timeout)
+            discovered = browser.discover_event_urls(venue_url)
+            venue_candidates = smoke_candidates(
+                discovered, datetime.now(timezone.utc), limit=5
+            )
+            print(
+                f"SMOKE DISCOVERY: {venue} returned "
+                f"{len(venue_candidates)} upcoming candidates.",
+                flush=True,
+            )
+            candidates.extend(url for url in venue_candidates if url not in candidates)
+            if candidates:
+                break
+        except Exception as exc:
+            message = f"{venue}: {type(exc).__name__}: {exc}"
+            errors.append(message)
+            print(f"SMOKE DISCOVERY FAILED: {message}", file=sys.stderr, flush=True)
+        finally:
+            if browser is not None:
+                try:
+                    browser.close()
+                except Exception as exc:
+                    print(
+                        f"Browser cleanup warning: {type(exc).__name__}: {exc}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+
+    for url in candidates:
+        try:
+            print(f"SMOKE CAPTURE: trying {url}", flush=True)
+            return run_smoke_capture(url, headless, timeout, output)
+        except Exception as exc:
+            message = f"{url}: {type(exc).__name__}: {exc}"
+            errors.append(message)
+            print(f"SMOKE CAPTURE FAILED: {message}", file=sys.stderr, flush=True)
+
+    diagnostic = {
+        "status": "failure",
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "candidate_count": len(candidates),
+        "errors": errors,
+    }
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(diagnostic, indent=2), encoding="utf-8")
+    raise RuntimeError(
+        "No upcoming Vivid event could be captured. "
+        f"Tried {len(candidates)} candidates after {len(errors)} recorded errors."
+    )
+
+
 def run_remote_collector(
     endpoint: str,
     token: str,
@@ -1657,7 +1733,11 @@ def build_parser() -> argparse.ArgumentParser:
     smoke_parser = subparsers.add_parser(
         "smoke", help="Capture and validate one event without writing to the database."
     )
-    smoke_parser.add_argument("url")
+    smoke_parser.add_argument(
+        "url",
+        nargs="?",
+        help="Vivid event URL. When omitted, discover and test the nearest upcoming game.",
+    )
     smoke_parser.add_argument("--headless", action="store_true")
     smoke_parser.add_argument("--timeout", type=int, default=DEFAULT_CAPTURE_TIMEOUT)
     smoke_parser.add_argument(
@@ -1710,7 +1790,9 @@ def main() -> int:
         show_audit(args.event_id, args.section, args.limit)
         return 0
     if args.command == "smoke":
-        return run_smoke_capture(args.url, args.headless, args.timeout, args.output)
+        if args.url:
+            return run_smoke_capture(args.url, args.headless, args.timeout, args.output)
+        return run_auto_smoke_capture(args.headless, args.timeout, args.output)
     if args.command == "remote-run":
         token = os.environ.get(args.token_env, "")
         if not token:

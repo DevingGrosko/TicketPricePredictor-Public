@@ -12,9 +12,9 @@ on:
   workflow_dispatch:
     inputs:
       event_url:
-        description: Vivid Seats event URL to test
-        required: true
-        default: https://www.vividseats.com/washington-nationals-tickets-nationals-park-7-25-2026--sports-mlb-baseball/production/5967811
+        description: Optional Vivid Seats event URL (otherwise discovers the next game)
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -23,8 +23,6 @@ jobs:
   capture:
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    env:
-      DEFAULT_EVENT_URL: https://www.vividseats.com/washington-nationals-tickets-nationals-park-7-25-2026--sports-mlb-baseball/production/5967811
     steps:
       - uses: actions/checkout@v7
 
@@ -45,12 +43,13 @@ jobs:
         env:
           REQUESTED_EVENT_URL: ${{ inputs.event_url }}
         run: |
-          EVENT_URL="${REQUESTED_EVENT_URL:-$DEFAULT_EVENT_URL}"
-          python collector.py smoke \
-            "$EVENT_URL" \
-            --headless \
-            --timeout 45 \
-            --output collector_smoke_result.json
+          if [[ -n "$REQUESTED_EVENT_URL" ]]; then
+            python collector.py smoke "$REQUESTED_EVENT_URL" \
+              --headless --timeout 45 --output collector_smoke_result.json
+          else
+            python collector.py smoke \
+              --headless --timeout 45 --output collector_smoke_result.json
+          fi
 
       - name: Upload diagnostic result
         if: always()

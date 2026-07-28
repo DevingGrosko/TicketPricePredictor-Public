@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
-from collector import EventSnapshot, SectionSnapshot, run_smoke_capture
+from collector import EventSnapshot, SectionSnapshot, run_smoke_capture, smoke_candidates
 
 
 class FakeBrowser:
@@ -48,6 +48,26 @@ class SmokeCaptureTests(unittest.TestCase):
         self.assertEqual(payload["lowest_section_price"], 42)
         self.assertEqual(payload["highest_section_price"], 67)
         self.assertTrue(FakeBrowser.closed)
+
+    def test_smoke_candidates_choose_nearest_upcoming_games(self):
+        urls = {
+            "https://www.vividseats.com/team-tickets-venue-7-27-2026--sports-mlb-baseball/production/3",
+            "https://www.vividseats.com/team-tickets-venue-7-29-2026--sports-mlb-baseball/production/2",
+            "https://www.vividseats.com/team-tickets-venue-7-28-2026--sports-mlb-baseball/production/1",
+            "https://www.vividseats.com/team-tickets-venue-6-20-2026--sports-mlb-baseball/production/4",
+        }
+
+        candidates = smoke_candidates(
+            urls, datetime(2026, 7, 27, 12, tzinfo=timezone.utc), limit=2
+        )
+
+        self.assertEqual(
+            candidates,
+            [
+                "https://www.vividseats.com/team-tickets-venue-7-27-2026--sports-mlb-baseball/production/3",
+                "https://www.vividseats.com/team-tickets-venue-7-28-2026--sports-mlb-baseball/production/1",
+            ],
+        )
 
 
 if __name__ == "__main__":
