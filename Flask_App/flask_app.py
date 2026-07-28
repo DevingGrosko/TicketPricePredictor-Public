@@ -11,7 +11,15 @@ from collector import (
     write_capture_audit,
 )
 from graph_builder import GraphBuilder
-from models import CreateModel, Event, Iteration, clean_event_title, event_has_complete_public_data
+from models import (
+    CreateModel,
+    Event,
+    Iteration,
+    captured_datetime_for_storage,
+    clean_event_title,
+    event_datetime_eastern,
+    event_has_complete_public_data,
+)
 
 # Load .env ONLY in local dev (PythonAnywhere won’t need it)
 try:
@@ -62,6 +70,7 @@ def ingest_collector_snapshot():
             raise ValueError("The event is outside the 72-hour capture window.")
 
         SessionLocal = CreateModel().getSession()
+        captured_at_storage = captured_datetime_for_storage(captured_at)
         with SessionLocal() as session:
             event = session.query(Event).filter(Event.URL == url).first()
             duplicate = (
@@ -69,8 +78,9 @@ def ingest_collector_snapshot():
                 and session.query(Iteration)
                 .filter(
                     Iteration.event_id == event.id,
-                    Iteration.captured_at >= captured_at,
-                    Iteration.captured_at < captured_at + timedelta(seconds=1),
+                    Iteration.captured_at >= captured_at_storage,
+                    Iteration.captured_at
+                    < captured_at_storage + timedelta(seconds=1),
                 )
                 .first()
                 is not None
@@ -114,7 +124,7 @@ def ingest_collector_snapshot():
 
 
 def format_event_title(event):
-    event_date = event.event_date
+    event_date = event_datetime_eastern(event.event_date)
     hour = event_date.hour % 12 or 12
     date_label = f"{event_date:%b} {event_date.day}, {event_date.year}"
     time_label = f"{hour}:{event_date.minute:02d} {event_date:%p}"

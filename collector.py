@@ -30,7 +30,17 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import func
 
-from models import CreateModel, Event, Iteration, Ticket, clean_event_title
+from models import (
+    CreateModel,
+    Event,
+    Iteration,
+    Ticket,
+    captured_datetime_for_storage,
+    captured_datetime_utc,
+    clean_event_title,
+    event_datetime_for_storage,
+    event_datetime_utc,
+)
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
@@ -638,9 +648,8 @@ def discover_events(registry_path: Path, headless: bool, timeout: int) -> tuple[
 
 
 def as_utc(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=ZoneInfo("America/New_York"))
-    return value.astimezone(timezone.utc)
+    """Convert an event datetime to UTC, treating naive values as Eastern."""
+    return event_datetime_utc(value)
 
 
 def collection_interval(hours_until_event: float) -> timedelta | None:
@@ -668,7 +677,7 @@ def is_due(session: Any, url: str, now: datetime, force: bool = False) -> tuple[
     latest = session.query(func.max(Iteration.captured_at)).filter(Iteration.event_id == event.id).scalar()
     if latest is None:
         return True, "no snapshots"
-    next_capture = as_utc(latest) + interval
+    next_capture = captured_datetime_utc(latest) + interval
     # A batch can take several minutes because games are captured one after
     # another. Treat games due shortly after the cycle starts as due now so
     # they do not miss this slot and wait a full extra 30 minutes.
@@ -684,6 +693,7 @@ def store_snapshot(
     snapshot: EventSnapshot,
     captured_at: datetime | None = None,
 ) -> tuple[int, int]:
+    stored_event_date = event_datetime_for_storage(event_date)
     SessionLocal = CreateModel().getSession()
     with SessionLocal() as session:
         event = session.query(Event).filter(Event.URL == url).first()
@@ -691,7 +701,7 @@ def store_snapshot(
         if event is None:
             event = Event(
                 title=snapshot.title,
-                event_date=event_date,
+                event_date=stored_event_date,
                 event_sections=section_names,
                 URL=url,
                 Place=snapshot.venue,
@@ -699,14 +709,14 @@ def store_snapshot(
             session.add(event)
         else:
             event.title = snapshot.title
-            event.event_date = event_date
+            event.event_date = stored_event_date
             event.Place = snapshot.venue
             known = set(event.event_sections or [])
             event.event_sections = list(event.event_sections or []) + [s for s in section_names if s not in known]
 
         iteration = Iteration(event=event)
         if captured_at is not None:
-            iteration.captured_at = captured_at
+            iteration.captured_at = captured_datetime_for_storage(captured_at)
         session.add(iteration)
         session.add_all(
             Ticket(

@@ -17,6 +17,47 @@ INCOMPLETE_PUBLIC_EVENT_DATES = frozenset(
         date(2026, 7, 19),
     }
 )
+NEW_YORK = ZoneInfo("America/New_York")
+
+
+def event_datetime_utc(value: datetime) -> datetime:
+    """Interpret persisted event wall time as Eastern and return aware UTC."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=NEW_YORK)
+    return value.astimezone(timezone.utc)
+
+
+def captured_datetime_utc(value: datetime) -> datetime:
+    """Interpret persisted capture wall time as UTC and return aware UTC."""
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def event_datetime_for_storage(value: datetime) -> datetime:
+    """Store event times as naive Eastern wall time for SQLite compatibility."""
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(NEW_YORK).replace(tzinfo=None)
+
+
+def captured_datetime_for_storage(value: datetime) -> datetime:
+    """Store capture times as naive UTC wall time for SQLite compatibility."""
+    return captured_datetime_utc(value).replace(tzinfo=None)
+
+
+def event_datetime_eastern(value: datetime) -> datetime:
+    """Return an aware Eastern event time for labels and calendar-date checks."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=NEW_YORK)
+    return value.astimezone(NEW_YORK)
+
+
+def hours_before_event(event_date: datetime, captured_at: datetime) -> float:
+    """Calculate lead time without mixing Eastern and UTC wall clocks."""
+    return (
+        event_datetime_utc(event_date) - captured_datetime_utc(captured_at)
+    ).total_seconds() / 3600
 
 
 def clean_event_title(title: str) -> str:
@@ -34,7 +75,8 @@ def event_has_complete_public_data(event: "Event") -> bool:
     """Keep known incomplete collection days out of public views and analysis."""
     return bool(
         event.event_date
-        and event.event_date.date() not in INCOMPLETE_PUBLIC_EVENT_DATES
+        and event_datetime_eastern(event.event_date).date()
+        not in INCOMPLETE_PUBLIC_EVENT_DATES
     )
 
 
@@ -66,7 +108,9 @@ class Iteration(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     event_id: Mapped[int] = mapped_column(ForeignKey("event.id"), nullable=False)
     captured_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(ZoneInfo("America/New_York")), nullable=False
+        DateTime(),
+        default=lambda: captured_datetime_for_storage(datetime.now(timezone.utc)),
+        nullable=False,
     )
 
     # backref to parent Event
