@@ -17,6 +17,8 @@ collector_backups/
 collector_health.json
 collector_state.json
 collector_remote_health.json
+dispatcher_state.json
+dispatcher.lock
 
 # Local artifacts
 *.log
