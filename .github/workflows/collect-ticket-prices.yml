@@ -34,6 +34,14 @@ jobs:
           python-version: "3.13"
           cache: pip
 
+      - name: Restore pending snapshot queue
+        uses: actions/cache/restore@v5
+        with:
+          path: collector_pending
+          key: collector-pending-${{ github.run_id }}
+          restore-keys: |
+            collector-pending-
+
       - name: Install collector dependencies
         run: python -m pip install "selenium>=4.26.1,<5" "SQLAlchemy>=2,<3"
 
@@ -45,7 +53,15 @@ jobs:
             --endpoint https://bunnyjeff.pythonanywhere.com/api/collector/snapshot \
             --headless \
             --timeout 45 \
-            --health-output collector_remote_health.json
+            --health-output collector_remote_health.json \
+            --pending-dir collector_pending
+
+      - name: Save pending snapshot queue
+        if: always()
+        uses: actions/cache/save@v5
+        with:
+          path: collector_pending
+          key: collector-pending-${{ github.run_id }}
 
       - name: Upload collection report
         if: always()
