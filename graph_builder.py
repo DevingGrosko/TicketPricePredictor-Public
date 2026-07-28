@@ -1,6 +1,13 @@
 from itertools import zip_longest
 
-from models import CreateModel, Ticket, Iteration, Event, event_has_complete_public_data
+from models import (
+    CreateModel,
+    Ticket,
+    Iteration,
+    Event,
+    event_has_complete_public_data,
+    hours_before_event,
+)
 import io
 import base64
 import matplotlib
@@ -197,7 +204,7 @@ class GraphBuilder:
 
                 # 2) Event for this ticket (via iteration)
                 ev = t.iteration.event.event_date
-                x.append(round((ev - when_captured).total_seconds() / 3600,3))
+                x.append(round(hours_before_event(ev, when_captured), 3))
                 y.append(t.price)
 
             return x, y
