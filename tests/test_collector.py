@@ -231,6 +231,19 @@ class ScheduleTests(unittest.TestCase):
             1,
         )
 
+    def test_remote_cycle_fails_visibly_while_delivery_is_queued(self):
+        self.assertEqual(
+            remote_cycle_exit_code(
+                due=2,
+                succeeded=2,
+                failures=0,
+                discovery_failures=0,
+                pending=2,
+                delivery_failures=1,
+            ),
+            1,
+        )
+
     def test_batch_timing_grace_keeps_games_in_the_next_thirty_minute_cycle(self):
         now = datetime(2026, 7, 20, 17, 20, tzinfo=timezone.utc)
         event = SimpleNamespace(

@@ -122,6 +122,36 @@ class DeliveryQueueTests(unittest.TestCase):
         self.assertEqual(len(errors), 1)
         self.assertEqual(json.loads(original), retained)
 
+    def test_rejected_payload_does_not_block_newer_pending_snapshots(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            pending = Path(temporary)
+            rejected_path = queue_snapshot(valid_payload(), pending)
+            newer_payload = valid_payload()
+            newer_payload["captured_at"] = "2026-07-28T15:00:00+00:00"
+            delivered_path = queue_snapshot(newer_payload, pending)
+            responses = [
+                SnapshotUploadError(
+                    "stale payload",
+                    retryable=False,
+                    status_code=400,
+                ),
+                {"status": "stored"},
+            ]
+
+            with patch("collector.post_snapshot_with_retry", side_effect=responses):
+                replayed, available, errors = replay_pending_snapshots(
+                    "https://example.com/ingest",
+                    "token",
+                    pending,
+                )
+
+            self.assertEqual(replayed, 1)
+            self.assertTrue(available)
+            self.assertEqual(len(errors), 1)
+            self.assertFalse(rejected_path.exists())
+            self.assertTrue(rejected_path.with_suffix(".rejected").exists())
+            self.assertFalse(delivered_path.exists())
+
 
 if __name__ == "__main__":
     unittest.main()
