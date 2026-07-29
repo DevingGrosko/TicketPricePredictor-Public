@@ -292,6 +292,18 @@ class ScheduleTests(unittest.TestCase):
             VENUE_FEEDS["Truist Park"],
             "https://www.vividseats.com/truist-park-tickets/venue/14658",
         )
+        self.assertEqual(
+            VENUE_FEEDS["Wrigley Field"],
+            "https://www.vividseats.com/wrigley-field-tickets/venue/1905",
+        )
+        self.assertEqual(
+            VENUE_FEEDS["Dodger Stadium"],
+            "https://www.vividseats.com/dodger-stadium-tickets/venue/475",
+        )
+        self.assertEqual(
+            VENUE_FEEDS["Busch Stadium"],
+            "https://www.vividseats.com/busch-stadium-tickets/venue/248",
+        )
         self.assertFalse(registry_row_is_excluded({"venue": "Citi Field", "url": ""}))
         self.assertFalse(registry_row_is_excluded({"venue": "Truist Park", "url": ""}))
         self.assertTrue(
