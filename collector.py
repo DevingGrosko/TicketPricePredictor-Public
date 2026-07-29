@@ -939,7 +939,11 @@ def replay_pending_snapshots(
     pending_dir.mkdir(parents=True, exist_ok=True)
     replayed = 0
     errors: list[str] = []
-    for path in sorted(pending_dir.glob("*.json")):
+    pending_paths = sorted(
+        [*pending_dir.glob("*.json"), *pending_dir.glob("*.rejected")],
+        key=lambda path: path.name,
+    )
+    for path in pending_paths:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
             snapshot_from_payload(payload)
@@ -958,7 +962,8 @@ def replay_pending_snapshots(
             errors.append(message)
             if not exc.retryable and exc.status_code in {400, 409, 422}:
                 rejected = path.with_suffix(".rejected")
-                path.replace(rejected)
+                if path != rejected:
+                    path.replace(rejected)
                 print(f"QUEUE REJECTED: {message}", file=sys.stderr, flush=True)
                 continue
             print(f"QUEUE DEFERRED: {message}", file=sys.stderr, flush=True)
