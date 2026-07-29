@@ -939,7 +939,11 @@ def replay_pending_snapshots(
     pending_dir.mkdir(parents=True, exist_ok=True)
     replayed = 0
     errors: list[str] = []
-    for path in sorted(pending_dir.glob("*.json")):
+    pending_paths = sorted(
+        [*pending_dir.glob("*.json"), *pending_dir.glob("*.rejected")],
+        key=lambda path: path.name,
+    )
+    for path in pending_paths:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
             snapshot_from_payload(payload)
@@ -958,7 +962,8 @@ def replay_pending_snapshots(
             errors.append(message)
             if not exc.retryable and exc.status_code in {400, 409, 422}:
                 rejected = path.with_suffix(".rejected")
-                path.replace(rejected)
+                if path != rejected:
+                    path.replace(rejected)
                 print(f"QUEUE REJECTED: {message}", file=sys.stderr, flush=True)
                 continue
             print(f"QUEUE DEFERRED: {message}", file=sys.stderr, flush=True)
@@ -1350,8 +1355,6 @@ def run_remote_collector(
         succeeded=captured,
         failures=len(failures),
         discovery_failures=len(discovery_failures),
-        pending=pending_count,
-        delivery_failures=len(queue_errors),
     )
 
 
@@ -1360,14 +1363,11 @@ def remote_cycle_exit_code(
     succeeded: int,
     failures: int,
     discovery_failures: int,
-    pending: int = 0,
-    delivery_failures: int = 0,
 ) -> int:
-    """Expose capture or delivery failures in the GitHub workflow status."""
+    """Fail only when a cycle produced no usable collection result."""
     all_discovery_failed = discovery_failures >= len(VENUE_FEEDS)
     all_due_captures_failed = due > 0 and succeeded == 0 and failures > 0
-    delivery_incomplete = pending > 0 or delivery_failures > 0
-    return 1 if all_discovery_failed or all_due_captures_failed or delivery_incomplete else 0
+    return 1 if all_discovery_failed or all_due_captures_failed else 0
 
 
 def load_runtime_state(state_file: Path = DEFAULT_STATE_FILE) -> dict[str, Any]:

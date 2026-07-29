@@ -152,6 +152,21 @@ class DeliveryQueueTests(unittest.TestCase):
             self.assertTrue(rejected_path.with_suffix(".rejected").exists())
             self.assertFalse(delivered_path.exists())
 
+            with patch(
+                "collector.post_snapshot_with_retry",
+                return_value={"status": "stored"},
+            ):
+                replayed, available, errors = replay_pending_snapshots(
+                    "https://example.com/ingest",
+                    "token",
+                    pending,
+                )
+
+            self.assertEqual(replayed, 1)
+            self.assertTrue(available)
+            self.assertEqual(errors, [])
+            self.assertFalse(rejected_path.with_suffix(".rejected").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
