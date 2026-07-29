@@ -70,22 +70,20 @@ UPLOAD_RETRY_DELAYS_SECONDS = (2, 5, 10)
 NEW_YORK = ZoneInfo("America/New_York")
 VENUE_FEEDS = {
     "Nationals Park": "https://www.vividseats.com/nationals-park-tickets/venue/5597",
+    "Citi Field": "https://www.vividseats.com/citi-field-tickets/venue/6134",
     "Citizens Bank Park": "https://www.vividseats.com/citizens-bank-park-tickets/venue/3125",
+    "Truist Park": "https://www.vividseats.com/truist-park-tickets/venue/14658",
     "Yankee Stadium": "https://www.vividseats.com/yankee-stadium-tickets/venue/6135",
     "Fenway Park": "https://www.vividseats.com/fenway-park-tickets/venue/551",
     "Oriole Park at Camden Yards": "https://www.vividseats.com/camden-yards-tickets/venue/261",
 }
 EXCLUDED_VENUES = {
-    "citi field",
     "george m. steinbrenner field",
     "steinbrenner field",
-    "truist park",
 }
 EXCLUDED_URL_MARKERS = {
-    "citi-field",
     "george-m-steinbrenner-field",
     "steinbrenner-field",
-    "truist-park",
 }
 
 

@@ -283,11 +283,17 @@ class ScheduleTests(unittest.TestCase):
             "Pirates at Yankees",
         )
 
-    def test_excluded_parks_are_never_discovered_or_collected(self):
-        self.assertNotIn("Citi Field", VENUE_FEEDS)
-        self.assertNotIn("Truist Park", VENUE_FEEDS)
-        self.assertTrue(registry_row_is_excluded({"venue": "Citi Field", "url": ""}))
-        self.assertTrue(registry_row_is_excluded({"venue": "Truist Park", "url": ""}))
+    def test_full_time_mlb_parks_are_enabled_and_spring_park_stays_excluded(self):
+        self.assertEqual(
+            VENUE_FEEDS["Citi Field"],
+            "https://www.vividseats.com/citi-field-tickets/venue/6134",
+        )
+        self.assertEqual(
+            VENUE_FEEDS["Truist Park"],
+            "https://www.vividseats.com/truist-park-tickets/venue/14658",
+        )
+        self.assertFalse(registry_row_is_excluded({"venue": "Citi Field", "url": ""}))
+        self.assertFalse(registry_row_is_excluded({"venue": "Truist Park", "url": ""}))
         self.assertTrue(
             registry_row_is_excluded(
                 {
