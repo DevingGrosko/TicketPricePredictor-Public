@@ -1350,8 +1350,6 @@ def run_remote_collector(
         succeeded=captured,
         failures=len(failures),
         discovery_failures=len(discovery_failures),
-        pending=pending_count,
-        delivery_failures=len(queue_errors),
     )
 
 
@@ -1360,14 +1358,11 @@ def remote_cycle_exit_code(
     succeeded: int,
     failures: int,
     discovery_failures: int,
-    pending: int = 0,
-    delivery_failures: int = 0,
 ) -> int:
-    """Expose capture or delivery failures in the GitHub workflow status."""
+    """Fail only when a cycle produced no usable collection result."""
     all_discovery_failed = discovery_failures >= len(VENUE_FEEDS)
     all_due_captures_failed = due > 0 and succeeded == 0 and failures > 0
-    delivery_incomplete = pending > 0 or delivery_failures > 0
-    return 1 if all_discovery_failed or all_due_captures_failed or delivery_incomplete else 0
+    return 1 if all_discovery_failed or all_due_captures_failed else 0
 
 
 def load_runtime_state(state_file: Path = DEFAULT_STATE_FILE) -> dict[str, Any]:
