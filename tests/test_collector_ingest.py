@@ -1,4 +1,5 @@
 import os
+import copy
 import sys
 import tempfile
 import types
@@ -90,6 +91,30 @@ class CollectorIngestTests(unittest.TestCase):
         with Session() as session:
             self.assertEqual(session.query(Iteration).count(), 1)
             self.assertEqual(session.query(Ticket).count(), 10)
+        backup.assert_called_once()
+        audit.assert_called_once()
+
+    @patch("Flask_App.flask_app.write_capture_audit")
+    @patch("Flask_App.flask_app.create_daily_backup")
+    def test_accepts_authenticated_snapshot_replayed_after_temporary_outage(
+        self,
+        backup,
+        audit,
+    ):
+        payload = copy.deepcopy(self.payload)
+        captured_at = datetime.now(timezone.utc) - timedelta(hours=12)
+        event_date = captured_at + timedelta(hours=24)
+        payload["captured_at"] = captured_at.isoformat()
+        payload["event_date"] = event_date.isoformat()
+
+        response = self.client.post(
+            "/api/collector/snapshot",
+            json=payload,
+            headers={"Authorization": "Bearer test-ingest-token"},
+        )
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.get_json()["status"], "stored")
         backup.assert_called_once()
         audit.assert_called_once()
 

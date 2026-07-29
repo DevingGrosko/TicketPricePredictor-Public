@@ -33,6 +33,8 @@ except Exception:
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 3 * 1024 * 1024
+MAX_SNAPSHOT_REPLAY_AGE = timedelta(days=7)
+MAX_SNAPSHOT_CLOCK_SKEW = timedelta(minutes=5)
 
 # Use an environment value in production; the fallback is only for local demos.
 app.config['SECRET_KEY'] = os.environ.get('FLASK_SECRET_KEY', 'development-only-secret-key')
@@ -60,8 +62,11 @@ def ingest_collector_snapshot():
     try:
         url, event_date, captured_at, snapshot = snapshot_from_payload(payload)
         now = datetime.now(timezone.utc)
-        if abs((captured_at.astimezone(timezone.utc) - now).total_seconds()) > 2 * 3600:
-            raise ValueError("Snapshot capture time is outside the accepted two-hour clock window.")
+        captured_at_utc = captured_at.astimezone(timezone.utc)
+        if captured_at_utc > now + MAX_SNAPSHOT_CLOCK_SKEW:
+            raise ValueError("Snapshot capture time is in the future.")
+        if now - captured_at_utc > MAX_SNAPSHOT_REPLAY_AGE:
+            raise ValueError("Snapshot is older than the seven-day replay window.")
         if event_date.astimezone(timezone.utc) <= captured_at.astimezone(timezone.utc):
             raise ValueError("The event had already started at the capture time.")
         if event_date.astimezone(timezone.utc) - captured_at.astimezone(timezone.utc) > timedelta(

@@ -828,9 +828,16 @@ def snapshot_from_payload(payload: dict[str, Any]) -> tuple[str, datetime, datet
 class SnapshotUploadError(RuntimeError):
     """An upload failure that records whether retrying can succeed."""
 
-    def __init__(self, message: str, *, retryable: bool):
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool,
+        status_code: int | None = None,
+    ):
         super().__init__(message)
         self.retryable = retryable
+        self.status_code = status_code
 
 
 def post_snapshot(
@@ -861,6 +868,7 @@ def post_snapshot(
         raise SnapshotUploadError(
             f"Snapshot upload failed with HTTP {exc.code}: {summary}",
             retryable=retryable,
+            status_code=exc.code,
         ) from exc
     except (urllib.error.URLError, TimeoutError) as exc:
         raise SnapshotUploadError(
@@ -945,6 +953,16 @@ def replay_pending_snapshots(
 
         try:
             response = post_snapshot_with_retry(endpoint, token, payload)
+        except SnapshotUploadError as exc:
+            message = f"Pending snapshot {path.name}: {type(exc).__name__}: {exc}"
+            errors.append(message)
+            if not exc.retryable and exc.status_code in {400, 409, 422}:
+                rejected = path.with_suffix(".rejected")
+                path.replace(rejected)
+                print(f"QUEUE REJECTED: {message}", file=sys.stderr, flush=True)
+                continue
+            print(f"QUEUE DEFERRED: {message}", file=sys.stderr, flush=True)
+            return replayed, False, errors
         except Exception as exc:
             message = f"Pending snapshot {path.name}: {type(exc).__name__}: {exc}"
             errors.append(message)
@@ -1332,6 +1350,8 @@ def run_remote_collector(
         succeeded=captured,
         failures=len(failures),
         discovery_failures=len(discovery_failures),
+        pending=pending_count,
+        delivery_failures=len(queue_errors),
     )
 
 
@@ -1340,11 +1360,14 @@ def remote_cycle_exit_code(
     succeeded: int,
     failures: int,
     discovery_failures: int,
+    pending: int = 0,
+    delivery_failures: int = 0,
 ) -> int:
-    """Fail only when a cycle produced no usable collection result."""
+    """Expose capture or delivery failures in the GitHub workflow status."""
     all_discovery_failed = discovery_failures >= len(VENUE_FEEDS)
     all_due_captures_failed = due > 0 and succeeded == 0 and failures > 0
-    return 1 if all_discovery_failed or all_due_captures_failed else 0
+    delivery_incomplete = pending > 0 or delivery_failures > 0
+    return 1 if all_discovery_failed or all_due_captures_failed or delivery_incomplete else 0
 
 
 def load_runtime_state(state_file: Path = DEFAULT_STATE_FILE) -> dict[str, Any]:
