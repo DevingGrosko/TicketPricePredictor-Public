@@ -92,37 +92,6 @@ replace_once(
 )
 
 replace_once(
-    ".github/workflows/deploy-pythonanywhere.yml",
-    '''            home_status="$(curl -sS --max-time 15 -o /tmp/home.html -w '%{http_code}' "$base/" || true)"
-            nfl_status="$(curl -sS --max-time 15 -o /tmp/nfl.html -w '%{http_code}' "$base/nfl" || true)"
-            concerts_status="$(curl -sS --max-time 15 -o /tmp/concerts.html -w '%{http_code}' "$base/concerts" || true)"''',
-    '''            home_status="$(curl -sS --max-time 15 -o /tmp/home.html -w '%{http_code}' "$base/" || true)"
-            home_is_nfl="false"
-            if grep -q "NFL market tracker" /tmp/home.html; then home_is_nfl="true"; fi
-            baseball_status="$(curl -sS --max-time 15 -o /tmp/baseball.html -w '%{http_code}' "$base/baseball" || true)"
-            nfl_status="$(curl -sS --max-time 15 -o /tmp/nfl.html -w '%{http_code}' "$base/nfl" || true)"
-            concerts_status="$(curl -sS --max-time 15 -o /tmp/concerts.html -w '%{http_code}' "$base/concerts" || true)"''',
-)
-
-replace_once(
-    ".github/workflows/deploy-pythonanywhere.yml",
-    '''            echo "Attempt $attempt: home=$home_status nfl=$nfl_status concerts=$concerts_status baseball_api=$baseball_api_status nfl_api=$nfl_api_status concert_api=$concert_api_status"
-            if [[ "$home_status" == "200" && "$nfl_status" == "200" && "$concerts_status" == "200" && "$baseball_api_status" == "401" && "$nfl_api_status" == "401" && "$concert_api_status" == "401" ]]; then''',
-    '''            echo "Attempt $attempt: home=$home_status home_is_nfl=$home_is_nfl baseball=$baseball_status nfl=$nfl_status concerts=$concerts_status baseball_api=$baseball_api_status nfl_api=$nfl_api_status concert_api=$concert_api_status"
-            if [[ "$home_status" == "200" && "$home_is_nfl" == "true" && "$baseball_status" == "200" && "$nfl_status" == "200" && "$concerts_status" == "200" && "$baseball_api_status" == "401" && "$nfl_api_status" == "401" && "$concert_api_status" == "401" ]]; then''',
-)
-
-replace_once(
-    ".github/workflows/deploy-pythonanywhere.yml",
-    '''          echo "NFL response:"
-          cat /tmp/nfl.html || true''',
-    '''          echo "Baseball response:"
-          cat /tmp/baseball.html || true
-          echo "NFL response:"
-          cat /tmp/nfl.html || true''',
-)
-
-replace_once(
     "README.md",
     '''- `/`: baseball analysis.
 - `/nfl`: NFL analysis.
