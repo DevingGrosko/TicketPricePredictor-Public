@@ -19,6 +19,7 @@ document.querySelectorAll('.interactive-chart').forEach((chart) => {
   const svg = chart.querySelector('.interactive-chart__svg');
   const tooltip = chart.querySelector('.interactive-chart__tooltip');
   const mode = chart.dataset.displayMode;
+  const analysisMode = chart.dataset.analysisMode;
   const rawData = JSON.parse(dataElement.textContent);
   const points = rawData.x
     .map((x, index) => ({ x: Number(x), y: Number(rawData.y[index]) }))
@@ -64,7 +65,8 @@ document.querySelectorAll('.interactive-chart').forEach((chart) => {
   }
 
   addSvgElement(svg, 'text', { x: margin.left + plotWidth / 2, y: height - 13, 'text-anchor': 'middle', class: 'interactive-chart__axis-label' }, 'Hours until event');
-  addSvgElement(svg, 'text', { x: 18, y: margin.top + plotHeight / 2, 'text-anchor': 'middle', transform: `rotate(-90 18 ${margin.top + plotHeight / 2})`, class: 'interactive-chart__axis-label' }, mode === 'money' ? 'Average listed price' : 'Relative price');
+  const priceAxisLabel = analysisMode === 'single' ? 'Lowest listed price' : 'Average lowest listed price';
+  addSvgElement(svg, 'text', { x: 18, y: margin.top + plotHeight / 2, 'text-anchor': 'middle', transform: `rotate(-90 18 ${margin.top + plotHeight / 2})`, class: 'interactive-chart__axis-label' }, mode === 'money' ? priceAxisLabel : 'Relative price');
 
   const plottedPoints = points.map((point) => ({ ...point, plotX: scaleX(point.x), plotY: scaleY(point.y) }));
   const linePath = plottedPoints.map((point, index) => `${index ? 'L' : 'M'} ${point.plotX} ${point.plotY}`).join(' ');
