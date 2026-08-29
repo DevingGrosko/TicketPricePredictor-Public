@@ -1,0 +1,61 @@
+name: Concert collector smoke test
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "concert_collector.py"
+      - "collector.py"
+      - "tests/test_concert_collector.py"
+      - ".github/workflows/concert-smoke-test.yml"
+  workflow_dispatch:
+    inputs:
+      event_url:
+        description: Optional Vivid Seats concert URL; otherwise discovers one
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  capture-concert:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install collector dependencies
+        run: python -m pip install "selenium>=4.26.1,<5" "SQLAlchemy>=2,<3"
+
+      - name: Show browser versions
+        run: |
+          google-chrome --version
+          python -c "import selenium; print(f'Selenium {selenium.__version__}')"
+
+      - name: Capture one concert without writing to the database
+        env:
+          REQUESTED_EVENT_URL: ${{ inputs.event_url }}
+        run: |
+          if [[ -n "$REQUESTED_EVENT_URL" ]]; then
+            python concert_collector.py smoke "$REQUESTED_EVENT_URL" \
+              --headless --timeout 45 --output concert_smoke_result.json
+          else
+            python concert_collector.py smoke \
+              --headless --timeout 45 --output concert_smoke_result.json
+          fi
+
+      - name: Upload diagnostic result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: concert-smoke-result
+          path: concert_smoke_result.json
+          if-no-files-found: warn
+          retention-days: 7

@@ -17,9 +17,12 @@ collector_backups/
 collector_health.json
 collector_state.json
 collector_remote_health.json
+concert_remote_health.json
+concert_smoke_result.json
 dispatcher_state.json
 dispatcher.lock
 collector_pending/
+concert_pending/
 
 # Local artifacts
 *.log
