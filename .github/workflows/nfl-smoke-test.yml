@@ -6,8 +6,10 @@ on:
       - main
     paths:
       - "nfl_collector.py"
+      - "nfl_schedule_collector.py"
       - "collector.py"
       - "tests/test_nfl_collector.py"
+      - "tests/test_nfl_schedule_collector.py"
       - ".github/workflows/nfl-smoke-test.yml"
   workflow_dispatch:
     inputs:
@@ -22,7 +24,7 @@ permissions:
 jobs:
   capture-nfl:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
@@ -39,11 +41,11 @@ jobs:
           google-chrome --version || chromium --version || true
           chromedriver --version || true
 
-      - name: Capture one NFL game without writing to production
+      - name: Resolve and capture one scheduled NFL game without production writes
         env:
           REQUESTED_EVENT_URL: ${{ inputs.event_url }}
         run: |
-          python nfl_collector.py smoke "$REQUESTED_EVENT_URL" \
+          python nfl_schedule_collector.py smoke "$REQUESTED_EVENT_URL" \
             --headless \
             --timeout 45 \
             --output nfl_smoke_result.json
