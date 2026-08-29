@@ -246,7 +246,7 @@ class _NFLAnchorParser(HTMLParser):
             DiscoveredNFLGame(
                 url=url,
                 title=title,
-                date_hint=date_hint_from_text(title, self.now) or date_hint_from_url(url),
+                date_hint=date_hint_from_url(url) or date_hint_from_text(title, self.now),
             )
         )
 
@@ -509,11 +509,23 @@ def run_smoke_capture(
             print(f"NFL SMOKE CAPTURE: trying {game.url}", flush=True)
             browser = VividNFLBrowser(headless=headless, timeout=timeout)
             raw_payload, event_date = browser.capture(game.url)
+            captured_at = datetime.now(timezone.utc)
+            if as_utc(event_date) <= captured_at:
+                raise ValueError(
+                    "NFL smoke candidate has already started; trying the next game."
+                )
+            if not requested_url and (
+                as_utc(event_date) - captured_at
+                > timedelta(days=SMOKE_HORIZON_DAYS, hours=1)
+            ):
+                raise ValueError(
+                    "NFL smoke candidate is outside the automatic 45-day horizon."
+                )
             snapshot = NFLSnapshotParser.parse(raw_payload)
             result = {
                 "status": "success",
                 "event_type": "nfl",
-                "captured_at": datetime.now(timezone.utc).isoformat(),
+                "captured_at": captured_at.isoformat(),
                 "event_date": event_date.isoformat(),
                 "source_url": game.url,
                 "source_id": snapshot.source_id,

@@ -40,6 +40,17 @@ class NFLDiscoveryTests(unittest.TestCase):
         self.assertEqual(rows[1].date_hint.isoformat(), "2026-09-14")
         self.assertTrue(all("production/" in row.url for row in rows))
 
+    def test_url_date_wins_over_stale_or_misleading_anchor_text(self):
+        now = datetime(2026, 8, 29, 12, tzinfo=timezone.utc)
+        page = """
+        <a href="/dallas-cowboys-new-york-giants-9-13-2026--sports-nfl-football/production/1234567">
+          Dallas Cowboys at New York Giants — Aug 18, 2026
+        </a>
+        """
+        rows = extract_nfl_game_rows(page, now=now)
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].date_hint.isoformat(), "2026-09-13")
+
     def test_infers_year_across_new_year(self):
         now = datetime(2026, 12, 20, 12, tzinfo=timezone.utc)
         self.assertEqual(
