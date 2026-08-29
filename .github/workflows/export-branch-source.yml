@@ -1,0 +1,22 @@
+name: Export branch source
+
+on:
+  push:
+    branches:
+      - feature/switch-concerts-to-nfl-hourly
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Package source
+        run: tar --exclude=.git --exclude=source.tar.gz -czf source.tar.gz .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nfl-branch-source
+          path: source.tar.gz
+          retention-days: 1
