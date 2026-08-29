@@ -21,7 +21,12 @@ jobs:
       - name: Apply tested source patch
         run: |
           cat nfl_patch.part-* | base64 --decode | tar -xzf -
-          rm -f nfl_patch.part-* nfl_patch.ready .github/workflows/apply-nfl-patch.yml
+          # GitHub Actions tokens cannot modify workflow files. Restore this
+          # directory and commit only the regular source changes here; workflow
+          # files are updated directly through the GitHub connector afterward.
+          rm -rf .github/workflows
+          git checkout HEAD -- .github/workflows
+          rm -f nfl_patch.part-* nfl_patch.ready
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
