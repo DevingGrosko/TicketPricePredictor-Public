@@ -1,0 +1,44 @@
+name: Temporary standard Ticketmaster live probe
+
+on:
+  push:
+    branches:
+      - feature/github-hosted-ticketmaster-probe
+    paths:
+      - ".github/workflows/provider-probe-live-smoke.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install browser dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run standard Ticketmaster probe
+        continue-on-error: true
+        run: |
+          python hosted_provider_probe.py \
+            "https://www.ticketmaster.com/new-england-patriots-v-pittsburgh-steelers-foxborough-massachusetts-09-20-2026/event/010064818D7A8D57" \
+            --provider ticketmaster \
+            --duration 55 \
+            --include-sanitized-payloads \
+            --output provider_probe_report.json \
+            --screenshot provider_probe.png
+      - name: Upload live diagnostic
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ticketmaster-live-probe-${{ github.run_id }}
+          path: |
+            provider_probe_report.json
+            provider_probe.png
+          if-no-files-found: warn
+          retention-days: 1
