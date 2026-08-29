@@ -41,10 +41,10 @@ jobs:
           google-chrome --version || chromium --version || true
           chromedriver --version || true
 
-      - name: Validate the complete seven-day NFL schedule source
+      - name: Validate the complete 30-day NFL schedule source
         run: |
           python nfl_schedule_collector.py schedule \
-            --horizon-hours 168 \
+            --horizon-hours 720 \
             > nfl_schedule_result.json
 
       - name: Capture one NFL event without writing to production
