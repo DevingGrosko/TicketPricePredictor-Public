@@ -1,14 +1,20 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import unittest
 
 from concert_collector import (
+    CONCERT_CAPTURE_WINDOW_HOURS,
     CONCERT_VENUE_FEEDS,
     ConcertSnapshotParser,
     concert_cycle_exit_code,
+    concert_is_within_capture_window,
+    concert_snapshot_from_payload,
+    concert_snapshot_to_payload,
     event_date_from_concert_url,
     extract_concert_event_urls,
+    hourly_capture_slot,
     upcoming_concerts,
 )
+from collector import EventSnapshot, SectionSnapshot
 
 
 class ConcertDiscoveryTests(unittest.TestCase):
@@ -42,21 +48,23 @@ class ConcertDiscoveryTests(unittest.TestCase):
             )
         )
 
-    def test_rolling_window_includes_early_september_progressively(self):
+    def test_rolling_window_spans_the_full_week(self):
         now = datetime(2026, 8, 30, 4, tzinfo=timezone.utc)
         urls = {
             "https://www.vividseats.com/a-8-31-2026--concerts-pop/production/1",
             "https://www.vividseats.com/a-9-1-2026--concerts-pop/production/2",
-            "https://www.vividseats.com/a-9-2-2026--concerts-pop/production/3",
-            "https://www.vividseats.com/a-9-5-2026--concerts-pop/production/4",
+            "https://www.vividseats.com/a-9-5-2026--concerts-pop/production/3",
+            "https://www.vividseats.com/a-9-6-2026--concerts-pop/production/4",
+            "https://www.vividseats.com/a-9-7-2026--concerts-pop/production/5",
         }
 
         self.assertEqual(
-            upcoming_concerts(urls, now, horizon_days=3),
+            upcoming_concerts(urls, now, horizon_days=7),
             [
                 "https://www.vividseats.com/a-8-31-2026--concerts-pop/production/1",
                 "https://www.vividseats.com/a-9-1-2026--concerts-pop/production/2",
-                "https://www.vividseats.com/a-9-2-2026--concerts-pop/production/3",
+                "https://www.vividseats.com/a-9-5-2026--concerts-pop/production/3",
+                "https://www.vividseats.com/a-9-6-2026--concerts-pop/production/4",
             ],
         )
 
@@ -68,6 +76,28 @@ class ConcertDiscoveryTests(unittest.TestCase):
         self.assertIn("Barclays Center", CONCERT_VENUE_FEEDS)
         self.assertIn("Capital One Arena", CONCERT_VENUE_FEEDS)
         self.assertIn("TD Garden", CONCERT_VENUE_FEEDS)
+
+
+class ConcertCadenceTests(unittest.TestCase):
+    def test_concert_window_is_exactly_seven_days(self):
+        self.assertEqual(CONCERT_CAPTURE_WINDOW_HOURS, 168)
+        now = datetime(2026, 8, 29, 12, tzinfo=timezone.utc)
+        self.assertTrue(
+            concert_is_within_capture_window(now + timedelta(hours=168), now)
+        )
+        self.assertFalse(
+            concert_is_within_capture_window(
+                now + timedelta(hours=168, seconds=1), now
+            )
+        )
+        self.assertFalse(concert_is_within_capture_window(now, now))
+
+    def test_every_run_in_an_hour_maps_to_one_capture_slot(self):
+        first = datetime(2026, 8, 29, 14, 8, 32, tzinfo=timezone.utc)
+        second = datetime(2026, 8, 29, 14, 38, 55, tzinfo=timezone.utc)
+        expected = datetime(2026, 8, 29, 14, tzinfo=timezone.utc)
+        self.assertEqual(hourly_capture_slot(first), expected)
+        self.assertEqual(hourly_capture_slot(second), expected)
 
 
 class ConcertSnapshotParserTests(unittest.TestCase):
@@ -140,6 +170,48 @@ class ConcertSnapshotParserTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "only 9 usable sections"):
             ConcertSnapshotParser.parse(payload)
+
+    def test_concert_payload_is_explicitly_typed(self):
+        url = (
+            "https://www.vividseats.com/artist-tickets-new-york-"
+            "9-1-2026--concerts-pop/production/1234567"
+        )
+        snapshot = EventSnapshot(
+            source_id="1234567",
+            title="Artist at Arena",
+            venue="Arena",
+            sections=tuple(
+                SectionSnapshot(
+                    section=f"Section {index}",
+                    price=50,
+                    listing_count=1,
+                    row="",
+                    quantity="",
+                    displayed_price="50",
+                    alternate_price="",
+                )
+                for index in range(10)
+            ),
+        )
+        captured_at = datetime(2026, 8, 29, 12, tzinfo=timezone.utc)
+        payload = concert_snapshot_to_payload(
+            url,
+            datetime(2026, 9, 1, 20, tzinfo=timezone.utc),
+            captured_at,
+            snapshot,
+        )
+
+        self.assertEqual(payload["event_type"], "concert")
+        parsed_url, _, parsed_capture, parsed_snapshot = concert_snapshot_from_payload(
+            payload
+        )
+        self.assertEqual(parsed_url, url)
+        self.assertEqual(parsed_capture, captured_at)
+        self.assertEqual(parsed_snapshot.title, "Artist at Arena")
+
+        payload["event_type"] = "baseball"
+        with self.assertRaisesRegex(ValueError, "only accepts concert"):
+            concert_snapshot_from_payload(payload)
 
 
 class ConcertCycleTests(unittest.TestCase):
