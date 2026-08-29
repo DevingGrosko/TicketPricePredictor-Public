@@ -1,6 +1,8 @@
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import hmac
 import os
+import re
 
 from flask import Flask, jsonify, render_template, request
 from sqlalchemy import select
@@ -12,30 +14,24 @@ from collector import (
     store_snapshot,
     write_capture_audit,
 )
-from concert_collector import (
-    CONCERT_CAPTURE_WINDOW_HOURS,
-    concert_snapshot_from_payload,
-)
-from concert_graph_builder import ConcertGraphBuilder
-from concert_models import (
-    ConcertEvent,
-    create_concert_daily_backup,
-    CreateConcertModel,
-    store_concert_snapshot,
-    write_concert_audit,
-)
-from graph_builder import GraphBuilder
+from graph_builder import ConcertGraphBuilder, GraphBuilder
 from models import (
+    ConcertEvent,
+    CreateConcertModel,
     CreateModel,
     Event,
     Iteration,
     captured_datetime_for_storage,
     clean_event_title,
+    create_concert_daily_backup,
     event_datetime_eastern,
     event_has_complete_public_data,
+    store_concert_snapshot,
+    write_concert_audit,
 )
 
-# Load .env ONLY in local dev (PythonAnywhere won’t need it)
+# Load .env only in local development. PythonAnywhere also keeps its values in
+# this file, and the storage layer reloads it before resolving database paths.
 try:
     from dotenv import load_dotenv
 
@@ -43,13 +39,21 @@ try:
 except Exception:
     pass
 
+
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 3 * 1024 * 1024
+app.config["SECRET_KEY"] = os.environ.get(
+    "FLASK_SECRET_KEY",
+    "development-only-secret-key",
+)
+
 MAX_SNAPSHOT_REPLAY_AGE = timedelta(days=7)
 MAX_SNAPSHOT_CLOCK_SKEW = timedelta(minutes=5)
-
-app.config["SECRET_KEY"] = os.environ.get(
-    "FLASK_SECRET_KEY", "development-only-secret-key"
+BASEBALL_CAPTURE_WINDOW_HOURS = 72
+CONCERT_CAPTURE_WINDOW_HOURS = 7 * 24
+CONCERT_URL_PATTERN = re.compile(
+    r"--concerts-[a-z0-9-]+/production/\d+$",
+    flags=re.IGNORECASE,
 )
 
 
@@ -58,13 +62,30 @@ def authorized_collector_request():
     supplied = request.headers.get("Authorization", "")
     if not configured:
         return False
-    expected = f"Bearer {configured}"
-    return hmac.compare_digest(supplied, expected)
+    return hmac.compare_digest(supplied, f"Bearer {configured}")
+
+
+def concert_snapshot_from_payload(payload):
+    """Apply concert-specific validation without importing collector modules
+    that PythonAnywhere's restricted deploy command does not synchronize.
+    """
+    event_type = payload.get("event_type")
+    if event_type not in {None, "concert"}:
+        raise ValueError("Concert endpoint only accepts concert snapshots.")
+
+    url, event_date, captured_at, snapshot = snapshot_from_payload(payload)
+    if CONCERT_URL_PATTERN.search(url) is None:
+        raise ValueError("Concert endpoint only accepts Vivid concert URLs.")
+
+    title = str(payload.get("title") or "").strip()
+    if not title:
+        raise ValueError("Concert snapshot is missing its title.")
+    return url, event_date, captured_at, replace(snapshot, title=title)
 
 
 @app.post("/api/collector/snapshot")
 def ingest_collector_snapshot():
-    """Validate and store one baseball snapshot in the baseball database."""
+    """Validate and store one baseball snapshot in Event-collection.db."""
     if not authorized_collector_request():
         return jsonify({"status": "error", "error": "unauthorized"}), 401
 
@@ -79,15 +100,16 @@ def ingest_collector_snapshot():
 
         now = datetime.now(timezone.utc)
         captured_at_utc = captured_at.astimezone(timezone.utc)
+        event_date_utc = event_date.astimezone(timezone.utc)
         if captured_at_utc > now + MAX_SNAPSHOT_CLOCK_SKEW:
             raise ValueError("Snapshot capture time is in the future.")
         if now - captured_at_utc > MAX_SNAPSHOT_REPLAY_AGE:
             raise ValueError("Snapshot is older than the seven-day replay window.")
-        if event_date.astimezone(timezone.utc) <= captured_at.astimezone(timezone.utc):
+        if event_date_utc <= captured_at_utc:
             raise ValueError("The event had already started at the capture time.")
-        if event_date.astimezone(timezone.utc) - captured_at.astimezone(
-            timezone.utc
-        ) > timedelta(hours=72):
+        if event_date_utc - captured_at_utc > timedelta(
+            hours=BASEBALL_CAPTURE_WINDOW_HOURS
+        ):
             raise ValueError("The baseball game is outside the 72-hour capture window.")
 
         SessionLocal = CreateModel().getSession()
@@ -136,6 +158,7 @@ def ingest_collector_snapshot():
     return jsonify(
         {
             "status": "stored",
+            "event_type": "baseball",
             "event_id": event_id,
             "iteration_id": iteration_id,
             "sections": len(snapshot.sections),
@@ -146,7 +169,7 @@ def ingest_collector_snapshot():
 
 @app.post("/api/concerts/snapshot")
 def ingest_concert_snapshot():
-    """Validate and store one hourly snapshot in the concert-only database."""
+    """Validate and store one hourly snapshot in Concert-collection.db."""
     if not authorized_collector_request():
         return jsonify({"status": "error", "error": "unauthorized"}), 401
 
@@ -224,7 +247,11 @@ def find_event(place, identifier):
         if str(identifier).isdigit():
             event = query.filter(Event.id == int(identifier)).first()
         else:
-            event = query.filter(Event.title == identifier).order_by(Event.event_date).first()
+            event = (
+                query.filter(Event.title == identifier)
+                .order_by(Event.event_date)
+                .first()
+            )
         return (
             event
             if event
@@ -258,7 +285,8 @@ def home():
             if len(game_ids) > 1:
                 event_dict.setdefault(place, []).append(section)
         event_dict = {
-            place: sorted(sections) for place, sections in event_dict.items()
+            place: sorted(sections)
+            for place, sections in event_dict.items()
         }
 
         games_dict = {}
@@ -294,27 +322,40 @@ def graph():
         request.args.get("display") or request.args.get("id")
     )
     mode = request.args.get("mode", "multi")
-    totalGames = request.args.get("total_games", 0)
+    total_games = request.args.get("total_games", 0)
 
-    new_graph = GraphBuilder()
+    builder = GraphBuilder()
 
     if mode == "single":
         selected_event = find_event(place, request.args.get("game"))
-        game = str(selected_event.id) if selected_event else request.args.get("game", "")
-        game_label = format_event_title(selected_event) if selected_event else "Unknown game"
+        game = (
+            str(selected_event.id)
+            if selected_event
+            else request.args.get("game", "")
+        )
+        game_label = (
+            format_event_title(selected_event)
+            if selected_event
+            else "Unknown game"
+        )
         y, x = (
-            new_graph.singleGameGraph(
-                place, selected_event.id, section, display_mode
+            builder.singleGameGraph(
+                place,
+                selected_event.id,
+                section,
+                display_mode,
             )
             if selected_event
             else ([], [])
         )
-        totalGames = 1 if y else 0
+        total_games = 1 if y else 0
     else:
-        y, x, total = new_graph.allEventsForStadium(
-            place, section, 48, display_mode
+        y, x, total_games = builder.allEventsForStadium(
+            place,
+            section,
+            48,
+            display_mode,
         )
-        totalGames = total
         game = ""
         game_label = ""
 
@@ -329,14 +370,12 @@ def graph():
             gameLabel=game_label,
             displayType=toggle_display_mode(display_mode),
             displayLabel=toggle_display_label(display_mode),
-            totalGames=totalGames,
+            totalGames=total_games,
         )
-
-    img = new_graph.create_plot(x, y, display_mode)
 
     return render_template(
         "graph.html",
-        img=img,
+        img=builder.create_plot(x, y, display_mode),
         chartX=x,
         chartY=y,
         displayMode=display_mode,
@@ -347,7 +386,7 @@ def graph():
         gameLabel=game_label,
         displayType=toggle_display_mode(display_mode),
         displayLabel=toggle_display_label(display_mode),
-        totalGames=totalGames,
+        totalGames=total_games,
     )
 
 
@@ -355,23 +394,24 @@ def graph():
 def predict():
     place = request.args.get("event")
     section = request.args.get("section")
-    display_mode = "percentage"
 
-    new_graph = GraphBuilder()
-    y, x, total = new_graph.allEventsForStadium(place, section, 48, display_mode)
+    builder = GraphBuilder()
+    y, x, total = builder.allEventsForStadium(
+        place,
+        section,
+        48,
+        "percentage",
+    )
     if not y or not x:
         return render_template(
             "lowestPrice.html",
             error="No ticket data is available for that selection.",
         )
 
-    y_min = min(y)
-    y_index = y.index(y_min)
-    x_index = x[y_index]
-
+    minimum_index = y.index(min(y))
     return render_template(
         "lowestPrice.html",
-        time=x_index,
+        time=x[minimum_index],
         place=place,
         section=section,
         totalGames=total,
@@ -406,7 +446,11 @@ def find_concert(venue, identifier):
 def concerts_home():
     model = CreateConcertModel()
     with model.getSession()() as session:
-        concerts = session.query(ConcertEvent).order_by(ConcertEvent.event_date).all()
+        concerts = (
+            session.query(ConcertEvent)
+            .order_by(ConcertEvent.event_date)
+            .all()
+        )
         concerts_dict = {}
         concert_sections_dict = {}
         for concert in concerts:
@@ -453,7 +497,10 @@ def concerts_graph():
     builder = ConcertGraphBuilder()
     y, x = (
         builder.single_concert_graph(
-            venue, selected.id, section, display_mode
+            venue,
+            selected.id,
+            section,
+            display_mode,
         )
         if selected
         else ([], [])
@@ -500,8 +547,10 @@ def toggle_display_label(display_mode):
 
 
 def sortSection(session, eventID) -> list:
-    ev = session.execute(select(Event).where(Event.id == eventID)).scalar_one_or_none()
-    sorted_sections = ev.event_sections
+    event = session.execute(
+        select(Event).where(Event.id == eventID)
+    ).scalar_one_or_none()
+    sorted_sections = event.event_sections
     sorted_sections.sort()
     return sorted_sections
 
