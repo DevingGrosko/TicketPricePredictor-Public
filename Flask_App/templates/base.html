@@ -12,7 +12,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}?v=1">
     {% block head %}{% endblock %}
   </head>
-  <body>
+  <body class="{% block body_class %}{% endblock %}">
     <div class="site-glow site-glow--one"></div>
     <div class="site-glow site-glow--two"></div>
     <header class="site-header">
@@ -22,7 +22,7 @@
       </a>
       <nav class="site-nav" aria-label="Primary navigation">
         <a href="{{ url_for('home') }}">Baseball</a>
-        <a href="{{ url_for('nfl.nfl_home') }}">NFL</a>
+        <a href="{{ url_for('nfl.nfl_home') }}"{% if request.endpoint and request.endpoint.startswith('nfl.') %} class="is-active" aria-current="page"{% endif %}>NFL</a>
         <a href="{{ url_for('home') }}#how-it-works">How it works</a>
         <a class="nav-github" href="https://github.com/DevingGrosko/TicketPricePredictor-Public" target="_blank" rel="noreferrer">View project <span aria-hidden="true">&#8599;</span></a>
       </nav>

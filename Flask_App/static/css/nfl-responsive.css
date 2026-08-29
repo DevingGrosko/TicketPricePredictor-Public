@@ -1,0 +1,44 @@
+@media (max-width: 760px) {
+  .nfl-theme .site-header {
+    flex-wrap: nowrap;
+  }
+
+  .nfl-theme .site-nav {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 14px;
+    margin-left: auto;
+  }
+
+  .nfl-theme .site-nav a:first-child,
+  .nfl-theme .site-nav a:nth-child(2) {
+    display: inline-flex;
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 430px) {
+  .nfl-theme .site-header {
+    width: calc(100% - 28px);
+  }
+
+  .nfl-theme .brand {
+    gap: 8px;
+    font-size: 17px;
+  }
+
+  .nfl-theme .brand-mark {
+    width: 28px;
+    height: 28px;
+  }
+
+  .nfl-theme .site-nav {
+    gap: 11px;
+  }
+
+  .nfl-theme .site-nav a:first-child,
+  .nfl-theme .site-nav a:nth-child(2) {
+    font-size: 11px;
+  }
+}

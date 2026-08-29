@@ -1,75 +1,135 @@
 {% extends "base.html" %}
-{% block title %}NFL prices — TicketSignal{% endblock %}
+{% block title %}NFL ticket trends — TicketSignal{% endblock %}
+{% block body_class %}nfl-theme{% endblock %}
+{% block head %}
+  <meta name="theme-color" content="#013369">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl.css') }}?v=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-responsive.css') }}?v=1">
+{% endblock %}
 
 {% block content %}
-<section class="hero">
-  <div class="hero-copy">
-    <div class="eyebrow"><span></span> NFL ticket intelligence</div>
-    <h1>One week of movement.<br><em>One game at a time.</em></h1>
-    <p class="hero-lede">NFL prices are tracked in their own database once per hour during the final seven days before kickoff.</p>
-    <div class="hero-actions">
-      <a class="button button--primary" href="#explore-nfl">Explore NFL history <span aria-hidden="true">&#8595;</span></a>
-      <a class="text-link" href="{{ url_for('home') }}">View baseball data <span aria-hidden="true">&#8594;</span></a>
+<div class="nfl-page">
+  <section class="nfl-hero">
+    <div class="nfl-hero__copy">
+      <div class="nfl-kicker">
+        <span class="nfl-mini-shield" aria-hidden="true"><i></i><strong>TS</strong></span>
+        <span>NFL market tracker</span>
+        <span class="nfl-live-tag"><i></i> Hourly</span>
+      </div>
+      <h1>Track the market.<br><em>Beat kickoff.</em></h1>
+      <p class="nfl-hero__lede">Watch section-level ticket prices move through the final seven days before an NFL game. Choose a stadium, matchup, and section to inspect the hourly market history.</p>
+      <div class="nfl-hero__actions">
+        <a class="button nfl-button nfl-button--primary" href="#explore-nfl">Build a price chart <span aria-hidden="true">&#8595;</span></a>
+        <a class="nfl-text-link" href="{{ url_for('home') }}">Switch to baseball <span aria-hidden="true">&#8594;</span></a>
+      </div>
+
+      <dl class="nfl-metrics" aria-label="NFL database totals">
+        <div><dt>{{ stadium_count }}</dt><dd>Stadiums</dd></div>
+        <div><dt>{{ game_count }}</dt><dd>Games tracked</dd></div>
+        <div><dt>{{ section_count }}</dt><dd>Sections observed</dd></div>
+      </dl>
     </div>
-    <dl class="hero-stats">
-      <div><dt>{{ stadium_count }}</dt><dd>Stadiums recorded</dd></div>
-      <div><dt>{{ game_count }}</dt><dd>NFL games recorded</dd></div>
-      <div><dt>{{ section_count }}</dt><dd>Unique sections</dd></div>
-    </dl>
-  </div>
 
-  <div class="hero-visual" aria-label="NFL collection policy">
-    <div class="signal-card">
-      <div class="signal-card__header">
-        <div><span>NFL pipeline</span><strong>Independent from baseball</strong></div>
-        <span class="live-pill"><i></i> Hourly</span>
+    <div class="nfl-scoreboard" aria-label="NFL collection window and cadence">
+      <div class="nfl-scoreboard__topline">
+        <div>
+          <span>Market clock</span>
+          <strong>Final-week price movement</strong>
+        </div>
+        <span class="nfl-status"><i></i> Live feed</span>
       </div>
-      <div class="signal-value"><strong>168h</strong><span>tracked before each kickoff</span></div>
-      <div class="chart" aria-hidden="true">
-        <div class="chart-grid"></div>
-        <svg viewBox="0 0 620 240" preserveAspectRatio="none" role="img">
-          <defs>
-            <linearGradient id="nflAreaGradient" x1="0" x2="0" y1="0" y2="1">
-              <stop offset="0%" stop-color="#8b5cf6" stop-opacity=".35"/>
-              <stop offset="100%" stop-color="#8b5cf6" stop-opacity="0"/>
-            </linearGradient>
-          </defs>
-          <path class="chart-area" d="M0 75 C70 40,120 110,180 82 S290 132,350 98 S470 165,620 120 L620 240 L0 240 Z"/>
-          <path class="chart-line" d="M0 75 C70 40,120 110,180 82 S290 132,350 98 S470 165,620 120"/>
-          <circle cx="470" cy="148" r="7"/>
-        </svg>
-        <span class="chart-tooltip">Hourly snapshots</span>
+
+      <div class="nfl-clock">
+        <span>Tracking window</span>
+        <strong>168:00</strong>
+        <small>Hours to kickoff</small>
       </div>
-      <div class="chart-labels"><span>7d</span><span>5d</span><span>3d</span><span>1d</span><span>Kickoff</span></div>
+
+      <div class="nfl-field" aria-hidden="true">
+        <div class="nfl-field__endzone nfl-field__endzone--left">7 DAYS</div>
+        <div class="nfl-field__surface">
+          <div class="nfl-yard-labels"><span>20</span><span>40</span><span>50</span><span>40</span><span>20</span></div>
+          <div class="nfl-hash nfl-hash--top"></div>
+          <div class="nfl-hash nfl-hash--bottom"></div>
+          <svg viewBox="0 0 620 220" preserveAspectRatio="none" role="img" aria-label="Illustrative ticket price movement toward kickoff">
+            <defs>
+              <linearGradient id="nflHomeAreaGradient" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stop-color="#d50a0a" stop-opacity=".34"/>
+                <stop offset="100%" stop-color="#d50a0a" stop-opacity="0"/>
+              </linearGradient>
+            </defs>
+            <path class="nfl-field__area" d="M0 62 C70 38,116 106,178 79 S280 128,342 91 S455 156,620 112 L620 220 L0 220 Z"/>
+            <path class="nfl-field__line" d="M0 62 C70 38,116 106,178 79 S280 128,342 91 S455 156,620 112"/>
+            <circle cx="455" cy="142" r="7"/>
+          </svg>
+          <span class="nfl-field__tooltip">Hourly snapshot</span>
+        </div>
+        <div class="nfl-field__endzone nfl-field__endzone--right">KICKOFF</div>
+      </div>
+
+      <div class="nfl-scoreboard__footer">
+        <div><span>Cadence</span><strong>Every 60 minutes</strong></div>
+        <div><span>Scope</span><strong>One game at a time</strong></div>
+      </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<section class="explore-section" id="explore-nfl">
-  <div class="section-heading">
-    <div><span class="section-kicker">NFL data</span><h2>Follow one game over time</h2></div>
-    <p>Choose a stadium, game, and section. Each chart uses only that game; later comparisons can aggregate compatible sections within the same stadium.</p>
-  </div>
+  <section class="nfl-data-bar" aria-label="NFL tracker methodology">
+    <div><span>01</span><strong>Seven-day window</strong><small>Collection begins 168 hours before kickoff.</small></div>
+    <div><span>02</span><strong>Section-level view</strong><small>Follow the lowest observed listing in a selected section.</small></div>
+    <div><span>03</span><strong>Independent history</strong><small>NFL observations stay separate from baseball data.</small></div>
+  </section>
 
-  <div class="analysis-shell">
-    <div class="analysis-panel is-active" role="tabpanel">
-      <div class="panel-copy">
-        <span class="panel-icon">&#9733;</span>
-        <span class="section-kicker">Single NFL game</span>
-        <h3>Inspect the final seven days</h3>
-        <p>See the lowest displayed listing price in a section at each hourly collection point.</p>
-        <ul><li>Separate NFL database</li><li>Hourly observations</li><li>Dollar or percentage view</li></ul>
+  <section class="nfl-explore" id="explore-nfl">
+    <div class="nfl-section-heading">
+      <div>
+        <span class="nfl-section-kicker">Build your matchup view</span>
+        <h2>Call the play in three steps.</h2>
       </div>
-      <form class="selection-form nfl-selection-form">
-        <div class="field"><label for="nfl-place">1. Choose a stadium</label><select id="nfl-place" class="place-select"><option value="">Select a stadium</option>{% for place in games_dict %}<option value="{{ place }}">{{ place }}</option>{% endfor %}</select></div>
-        <div class="field"><label for="nfl-game">2. Choose a game</label><select id="nfl-game" class="game-select" disabled><option value="">Select a game</option></select></div>
-        <div class="field"><label for="nfl-section">3. Choose a section</label><select id="nfl-section" class="section-select" disabled><option value="">Select a section</option></select></div>
-        <button class="button button--primary submit-analysis" type="submit" disabled>View NFL trend <span>&#8594;</span></button>
-        <p class="form-note"><span>&#9432;</span> NFL games are stored separately from baseball and archived concert history.</p>
+      <p>Select the stadium, game, and section you care about. The chart then shows how that section’s observed market price changed as kickoff approached.</p>
+    </div>
+
+    <div class="nfl-analysis-shell">
+      <div class="nfl-playbook">
+        <div class="nfl-playbook__mark" aria-hidden="true">
+          <span class="nfl-football-icon"><i></i></span>
+        </div>
+        <span class="nfl-section-kicker">Single-game analysis</span>
+        <h3>A cleaner read on the final week.</h3>
+        <p>Use the hourly history to see whether a section is holding firm, drifting lower, or getting more expensive as inventory changes.</p>
+        <div class="nfl-feature-list">
+          <div><span>168h</span><p><strong>Full final-week window</strong><small>From seven days out to kickoff.</small></p></div>
+          <div><span>1h</span><p><strong>Consistent snapshots</strong><small>One market observation each hour.</small></p></div>
+          <div><span>$ / %</span><p><strong>Two chart modes</strong><small>View dollar prices or relative movement.</small></p></div>
+        </div>
+      </div>
+
+      <form class="nfl-selection-form">
+        <div class="nfl-form__header">
+          <div><span>Price chart setup</span><strong>Choose your view</strong></div>
+          <span class="nfl-form__count">3 picks</span>
+        </div>
+        <div class="field nfl-field-control">
+          <label for="nfl-place"><span>1</span> Stadium</label>
+          <select id="nfl-place" class="place-select">
+            <option value="">Select a stadium</option>
+            {% for place in games_dict %}<option value="{{ place }}">{{ place }}</option>{% endfor %}
+          </select>
+        </div>
+        <div class="field nfl-field-control">
+          <label for="nfl-game"><span>2</span> Matchup</label>
+          <select id="nfl-game" class="game-select" disabled><option value="">Select a game</option></select>
+        </div>
+        <div class="field nfl-field-control">
+          <label for="nfl-section"><span>3</span> Section</label>
+          <select id="nfl-section" class="section-select" disabled><option value="">Select a section</option></select>
+        </div>
+        <button class="button nfl-button nfl-button--primary submit-analysis" type="submit" disabled>Open price trend <span aria-hidden="true">&#8594;</span></button>
+        <p class="nfl-form-note"><span aria-hidden="true">&#9432;</span> Prices are historical marketplace observations, not a guarantee of future availability.</p>
       </form>
     </div>
-  </div>
-</section>
+  </section>
+</div>
 
 <script>
   const nflGamesData = {{ games_dict | tojson }};
