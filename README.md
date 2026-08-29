@@ -72,6 +72,7 @@ PythonAnywhere dispatches GitHub Actions on its reliable 30-minute cadence.
 - Baseball runs on every dispatch.
 - NFL runs on the first dispatch of each UTC hour.
 - NFL discovery starts from Vivid Seats' league page, filters out parking, packages, season tickets, and other non-game events, then captures only games whose calendar date is within seven days.
+- League discovery scrolls through lazy-loaded results and does not settle until it has found at least one current or future NFL game.
 - Canonical dates encoded in Vivid event URLs take precedence over surrounding feed text, and automatic smoke captures reject events that have already started.
 - The exact kickoff time is checked after capture, so a game is stored only when it is within 168 hours.
 - Baseball and NFL use separate concurrency groups and pending queues.
