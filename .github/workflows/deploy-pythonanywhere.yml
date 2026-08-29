@@ -88,3 +88,30 @@ jobs:
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             bunnyjeff@ssh.pythonanywhere.com deploy
+
+      - name: Verify public pages and API startup
+        run: |
+          base="https://bunnyjeff.pythonanywhere.com"
+          for attempt in $(seq 1 18); do
+            home_status="$(curl -sS --max-time 15 -o /tmp/home.html -w '%{http_code}' "$base/" || true)"
+            concerts_status="$(curl -sS --max-time 15 -o /tmp/concerts.html -w '%{http_code}' "$base/concerts" || true)"
+            baseball_api_status="$(curl -sS --max-time 15 -o /tmp/baseball-api.txt -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$base/api/collector/snapshot" || true)"
+            concert_api_status="$(curl -sS --max-time 15 -o /tmp/concert-api.txt -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$base/api/concerts/snapshot" || true)"
+
+            echo "Attempt $attempt: home=$home_status concerts=$concerts_status baseball_api=$baseball_api_status concert_api=$concert_api_status"
+            if [[ "$home_status" == "200" && "$concerts_status" == "200" && "$baseball_api_status" == "401" && "$concert_api_status" == "401" ]]; then
+              echo "PythonAnywhere startup verification passed."
+              exit 0
+            fi
+            sleep 5
+          done
+
+          echo "Home response:"
+          cat /tmp/home.html || true
+          echo "Concerts response:"
+          cat /tmp/concerts.html || true
+          echo "Baseball API response:"
+          cat /tmp/baseball-api.txt || true
+          echo "Concert API response:"
+          cat /tmp/concert-api.txt || true
+          exit 1
