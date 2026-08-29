@@ -45,7 +45,7 @@
             <a class="button nfl-button nfl-button--primary" href="{{ url_for('nfl.nfl_home') }}#explore-nfl">Try another selection</a>
           </div>
         {% else %}
-          <div class="interactive-chart nfl-interactive-chart" data-display-mode="{{ displayMode }}">
+          <div class="interactive-chart nfl-interactive-chart" data-display-mode="{{ displayMode }}" data-y-axis-label="{% if displayMode == 'money' %}Lowest observed section price{% else %}Relative price movement{% endif %}">
             <script type="application/json" class="interactive-chart__data">{{ {"x": chartX, "y": chartY} | tojson }}</script>
             <svg class="interactive-chart__svg" viewBox="0 0 900 520" role="img" aria-label="Interactive NFL ticket price trend for {{ venue }}, {{ section }}"></svg>
             <div class="interactive-chart__tooltip" role="status" hidden></div>
@@ -80,4 +80,4 @@
 </div>
 {% endblock %}
 
-{% block scripts %}<script src="{{ url_for('static', filename='js/graph.js') }}?v=1"></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/graph.js') }}?v=2"></script>{% endblock %}
