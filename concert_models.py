@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import sqlite3
 import sys
+import threading
 from typing import Any
 
 from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint, create_engine
@@ -24,6 +25,8 @@ DEFAULT_CONCERT_DATABASE = PROJECT_DIR / "Concert-collection.db"
 DEFAULT_CONCERT_AUDIT_DIR = PROJECT_DIR / "concert_audit"
 DEFAULT_CONCERT_BACKUP_DIR = PROJECT_DIR / "concert_backups"
 CONCERT_BACKUP_RETENTION_DAYS = 7
+_LEGACY_MIGRATION_LOCK = threading.Lock()
+_LEGACY_MIGRATION_ATTEMPTED = False
 
 
 class ConcertBase(DeclarativeBase):
@@ -92,10 +95,58 @@ def concert_database_path() -> Path:
     return Path(configured).expanduser().resolve()
 
 
+def _migrate_legacy_shared_storage_once() -> None:
+    """Move shared-era concert rows lazily after the Flask app has loaded.
+
+    Import-time migration made PythonAnywhere workers unavailable while a large
+    SQLite backup was being copied. This version runs only when concert storage
+    is first used, reads the server's .env before selecting database paths, and
+    relies on copy-before-delete/idempotency rather than another startup backup.
+    """
+    global _LEGACY_MIGRATION_ATTEMPTED
+
+    if _LEGACY_MIGRATION_ATTEMPTED:
+        return
+    with _LEGACY_MIGRATION_LOCK:
+        if _LEGACY_MIGRATION_ATTEMPTED:
+            return
+        _LEGACY_MIGRATION_ATTEMPTED = True
+        try:
+            try:
+                from dotenv import load_dotenv
+
+                load_dotenv(PROJECT_DIR / ".env", override=True)
+            except Exception:
+                pass
+
+            from legacy_concert_migration import migrate_legacy_concert_rows
+
+            report = migrate_legacy_concert_rows(make_backups=False)
+        except Exception as exc:
+            _LEGACY_MIGRATION_ATTEMPTED = False
+            print(
+                f"Legacy concert migration warning: {type(exc).__name__}: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+            return
+
+        if report["events_migrated"]:
+            print(
+                "Migrated legacy concert data out of the baseball database: "
+                f"{report['events_migrated']} events, "
+                f"{report['iterations_migrated']} iterations, "
+                f"{report['tickets_migrated']} ticket rows.",
+                flush=True,
+            )
+
+
 class CreateConcertModel:
     """Open the concert-only SQLite database, creating its schema if needed."""
 
     def __init__(self, db_path: str | Path | None = None):
+        if db_path is None:
+            _migrate_legacy_shared_storage_once()
         self.db_path = Path(db_path or concert_database_path()).expanduser().resolve()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.engine = create_engine(
@@ -267,35 +318,3 @@ def write_concert_audit(
         if modified < cutoff:
             candidate.unlink()
     return path
-
-
-def _migrate_legacy_shared_storage_on_import() -> None:
-    """Run the one-time shared-database cleanup when the web app reloads."""
-    try:
-        from legacy_concert_migration import migrate_legacy_concert_rows
-    except (ImportError, AttributeError):
-        # This can occur only when legacy_concert_migration itself imports this
-        # module during tests or a direct CLI invocation.
-        return
-
-    try:
-        report = migrate_legacy_concert_rows()
-    except Exception as exc:
-        print(
-            f"Legacy concert migration warning: {type(exc).__name__}: {exc}",
-            file=sys.stderr,
-            flush=True,
-        )
-        return
-
-    if report["events_migrated"]:
-        print(
-            "Migrated legacy concert data out of the baseball database: "
-            f"{report['events_migrated']} events, "
-            f"{report['iterations_migrated']} iterations, "
-            f"{report['tickets_migrated']} ticket rows.",
-            flush=True,
-        )
-
-
-_migrate_legacy_shared_storage_on_import()
