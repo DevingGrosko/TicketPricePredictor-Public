@@ -49,6 +49,7 @@ Database files, scraped JSON, browser profiles, runtime audit records, and crede
 - `collector.py`: guarded MLB collection, delivery queue, health reporting, and backups.
 - `nfl_collector.py`: Vivid NFL parsing, event capture, and feed-only fallback.
 - `nfl_schedule_collector.py`: complete-slate schedule seeding, Vivid resolution, coverage checks, and hourly collection.
+- `manual_provider_capture.py`: human-in-the-loop Ticketmaster and SeatGeek response diagnostics.
 - `concert_collector.py`: preserved concert collector code; no longer scheduled.
 - `Prediction.py`: baseball forecasting experiments.
 
@@ -81,3 +82,31 @@ PythonAnywhere dispatches GitHub Actions on its reliable 30-minute cadence.
 - Baseball and NFL use separate concurrency groups and pending queues.
 
 The NFL smoke test resolves a scheduled matchup and captures one current game without writing to a production database.
+
+## Manual Ticketmaster and SeatGeek diagnostics
+
+`manual_provider_capture.py` is an exploratory, human-in-the-loop tool for determining whether a provider page exposes section-level inventory to a browser session that the user can access normally. It does not alter browser fingerprints, hide WebDriver, rotate proxies, solve challenges, replay anti-bot tokens, or send data to the production database.
+
+The preferred mode is a HAR exported from an ordinary Chrome session:
+
+1. Open the event in normal Chrome.
+2. Open **Developer Tools → Network** and enable **Preserve log**.
+3. Reload the event, open the interactive seat map, and scroll through the available inventory.
+4. Right-click the Network request list and select **Save all as HAR with content**.
+5. Run:
+
+```bash
+python manual_provider_capture.py har ~/Downloads/event.har \
+  --event-url "https://www.ticketmaster.com/..." \
+  --include-sanitized-payloads
+```
+
+A visible Selenium diagnostic is also available when the provider page loads normally in an unmodified automated browser:
+
+```bash
+python manual_provider_capture.py browser \
+  "https://seatgeek.com/..." \
+  --include-sanitized-payloads
+```
+
+The output is written under `manual_provider_captures/`. It removes common authentication, session, customer, payment, and contact fields; it does not export cookies or request headers. Section/row/price records are heuristic candidates until a provider-specific parser is validated against real captures. Nothing from this tool is inserted into `NFL-collection.db` automatically.
