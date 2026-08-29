@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 from nfl_collector import (
     NFLSnapshotParser,
     date_hint_from_text,
+    date_hint_from_url,
     extract_nfl_game_rows,
     hourly_capture_slot,
     is_nfl_game_title,
@@ -45,6 +46,13 @@ class NFLDiscoveryTests(unittest.TestCase):
             date_hint_from_text("Buffalo Bills at New York Jets Jan 3", now).isoformat(),
             "2027-01-03",
         )
+
+    def test_reads_date_from_vivid_nfl_url(self):
+        url = (
+            "https://www.vividseats.com/dallas-cowboys-tickets-new-york-"
+            "9-13-2026--sports-nfl-football/production/1234567"
+        )
+        self.assertEqual(date_hint_from_url(url).isoformat(), "2026-09-13")
 
     def test_filters_to_rolling_calendar_window(self):
         now = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)

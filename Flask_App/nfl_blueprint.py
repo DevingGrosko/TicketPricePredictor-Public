@@ -219,81 +219,87 @@ def store_nfl_snapshot(
     stored_event_date = event_datetime_for_storage(event_date)
     stored_captured_at = captured_datetime_for_storage(hourly_capture_slot(captured_at))
 
-    with model.getSession()() as session:
-        event = (
-            session.query(NFLEvent)
-            .filter(
-                (NFLEvent.source_url == url)
-                | (NFLEvent.source_id == snapshot.source_id)
-            )
-            .first()
-        )
-        if event is None:
-            event = NFLEvent(
-                source_id=snapshot.source_id,
-                title=snapshot.title,
-                event_date=stored_event_date,
-                sections=[row.section for row in snapshot.sections],
-                source_url=url,
-                venue=snapshot.venue,
-            )
-            session.add(event)
-            session.flush()
-        else:
-            event.title = snapshot.title
-            event.event_date = stored_event_date
-            event.source_url = url
-            event.source_id = snapshot.source_id
-            event.venue = snapshot.venue
-            known_sections = set(event.sections or [])
-            event.sections = list(event.sections or []) + [
-                row.section
-                for row in snapshot.sections
-                if row.section not in known_sections
-            ]
-
-        existing = (
-            session.query(NFLIteration)
-            .filter(
-                NFLIteration.event_id == event.id,
-                NFLIteration.captured_at == stored_captured_at,
-            )
-            .first()
-        )
-        if existing is not None:
-            session.commit()
-            return event.id, existing.id, False
-
-        iteration = NFLIteration(event=event, captured_at=stored_captured_at)
-        session.add(iteration)
-        session.add_all(
-            NFLTicket(
-                section=row.section,
-                price=row.price,
-                listing_count=row.listing_count,
-                iteration=iteration,
-            )
-            for row in snapshot.sections
-        )
-        try:
-            session.commit()
-        except IntegrityError:
-            session.rollback()
+    try:
+        with model.getSession()() as session:
             event = (
                 session.query(NFLEvent)
-                .filter(NFLEvent.source_url == url)
-                .one()
+                .filter(
+                    (NFLEvent.source_url == url)
+                    | (NFLEvent.source_id == snapshot.source_id)
+                )
+                .first()
             )
+            if event is None:
+                event = NFLEvent(
+                    source_id=snapshot.source_id,
+                    title=snapshot.title,
+                    event_date=stored_event_date,
+                    sections=[row.section for row in snapshot.sections],
+                    source_url=url,
+                    venue=snapshot.venue,
+                )
+                session.add(event)
+                session.flush()
+            else:
+                event.title = snapshot.title
+                event.event_date = stored_event_date
+                event.source_url = url
+                event.source_id = snapshot.source_id
+                event.venue = snapshot.venue
+                known_sections = set(event.sections or [])
+                event.sections = list(event.sections or []) + [
+                    row.section
+                    for row in snapshot.sections
+                    if row.section not in known_sections
+                ]
+
             existing = (
                 session.query(NFLIteration)
                 .filter(
                     NFLIteration.event_id == event.id,
                     NFLIteration.captured_at == stored_captured_at,
                 )
-                .one()
+                .first()
             )
-            return event.id, existing.id, False
-        return event.id, iteration.id, True
+            if existing is not None:
+                session.commit()
+                return event.id, existing.id, False
+
+            iteration = NFLIteration(event=event, captured_at=stored_captured_at)
+            session.add(iteration)
+            session.add_all(
+                NFLTicket(
+                    section=row.section,
+                    price=row.price,
+                    listing_count=row.listing_count,
+                    iteration=iteration,
+                )
+                for row in snapshot.sections
+            )
+            try:
+                session.commit()
+            except IntegrityError:
+                session.rollback()
+                event = (
+                    session.query(NFLEvent)
+                    .filter(
+                        (NFLEvent.source_url == url)
+                        | (NFLEvent.source_id == snapshot.source_id)
+                    )
+                    .one()
+                )
+                existing = (
+                    session.query(NFLIteration)
+                    .filter(
+                        NFLIteration.event_id == event.id,
+                        NFLIteration.captured_at == stored_captured_at,
+                    )
+                    .one()
+                )
+                return event.id, existing.id, False
+            return event.id, iteration.id, True
+    finally:
+        model.engine.dispose()
 
 
 def create_nfl_daily_backup(

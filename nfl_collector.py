@@ -189,7 +189,7 @@ def date_hint_from_text(value: str, now: datetime) -> date | None:
 
 
 def date_hint_from_url(url: str) -> date | None:
-    match = re.search(r"-(\d{1,2})-(\d{1,2})-(\d{4})(?:/|$)", url)
+    match = re.search(r"-(\d{1,2})-(\d{1,2})-(\d{4})(?:--|/|$)", url)
     if not match:
         return None
     month, day, year = map(int, match.groups())
