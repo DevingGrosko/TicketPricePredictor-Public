@@ -9,7 +9,7 @@ import unittest
 
 class FlaskProductionStartupTests(unittest.TestCase):
     def test_fresh_app_import_with_pythonanywhere_deploy_allowlist(self):
-        """Prove the live app needs only files synchronized by the deploy key."""
+        """Exercise the exact files synchronized by the restricted deploy key."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             env = os.environ.copy()
@@ -17,6 +17,7 @@ class FlaskProductionStartupTests(unittest.TestCase):
                 {
                     "DATABASE_PATH": str(root / "baseball.db"),
                     "CONCERT_DATABASE_PATH": str(root / "concerts.db"),
+                    "NFL_DATABASE_PATH": str(root / "nfl.db"),
                     "COLLECTOR_INGEST_TOKEN": "integration-test-token",
                     "FLASK_SECRET_KEY": "integration-test-secret",
                 }
@@ -27,10 +28,10 @@ class FlaskProductionStartupTests(unittest.TestCase):
                 import importlib.abc
                 import sys
 
-                # PythonAnywhere's restricted deploy key synchronizes
-                # Flask_App, models.py, and graph_builder.py. These modular
-                # compatibility files are intentionally absent from the live
-                # import path and must never be required by the WSGI app.
+                # The live deploy synchronizes Flask_App, models.py, and
+                # graph_builder.py. Root compatibility modules must not be
+                # required for WSGI startup. nfl_blueprint.py is inside
+                # Flask_App and is part of the deployed application.
                 class BlockUndeployedConcertModules(importlib.abc.MetaPathFinder):
                     blocked = {
                         "concert_models",
@@ -48,17 +49,20 @@ class FlaskProductionStartupTests(unittest.TestCase):
 
                 sys.meta_path.insert(0, BlockUndeployedConcertModules())
 
+                from models import Base, database_path
                 from Flask_App.flask_app import app
+
+                Base.metadata.create_all(
+                    __import__("sqlalchemy").create_engine(
+                        f"sqlite:///{database_path()}"
+                    )
+                )
 
                 now = datetime.now(timezone.utc).replace(
                     minute=0, second=0, microsecond=0
                 )
                 event_date = now + timedelta(days=2)
-                url = (
-                    "https://www.vividseats.com/test-artist-tickets-"
-                    f"{event_date.month}-{event_date.day}-{event_date.year}"
-                    "--concerts-pop/production/1234567"
-                )
+                url = "https://www.vividseats.com/nfl-game/production/1234567"
                 sections = [
                     {
                         "section": f"Section {index}",
@@ -74,13 +78,13 @@ class FlaskProductionStartupTests(unittest.TestCase):
                 ]
                 payload = {
                     "schema_version": 1,
-                    "event_type": "concert",
+                    "event_type": "nfl",
                     "captured_at": now.isoformat(),
                     "event_date": event_date.isoformat(),
                     "source_url": url,
                     "source_id": "1234567",
-                    "title": "Test Artist: World Tour",
-                    "venue": "Test Arena",
+                    "title": "Dallas Cowboys at New York Giants",
+                    "venue": "MetLife Stadium",
                     "section_count": len(sections),
                     "sections": sections,
                 }
@@ -90,26 +94,32 @@ class FlaskProductionStartupTests(unittest.TestCase):
                 }
 
                 client = app.test_client()
-                first = client.post(
-                    "/api/concerts/snapshot", json=payload, headers=headers
-                )
+                first = client.post("/api/nfl/snapshot", json=payload, headers=headers)
                 assert first.status_code == 201, first.get_data(as_text=True)
                 assert first.get_json()["status"] == "stored"
 
                 duplicate = client.post(
-                    "/api/concerts/snapshot", json=payload, headers=headers
+                    "/api/nfl/snapshot", json=payload, headers=headers
                 )
                 assert duplicate.status_code == 200, duplicate.get_data(as_text=True)
                 assert duplicate.get_json()["status"] == "duplicate"
 
-                wrong_endpoint = client.post(
+                wrong_baseball_endpoint = client.post(
                     "/api/collector/snapshot", json=payload, headers=headers
                 )
-                assert wrong_endpoint.status_code == 400
+                assert wrong_baseball_endpoint.status_code == 400
 
-                concerts_page = client.get("/concerts")
-                assert concerts_page.status_code == 200
-                assert b"Test Artist" in concerts_page.data
+                wrong_concert_endpoint = client.post(
+                    "/api/concerts/snapshot", json=payload, headers=headers
+                )
+                assert wrong_concert_endpoint.status_code == 400
+
+                nfl_page = client.get("/nfl")
+                assert nfl_page.status_code == 200
+                assert b"Dallas Cowboys" in nfl_page.data
+
+                baseball_page = client.get("/")
+                assert baseball_page.status_code == 200
                 """
             )
             result = subprocess.run(

@@ -22,7 +22,7 @@
       </a>
       <nav class="site-nav" aria-label="Primary navigation">
         <a href="{{ url_for('home') }}">Baseball</a>
-        <a href="{{ url_for('concerts_home') }}">Concerts</a>
+        <a href="{{ url_for('nfl.nfl_home') }}">NFL</a>
         <a href="{{ url_for('home') }}#how-it-works">How it works</a>
         <a class="nav-github" href="https://github.com/DevingGrosko/TicketPricePredictor-Public" target="_blank" rel="noreferrer">View project <span aria-hidden="true">&#8599;</span></a>
       </nav>
@@ -38,7 +38,7 @@
         </a>
         <p>Historical ticket intelligence for smarter timing.</p>
       </div>
-      <p>Baseball and concert histories are collected and stored separately.</p>
+      <p>Baseball and NFL histories are collected and stored separately.</p>
     </footer>
     {% block scripts %}{% endblock %}
   </body>

@@ -47,6 +47,10 @@ app.config["SECRET_KEY"] = os.environ.get(
     "development-only-secret-key",
 )
 
+from Flask_App.nfl_blueprint import nfl_blueprint
+
+app.register_blueprint(nfl_blueprint)
+
 MAX_SNAPSHOT_REPLAY_AGE = timedelta(days=7)
 MAX_SNAPSHOT_CLOCK_SKEW = timedelta(minutes=5)
 BASEBALL_CAPTURE_WINDOW_HOURS = 72
