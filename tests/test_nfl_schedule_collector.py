@@ -8,6 +8,8 @@ from nfl_schedule_collector import (
     candidates_for_schedule_game,
     matchup_key_from_title,
     parse_schedule_payload,
+    schedule_cadence_summary,
+    schedule_games_due,
     schedule_url,
     validate_captured_match,
 )
@@ -64,9 +66,21 @@ class NFLScheduleParsingTests(unittest.TestCase):
                 ),
                 self._event(
                     "3",
-                    now + timedelta(hours=169),
+                    now + timedelta(hours=400),
                     "Dallas Cowboys",
                     "New York Giants",
+                ),
+                self._event(
+                    "6",
+                    now + timedelta(hours=719),
+                    "Baltimore Ravens",
+                    "Pittsburgh Steelers",
+                ),
+                self._event(
+                    "7",
+                    now + timedelta(hours=721),
+                    "Miami Dolphins",
+                    "New York Jets",
                 ),
                 self._event(
                     "4",
@@ -86,18 +100,18 @@ class NFLScheduleParsingTests(unittest.TestCase):
 
         games = parse_schedule_payload(payload, now)
 
-        self.assertEqual([game.schedule_id for game in games], ["1", "2"])
+        self.assertEqual([game.schedule_id for game in games], ["1", "2", "3", "6"])
         self.assertEqual(games[0].away_team, "New England Patriots")
         self.assertEqual(games[0].home_team, "Seattle Seahawks")
         self.assertEqual(games[0].venue, "Test Stadium")
 
-    def test_exact_168_hour_boundary_is_included(self):
+    def test_exact_720_hour_boundary_is_included(self):
         now = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
         payload = {
             "events": [
                 self._event(
                     "boundary",
-                    now + timedelta(hours=168),
+                    now + timedelta(hours=720),
                     "Baltimore Ravens",
                     "Pittsburgh Steelers",
                 )
@@ -106,11 +120,41 @@ class NFLScheduleParsingTests(unittest.TestCase):
         games = parse_schedule_payload(payload, now)
         self.assertEqual(len(games), 1)
 
-    def test_schedule_url_requests_a_date_range_and_large_limit(self):
+    def test_schedule_url_requests_a_month_range_and_large_limit(self):
         now = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
-        url = schedule_url(now, 168)
-        self.assertIn("dates=20260901-20260909", url)
+        url = schedule_url(now, 720)
+        self.assertIn("dates=20260901-20261002", url)
         self.assertIn("limit=1000", url)
+
+    def test_schedule_due_filter_staggers_longer_window_games(self):
+        slot = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
+        games = [
+            ScheduledNFLGame(
+                schedule_id="final-week",
+                event_date=slot + timedelta(hours=100),
+                away_team="Buffalo Bills",
+                home_team="Houston Texans",
+                venue="Test Stadium",
+                name="Buffalo Bills at Houston Texans",
+            )
+        ] + [
+            ScheduledNFLGame(
+                schedule_id=f"early-{index}",
+                event_date=slot + timedelta(hours=500),
+                away_team="Dallas Cowboys",
+                home_team="New York Giants",
+                venue="Test Stadium",
+                name="Dallas Cowboys at New York Giants",
+            )
+            for index in range(12)
+        ]
+        due = schedule_games_due(games, slot)
+        self.assertIn("final-week", {game.schedule_id for game in due})
+        self.assertLess(len(due), len(games))
+        summary = schedule_cadence_summary(games, slot)
+        self.assertEqual(summary["in_window"]["1h"], 1)
+        self.assertEqual(summary["in_window"]["6h"], 12)
+        self.assertEqual(sum(summary["due_now"].values()), len(due))
 
 
 class NFLVividResolutionTests(unittest.TestCase):

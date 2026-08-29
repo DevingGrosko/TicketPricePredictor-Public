@@ -7,8 +7,12 @@ from nfl_collector import (
     date_hint_from_text,
     date_hint_from_url,
     extract_nfl_game_rows,
+    adaptive_due_nfl_games,
     hourly_capture_slot,
     is_nfl_game_title,
+    nfl_capture_interval_hours,
+    nfl_capture_is_due,
+    nfl_capture_phase,
     nfl_is_within_capture_window,
     nfl_snapshot_to_payload,
     upcoming_nfl_games,
@@ -86,16 +90,56 @@ class NFLDiscoveryTests(unittest.TestCase):
 
 
 class NFLCadenceTests(unittest.TestCase):
-    def test_window_is_exactly_seven_days(self):
+    def test_window_is_exactly_thirty_days(self):
         now = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
-        self.assertTrue(nfl_is_within_capture_window(now + timedelta(hours=168), now))
+        self.assertTrue(nfl_is_within_capture_window(now + timedelta(hours=720), now))
         self.assertFalse(
             nfl_is_within_capture_window(
-                now + timedelta(hours=168, seconds=1),
+                now + timedelta(hours=720, seconds=1),
                 now,
             )
         )
         self.assertFalse(nfl_is_within_capture_window(now, now))
+
+    def test_interval_tiers_use_six_three_and_one_hours(self):
+        now = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
+        self.assertEqual(nfl_capture_interval_hours(now + timedelta(hours=720), now), 6)
+        self.assertEqual(nfl_capture_interval_hours(now + timedelta(hours=336), now), 3)
+        self.assertEqual(nfl_capture_interval_hours(now + timedelta(hours=168), now), 1)
+        self.assertIsNone(
+            nfl_capture_interval_hours(now + timedelta(hours=720, seconds=1), now)
+        )
+
+    def test_longer_interval_games_are_staggered_by_game_key(self):
+        midnight = datetime(2026, 9, 1, 0, tzinfo=timezone.utc)
+        six_hour_game = midnight + timedelta(hours=500)
+        phase = nfl_capture_phase("schedule-123", 6)
+        due_slot = midnight + timedelta(hours=phase)
+        next_slot = due_slot + timedelta(hours=1)
+        self.assertTrue(
+            nfl_capture_is_due(six_hour_game, due_slot, "schedule-123")
+        )
+        self.assertFalse(
+            nfl_capture_is_due(six_hour_game, next_slot, "schedule-123")
+        )
+
+    def test_final_week_game_is_due_every_hour(self):
+        game_date = datetime(2026, 9, 5, 12, tzinfo=timezone.utc)
+        for hour in range(24):
+            slot = datetime(2026, 9, 1, hour, tzinfo=timezone.utc)
+            self.assertTrue(nfl_capture_is_due(game_date, slot, "any-game"))
+
+    def test_feed_fallback_uses_adaptive_due_filter(self):
+        now = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
+        page = """
+        <a href="/a/production/1000001">Dallas Cowboys at New York Giants Sep 5, 2026</a>
+        <a href="/b/production/1000002">Baltimore Ravens at Pittsburgh Steelers Sep 20, 2026</a>
+        <a href="/c/production/1000003">Buffalo Bills at Houston Texans Sep 27, 2026</a>
+        """
+        rows = extract_nfl_game_rows(page, now=now)
+        due = adaptive_due_nfl_games(rows, now)
+        self.assertTrue(any("1000001" in game.url for game in due))
+        self.assertLessEqual(len(due), len(rows))
 
     def test_every_run_in_an_hour_maps_to_one_capture_slot(self):
         first = datetime(2026, 9, 1, 12, 1, 4, tzinfo=timezone.utc)

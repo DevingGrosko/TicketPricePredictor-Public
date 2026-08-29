@@ -123,6 +123,66 @@ class NFLDatabaseIsolationTests(unittest.TestCase):
                 else:
                     os.environ["COLLECTOR_INGEST_TOKEN"] = old_token
 
+    @patch("Flask_App.nfl_blueprint.write_nfl_audit")
+    @patch("Flask_App.nfl_blueprint.create_nfl_daily_backup")
+    def test_api_accepts_thirty_days_and_rejects_beyond_window(self, backup, audit):
+        with tempfile.TemporaryDirectory() as directory:
+            old_db = os.environ.get("NFL_DATABASE_PATH")
+            old_token = os.environ.get("COLLECTOR_INGEST_TOKEN")
+            os.environ["NFL_DATABASE_PATH"] = str(Path(directory) / "nfl.db")
+            os.environ["COLLECTOR_INGEST_TOKEN"] = "test-token"
+            try:
+                app = Flask(__name__, template_folder="../Flask_App/templates")
+                app.register_blueprint(nfl_blueprint)
+                app.config.update(TESTING=True)
+                client = app.test_client()
+                captured_at = datetime.now(timezone.utc).replace(
+                    minute=0, second=0, microsecond=0
+                )
+                headers = {"Authorization": "Bearer test-token"}
+                snapshot = self._snapshot()
+
+                boundary_payload = snapshot_to_payload(
+                    "https://www.vividseats.com/game/production/1234567",
+                    captured_at + timedelta(hours=720),
+                    captured_at,
+                    snapshot,
+                )
+                boundary_payload["event_type"] = "nfl"
+                accepted = client.post(
+                    "/api/nfl/snapshot", json=boundary_payload, headers=headers
+                )
+                self.assertEqual(accepted.status_code, 201, accepted.get_data(as_text=True))
+
+                outside_payload = snapshot_to_payload(
+                    "https://www.vividseats.com/game/production/7654321",
+                    captured_at + timedelta(hours=721),
+                    captured_at,
+                    EventSnapshot(
+                        source_id="7654321",
+                        title=snapshot.title,
+                        venue=snapshot.venue,
+                        sections=snapshot.sections,
+                    ),
+                )
+                outside_payload["event_type"] = "nfl"
+                rejected = client.post(
+                    "/api/nfl/snapshot", json=outside_payload, headers=headers
+                )
+                self.assertEqual(rejected.status_code, 400)
+                self.assertIn("30-day", rejected.get_json()["error"])
+                backup.assert_called_once()
+                audit.assert_called_once()
+            finally:
+                if old_db is None:
+                    os.environ.pop("NFL_DATABASE_PATH", None)
+                else:
+                    os.environ["NFL_DATABASE_PATH"] = old_db
+                if old_token is None:
+                    os.environ.pop("COLLECTOR_INGEST_TOKEN", None)
+                else:
+                    os.environ["COLLECTOR_INGEST_TOKEN"] = old_token
+
 
 if __name__ == "__main__":
     unittest.main()

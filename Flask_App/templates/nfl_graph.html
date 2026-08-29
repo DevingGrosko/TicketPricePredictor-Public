@@ -23,8 +23,8 @@
       </div>
       <div class="nfl-window-badge">
         <span>Tracking window</span>
-        <strong>7D</strong>
-        <small>Hourly snapshots</small>
+        <strong>30D</strong>
+        <small>Adaptive snapshots</small>
       </div>
     </header>
 
@@ -50,7 +50,7 @@
             <script type="application/json" class="interactive-chart__data">{{ {"x": chartX, "y": chartY} | tojson }}</script>
             <svg class="interactive-chart__svg" viewBox="0 0 900 520" role="img" aria-label="Interactive NFL ticket price trend for {{ venue }}, {{ section }}"></svg>
             <div class="interactive-chart__tooltip" role="status" hidden></div>
-            <p class="interactive-chart__hint"><span aria-hidden="true">&#9432;</span> Hover over the line to inspect each hourly market observation.</p>
+            <p class="interactive-chart__hint"><span aria-hidden="true">&#9432;</span> Hover over the line to inspect each captured market observation.</p>
           </div>
           <noscript><img src="data:image/png;base64,{{ img }}" class="result-chart" alt="NFL ticket price trend for {{ venue }}, {{ section }}"></noscript>
         {% endif %}
@@ -61,16 +61,16 @@
           <span class="nfl-football-icon" aria-hidden="true"><i></i></span>
           <div><span class="nfl-section-kicker">Game plan</span><h2>Read the market from left to right.</h2></div>
         </div>
-        <p>The chart counts down toward kickoff. Each point is the lowest observed listing price for this section during that hourly snapshot.</p>
+        <p>The chart counts down toward kickoff. Each point is the lowest observed listing price for this section at that scheduled capture time.</p>
 
         <dl class="nfl-insight-stats">
-          <div><dt>168h</dt><dd>Maximum lookback</dd></div>
-          <div><dt>1h</dt><dd>Snapshot interval</dd></div>
+          <div><dt>720h</dt><dd>Maximum lookback</dd></div>
+          <div><dt>6/3/1h</dt><dd>Adaptive interval</dd></div>
         </dl>
 
         <div class="nfl-chart-guide">
           <div><i class="nfl-chart-guide__line"></i><span><strong>Trend line</strong><small>How the observed section price moved.</small></span></div>
-          <div><i class="nfl-chart-guide__dot"></i><span><strong>Hourly point</strong><small>A captured market observation.</small></span></div>
+          <div><i class="nfl-chart-guide__dot"></i><span><strong>Captured point</strong><small>A scheduled market observation.</small></span></div>
           <div><i class="nfl-chart-guide__kickoff"></i><span><strong>Kickoff side</strong><small>Time moves toward zero on the right.</small></span></div>
         </div>
 

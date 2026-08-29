@@ -1,8 +1,8 @@
 """NFL-specific storage, API routes, and website views.
 
 NFL history is intentionally isolated from both the existing baseball database
-and the archived concert database. Each game receives at most one observation
-per UTC hour during the final seven days before kickoff.
+and the archived concert database. Games are accepted during the final 30 days
+before kickoff, with the collector choosing a 6-hour, 3-hour, or hourly cadence.
 """
 
 from __future__ import annotations
@@ -39,7 +39,7 @@ DEFAULT_NFL_AUDIT_DIR = PROJECT_DIR / "nfl_audit"
 DEFAULT_NFL_BACKUP_DIR = PROJECT_DIR / "nfl_backups"
 NFL_BACKUP_RETENTION_DAYS = 7
 NFL_AUDIT_RETENTION_DAYS = 30
-NFL_CAPTURE_WINDOW_HOURS = 7 * 24
+NFL_CAPTURE_WINDOW_HOURS = 30 * 24
 MAX_SNAPSHOT_REPLAY_AGE = timedelta(days=7)
 MAX_SNAPSHOT_CLOCK_SKEW = timedelta(minutes=5)
 NFL_URL_PATTERN = re.compile(r"/production/(\d+)$", flags=re.IGNORECASE)
@@ -394,7 +394,7 @@ def ingest_nfl_snapshot():
         if event_date_utc <= captured_at_utc:
             raise ValueError("The NFL game had already started at the capture time.")
         if event_date_utc - captured_at_utc > timedelta(hours=NFL_CAPTURE_WINDOW_HOURS):
-            raise ValueError("The NFL game is outside the seven-day capture window.")
+            raise ValueError("The NFL game is outside the 30-day capture window.")
 
         create_nfl_daily_backup(now=now)
         event_id, iteration_id, stored = store_nfl_snapshot(

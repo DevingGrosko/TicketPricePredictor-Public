@@ -17,7 +17,7 @@
         <span class="nfl-live-tag"><i></i> Hourly</span>
       </div>
       <h1>Track the market.<br><em>Beat kickoff.</em></h1>
-      <p class="nfl-hero__lede">Watch section-level ticket prices move through the final seven days before an NFL game. Choose a stadium, matchup, and section to inspect the hourly market history.</p>
+      <p class="nfl-hero__lede">Watch section-level ticket prices move through the final 30 days before an NFL game. Choose a stadium, matchup, and section to inspect the hourly market history.</p>
       <div class="nfl-hero__actions">
         <a class="button nfl-button nfl-button--primary" href="#explore-nfl">Build a price chart <span aria-hidden="true">&#8595;</span></a>
         <a class="nfl-text-link" href="{{ url_for('home') }}">Switch to baseball <span aria-hidden="true">&#8594;</span></a>
@@ -41,12 +41,12 @@
 
       <div class="nfl-clock">
         <span>Tracking window</span>
-        <strong>168:00</strong>
+        <strong>720:00</strong>
         <small>Hours to kickoff</small>
       </div>
 
       <div class="nfl-field" aria-hidden="true">
-        <div class="nfl-field__endzone nfl-field__endzone--left">7 DAYS</div>
+        <div class="nfl-field__endzone nfl-field__endzone--left">30 DAYS</div>
         <div class="nfl-field__surface">
           <div class="nfl-yard-labels"><span>20</span><span>40</span><span>50</span><span>40</span><span>20</span></div>
           <div class="nfl-hash nfl-hash--top"></div>
@@ -68,16 +68,16 @@
       </div>
 
       <div class="nfl-scoreboard__footer">
-        <div><span>Cadence</span><strong>Every 60 minutes</strong></div>
+        <div><span>Cadence</span><strong>6h → 3h → 1h</strong></div>
         <div><span>Scope</span><strong>One game at a time</strong></div>
       </div>
     </div>
   </section>
 
   <section class="nfl-data-bar" aria-label="NFL tracker methodology">
-    <div><span>01</span><strong>Seven-day window</strong><small>Collection begins 168 hours before kickoff.</small></div>
-    <div><span>02</span><strong>Section-level view</strong><small>Follow the lowest observed listing in a selected section.</small></div>
-    <div><span>03</span><strong>Independent history</strong><small>NFL observations stay separate from baseball data.</small></div>
+    <div><span>01</span><strong>Thirty-day window</strong><small>Collection begins up to 720 hours before kickoff.</small></div>
+    <div><span>02</span><strong>Adaptive cadence</strong><small>Every 6 hours, then 3 hours, then hourly in the final week.</small></div>
+    <div><span>03</span><strong>Section-level history</strong><small>NFL observations stay separate from baseball data.</small></div>
   </section>
 
   <section class="nfl-explore" id="explore-nfl">
@@ -86,7 +86,7 @@
         <span class="nfl-section-kicker">Build your matchup view</span>
         <h2>Call the play in three steps.</h2>
       </div>
-      <p>Select the stadium, game, and section you care about. The chart then shows how that section’s observed market price changed as kickoff approached.</p>
+      <p>Select the stadium, game, and section you care about. The chart then shows how that section’s observed market price changed across the month leading into kickoff.</p>
     </div>
 
     <div class="nfl-analysis-shell">
@@ -95,11 +95,11 @@
           <span class="nfl-football-icon"><i></i></span>
         </div>
         <span class="nfl-section-kicker">Single-game analysis</span>
-        <h3>A cleaner read on the final week.</h3>
+        <h3>A longer read on the road to kickoff.</h3>
         <p>Use the hourly history to see whether a section is holding firm, drifting lower, or getting more expensive as inventory changes.</p>
         <div class="nfl-feature-list">
-          <div><span>168h</span><p><strong>Full final-week window</strong><small>From seven days out to kickoff.</small></p></div>
-          <div><span>1h</span><p><strong>Consistent snapshots</strong><small>One market observation each hour.</small></p></div>
+          <div><span>720h</span><p><strong>Full 30-day window</strong><small>Early movement through the final whistle countdown.</small></p></div>
+          <div><span>6→3→1h</span><p><strong>Adaptive snapshots</strong><small>More frequent observations as kickoff gets closer.</small></p></div>
           <div><span>$ / %</span><p><strong>Two chart modes</strong><small>View dollar prices or relative movement.</small></p></div>
         </div>
       </div>
