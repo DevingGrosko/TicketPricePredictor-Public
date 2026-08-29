@@ -87,7 +87,6 @@ class LegacyConcertMigrationTests(unittest.TestCase):
                 baseball_path=baseball_db,
                 concert_path=concert_db,
                 lock_path=root / "migration.lock",
-                make_backups=False,
             )
             self.assertEqual(report["legacy_events_found"], 1)
             self.assertEqual(report["events_migrated"], 1)
@@ -122,7 +121,6 @@ class LegacyConcertMigrationTests(unittest.TestCase):
                 baseball_path=baseball_db,
                 concert_path=concert_db,
                 lock_path=root / "migration.lock",
-                make_backups=False,
             )
             self.assertEqual(rerun["legacy_events_found"], 0)
             self.assertEqual(rerun["events_migrated"], 0)
