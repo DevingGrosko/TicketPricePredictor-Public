@@ -3,6 +3,14 @@ name: Collect ticket prices
 run-name: Collect ticket prices (${{ inputs.dispatch_source || github.event_name }})
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      # Run the current collector immediately after its workflow changes. This
+      # also provides a controlled way to replay preserved queues after an
+      # endpoint recovery without making ordinary code pushes scrape tickets.
+      - ".github/workflows/collect-ticket-prices.yml"
   schedule:
     # Best-effort baseball recovery trigger. PythonAnywhere dispatches the
     # reliable :08/:38 cadence. The :53 fallback maps to the same half-hour
@@ -82,9 +90,10 @@ jobs:
         id: cadence
         env:
           DISPATCH_SOURCE: ${{ inputs.dispatch_source }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
           minute="$(date -u +%M)"
-          if [[ "$DISPATCH_SOURCE" == "manual" || 10#$minute -lt 30 ]]; then
+          if [[ "$EVENT_NAME" == "push" || "$DISPATCH_SOURCE" == "manual" || 10#$minute -lt 30 ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "Concert collection is due for this UTC hour."
           else
