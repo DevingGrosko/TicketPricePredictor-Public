@@ -1,0 +1,56 @@
+name: Fix NFL feed date hints
+
+on:
+  push:
+    branches:
+      - feature/switch-concerts-to-nfl-hourly
+    paths:
+      - "fix_nfl_feed_date.ready"
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/switch-concerts-to-nfl-hourly
+          fetch-depth: 0
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Install test dependency
+        run: python -m pip install "SQLAlchemy>=2,<3"
+      - name: Use displayed schedule dates only as discovery hints
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          collector = Path("nfl_collector.py")
+          text = collector.read_text(encoding="utf-8")
+          old = "date_hint=date_hint_from_url(url) or date_hint_from_text(title, self.now),"
+          new = "date_hint=date_hint_from_text(title, self.now) or date_hint_from_url(url),"
+          if old not in text:
+              raise SystemExit("NFL feed-date priority target was not found")
+          collector.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          tests = Path("tests/test_nfl_collector.py")
+          test_text = tests.read_text(encoding="utf-8")
+          old_test = '''    def test_url_date_wins_over_stale_or_misleading_anchor_text(self):\n        now = datetime(2026, 8, 29, 12, tzinfo=timezone.utc)\n        page = """\n        <a href="/dallas-cowboys-new-york-giants-9-13-2026--sports-nfl-football/production/1234567">\n          Dallas Cowboys at New York Giants — Aug 18, 2026\n        </a>\n        """\n        rows = extract_nfl_game_rows(page, now=now)\n        self.assertEqual(len(rows), 1)\n        self.assertEqual(rows[0].date_hint.isoformat(), "2026-09-13")\n\n'''
+          new_test = '''    def test_feed_text_date_wins_when_vivid_slug_is_not_calendar_date(self):\n        now = datetime(2026, 8, 29, 12, tzinfo=timezone.utc)\n        page = """\n        <a href="/seattle-seahawks-tickets-seattle-lumen-field-3-9-2027/production/6493039">\n          New England Patriots at Seattle Seahawks — Wed Sep 9, 2026\n        </a>\n        """\n        rows = extract_nfl_game_rows(page, now=now)\n        self.assertEqual(len(rows), 1)\n        self.assertEqual(rows[0].date_hint.isoformat(), "2026-09-09")\n\n'''
+          if old_test not in test_text:
+              raise SystemExit("NFL feed-date unit test target was not found")
+          tests.write_text(test_text.replace(old_test, new_test, 1), encoding="utf-8")
+          PY
+          python -m py_compile nfl_collector.py tests/test_nfl_collector.py
+          python -m unittest discover -s tests -p 'test_nfl_collector.py' -v
+      - name: Commit repair and remove temporary workflow
+        run: |
+          rm -f fix_nfl_feed_date.ready .github/workflows/fix-nfl-feed-date.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Use NFL feed dates as hints and validate kickoff on event pages"
+          git push origin HEAD:feature/switch-concerts-to-nfl-hourly
