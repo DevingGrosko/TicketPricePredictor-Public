@@ -21,6 +21,9 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
+          cache: pip
+      - name: Install application dependencies
+        run: python -m pip install -r requirements.txt
       - name: Apply team-grouping patch
         run: python apply_nfl_team_grouping.py
       - name: Validate patched files
