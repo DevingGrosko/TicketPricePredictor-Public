@@ -114,11 +114,16 @@ class FlaskProductionStartupTests(unittest.TestCase):
                 )
                 assert wrong_concert_endpoint.status_code == 400
 
+                homepage = client.get("/")
+                assert homepage.status_code == 200
+                assert b"NFL market tracker" in homepage.data
+                assert b"Dallas Cowboys" in homepage.data
+
                 nfl_page = client.get("/nfl")
                 assert nfl_page.status_code == 200
                 assert b"Dallas Cowboys" in nfl_page.data
 
-                baseball_page = client.get("/")
+                baseball_page = client.get("/baseball")
                 assert baseball_page.status_code == 200
                 """
             )
