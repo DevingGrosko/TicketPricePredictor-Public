@@ -47,7 +47,8 @@ Database files, scraped JSON, browser profiles, runtime audit records, and crede
 - `models.py`: baseball models plus preserved concert storage compatibility.
 - `graph_builder.py`: baseball and archived concert chart helpers.
 - `collector.py`: guarded MLB collection, delivery queue, health reporting, and backups.
-- `nfl_collector.py`: league-wide NFL discovery and seven-day hourly collection.
+- `nfl_collector.py`: Vivid NFL parsing, event capture, and feed-only fallback.
+- `nfl_schedule_collector.py`: complete-slate schedule seeding, Vivid resolution, coverage checks, and hourly collection.
 - `concert_collector.py`: preserved concert collector code; no longer scheduled.
 - `Prediction.py`: baseball forecasting experiments.
 
@@ -71,10 +72,12 @@ PythonAnywhere dispatches GitHub Actions on its reliable 30-minute cadence.
 
 - Baseball runs on every dispatch.
 - NFL runs on the first dispatch of each UTC hour.
-- NFL discovery starts from Vivid Seats' league page, filters out parking, packages, season tickets, and other non-game events, then captures only games whose displayed schedule date is within seven days.
-- League discovery scrolls through lazy-loaded results and does not settle until it has found at least one current or future NFL game.
-- Feed dates are discovery hints only because Vivid event URL slugs are not reliable calendar dates.
-- The actual kickoff parsed from each event page is authoritative, and a game is stored only when that time is within 168 hours.
+- The NFL collector first loads the complete scheduled slate inside the exact seven-day window.
+- Each scheduled matchup is matched to Vivid's NFL feed. A missing feed link is recovered through a targeted Vivid search for the two teams.
+- Feed and search results are candidate links only. The title and kickoff parsed from the individual Vivid event page must match the scheduled matchup before anything is stored.
+- The health report records the number scheduled, matched from the feed, recovered through search, unresolved, captured, queued, and uploaded, plus an explicit coverage percentage.
+- If the structured schedule source is unavailable, the prior Vivid-only collector still runs so data collection continues, but the workflow is marked degraded instead of silently claiming complete coverage.
+- The actual kickoff parsed from each event page remains authoritative for enforcing the final 168-hour storage window.
 - Baseball and NFL use separate concurrency groups and pending queues.
 
-The NFL smoke test discovers and captures one current game without writing to a production database.
+The NFL smoke test resolves a scheduled matchup and captures one current game without writing to a production database.
