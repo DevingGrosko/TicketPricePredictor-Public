@@ -41,6 +41,9 @@ from nfl_collector import (
     discover_nfl_games,
     extract_nfl_game_rows,
     hourly_capture_slot,
+    nfl_capture_interval_hours,
+    nfl_capture_is_due,
+    nfl_capture_tier,
     nfl_is_within_capture_window,
     nfl_snapshot_to_payload,
     run_remote_collector as run_feed_only_collector,
@@ -223,6 +226,34 @@ def fetch_schedule_games(
     url = schedule_url(now, horizon_hours)
     payload = fetcher(url, SCHEDULE_REQUEST_TIMEOUT_SECONDS)
     return parse_schedule_payload(payload, now, horizon_hours), url
+
+
+def schedule_games_due(
+    schedule: list[ScheduledNFLGame],
+    capture_slot: datetime,
+) -> list[ScheduledNFLGame]:
+    return [
+        game
+        for game in schedule
+        if nfl_capture_is_due(game.event_date, capture_slot, game.schedule_id)
+    ]
+
+
+def schedule_cadence_summary(
+    schedule: list[ScheduledNFLGame],
+    capture_slot: datetime,
+) -> dict[str, dict[str, int]]:
+    in_window = {"1h": 0, "3h": 0, "6h": 0}
+    due = {"1h": 0, "3h": 0, "6h": 0}
+    for game in schedule:
+        interval = nfl_capture_interval_hours(game.event_date, capture_slot)
+        if interval is None:
+            continue
+        label = f"{interval}h"
+        in_window[label] += 1
+        if nfl_capture_is_due(game.event_date, capture_slot, game.schedule_id):
+            due[label] += 1
+    return {"in_window": in_window, "due_now": due}
 
 
 def matchup_key_from_title(title: str) -> tuple[str, str] | None:
@@ -456,6 +487,7 @@ def run_schedule_collector(
         endpoint, token, pending_dir
     )
 
+    capture_slot = hourly_capture_slot(started_at)
     try:
         schedule, schedule_source = fetch_schedule_games(started_at)
     except Exception as exc:
@@ -471,15 +503,25 @@ def run_schedule_collector(
             schedule_error=message,
         )
 
-    feed_rows, feed_errors = discover_nfl_games(headless, timeout)
-    resolutions, search_errors = resolve_schedule_games(
-        schedule,
-        feed_rows,
-        headless=headless,
-        timeout=timeout,
-    )
+    due_schedule = schedule_games_due(schedule, capture_slot)
+    cadence_summary = schedule_cadence_summary(schedule, capture_slot)
+    if due_schedule:
+        feed_rows, feed_errors = discover_nfl_games(headless, timeout)
+        resolutions, search_errors = resolve_schedule_games(
+            due_schedule,
+            feed_rows,
+            headless=headless,
+            timeout=timeout,
+        )
+    else:
+        feed_rows, feed_errors = [], []
+        resolutions, search_errors = [], []
+        print(
+            f"No NFL games are due in this adaptive cadence slot; "
+            f"{len(schedule)} remain inside the 30-day window.",
+            flush=True,
+        )
 
-    capture_slot = hourly_capture_slot(started_at)
     uploaded = 0
     captured = 0
     queued = 0
@@ -513,7 +555,7 @@ def run_schedule_collector(
                 timeout=timeout,
             )
             if not nfl_is_within_capture_window(event_date, datetime.now(timezone.utc)):
-                raise ValueError("Resolved Vivid event is outside the exact 168-hour window.")
+                raise ValueError("Resolved Vivid event is outside the exact 720-hour window.")
 
             payload = nfl_snapshot_to_payload(
                 url,
@@ -540,6 +582,12 @@ def run_schedule_collector(
                     uploads.append(
                         {
                             "schedule_id": game.schedule_id,
+                            "cadence_hours": nfl_capture_interval_hours(
+                                game.event_date, capture_slot
+                            ),
+                            "cadence_tier": nfl_capture_tier(
+                                game.event_date, capture_slot
+                            ),
                             "url": url,
                             "title": snapshot.title,
                             "venue": snapshot.venue,
@@ -568,7 +616,7 @@ def run_schedule_collector(
             print(f"NFL CAPTURE FAILED: {message}", file=sys.stderr, flush=True)
 
     pending_count = len(list(pending_dir.glob("*.json")))
-    expected = len(schedule)
+    expected = len(due_schedule)
     coverage = 100.0 if expected == 0 else round(captured / expected * 100, 2)
     all_errors = feed_errors + search_errors + capture_errors + queue_errors
     if unresolved or capture_errors or feed_errors or search_errors:
@@ -587,7 +635,16 @@ def run_schedule_collector(
         "started_at": started_at.isoformat(),
         "capture_slot": capture_slot.isoformat(),
         "capture_window_hours": NFL_CAPTURE_WINDOW_HOURS,
+        "cadence_policy": {
+            "days_15_to_30_hours": 6,
+            "days_8_to_14_hours": 3,
+            "final_7_days_hours": 1,
+            "staggering": "deterministic per schedule ID",
+        },
+        "scheduled_in_window": len(schedule),
         "scheduled_due": expected,
+        "skipped_by_cadence": len(schedule) - expected,
+        "cadence_tiers": cadence_summary,
         "feed_discovered": len(feed_rows),
         "matched_from_feed": matched_from_feed,
         "recovered_from_search": recovered_from_search,
@@ -606,7 +663,8 @@ def run_schedule_collector(
     _write_health(health_output, report)
     print(
         "NFL schedule-backed collection finished: "
-        f"{captured}/{expected} captured ({coverage:.2f}% coverage), "
+        f"{captured}/{expected} due games captured ({coverage:.2f}% coverage); "
+        f"{len(schedule)} games remain inside the 30-day window, "
         f"{recovered_from_search} recovered through search, "
         f"{len(unresolved)} unresolved, {queued} queued, {replayed} replayed.",
         flush=True,

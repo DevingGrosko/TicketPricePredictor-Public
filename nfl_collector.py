@@ -1,8 +1,9 @@
 """Collect Vivid Seats NFL ticket prices into the separate NFL pipeline.
 
-NFL games are discovered from Vivid's league feed, tracked during the final
-seven days before kickoff, sampled once per UTC hour, and uploaded to the
-NFL-only API and database.
+NFL games are discovered from Vivid's league feed and tracked during the
+final 30 days before kickoff. Each game is sampled every six hours from 30 to
+14 days out, every three hours from 14 to 7 days out, and once per hour during
+the final week before being uploaded to the NFL-only API and database.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from html.parser import HTMLParser
+import hashlib
 import html
 import json
 import os
@@ -41,8 +43,13 @@ PROJECT_DIR = Path(__file__).resolve().parent
 DEFAULT_HEALTH_OUTPUT = PROJECT_DIR / "nfl_remote_health.json"
 DEFAULT_PENDING_DIR = PROJECT_DIR / "nfl_pending"
 DEFAULT_SMOKE_OUTPUT = PROJECT_DIR / "nfl_smoke_result.json"
-NFL_CAPTURE_WINDOW_HOURS = 7 * 24
-DISCOVERY_HORIZON_DAYS = 7
+NFL_CAPTURE_WINDOW_HOURS = 30 * 24
+NFL_THREE_HOUR_WINDOW_HOURS = 14 * 24
+NFL_HOURLY_WINDOW_HOURS = 7 * 24
+NFL_EARLY_CADENCE_HOURS = 6
+NFL_MIDDLE_CADENCE_HOURS = 3
+NFL_FINAL_CADENCE_HOURS = 1
+DISCOVERY_HORIZON_DAYS = 30
 SMOKE_HORIZON_DAYS = 45
 MIN_USABLE_SECTIONS = 10
 NFL_FEED_URL = "https://www.vividseats.com/nfl/"
@@ -449,6 +456,88 @@ def hourly_capture_slot(value: datetime) -> datetime:
     return value.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
 
 
+def nfl_capture_interval_hours(event_date: datetime, now: datetime) -> int | None:
+    """Return the collection interval for a game at the supplied moment."""
+    hours_until = (
+        as_utc(event_date) - now.astimezone(timezone.utc)
+    ).total_seconds() / 3600
+    if not 0 < hours_until <= NFL_CAPTURE_WINDOW_HOURS:
+        return None
+    if hours_until <= NFL_HOURLY_WINDOW_HOURS:
+        return NFL_FINAL_CADENCE_HOURS
+    if hours_until <= NFL_THREE_HOUR_WINDOW_HOURS:
+        return NFL_MIDDLE_CADENCE_HOURS
+    return NFL_EARLY_CADENCE_HOURS
+
+
+def nfl_capture_tier(event_date: datetime, now: datetime) -> str | None:
+    interval = nfl_capture_interval_hours(event_date, now)
+    return {
+        NFL_FINAL_CADENCE_HOURS: "final_7_days_hourly",
+        NFL_MIDDLE_CADENCE_HOURS: "days_8_to_14_every_3_hours",
+        NFL_EARLY_CADENCE_HOURS: "days_15_to_30_every_6_hours",
+    }.get(interval)
+
+
+def nfl_capture_phase(cadence_key: str, interval_hours: int) -> int:
+    """Assign a stable hourly phase so longer-window games are staggered."""
+    if interval_hours <= 1:
+        return 0
+    digest = hashlib.sha256(str(cadence_key).encode("utf-8")).digest()
+    return int.from_bytes(digest[:4], "big") % interval_hours
+
+
+def nfl_capture_is_due(
+    event_date: datetime,
+    capture_slot: datetime,
+    cadence_key: str = "",
+) -> bool:
+    interval = nfl_capture_interval_hours(event_date, capture_slot)
+    if interval is None:
+        return False
+    if interval == NFL_FINAL_CADENCE_HOURS:
+        return True
+    phase_key = cadence_key or as_utc(event_date).isoformat()
+    phase = nfl_capture_phase(phase_key, interval)
+    utc_hour = int(hourly_capture_slot(capture_slot).timestamp() // 3600)
+    return utc_hour % interval == phase
+
+
+def approximate_nfl_event_time(game: DiscoveredNFLGame) -> datetime | None:
+    """Use a stable afternoon kickoff only for degraded feed-only pacing."""
+    if game.date_hint is None:
+        return None
+    return datetime(
+        game.date_hint.year,
+        game.date_hint.month,
+        game.date_hint.day,
+        13,
+        tzinfo=NEW_YORK,
+    )
+
+
+def adaptive_due_nfl_games(
+    games: list[DiscoveredNFLGame],
+    now: datetime,
+    limit: int | None = None,
+) -> list[DiscoveredNFLGame]:
+    """Filter feed-only fallback games using the same staggered cadence."""
+    capture_slot = hourly_capture_slot(now)
+    eligible = upcoming_nfl_games(
+        games,
+        now,
+        horizon_days=DISCOVERY_HORIZON_DAYS,
+    )
+    due = []
+    for game in eligible:
+        approximate_date = approximate_nfl_event_time(game)
+        if approximate_date is None:
+            continue
+        if nfl_capture_is_due(approximate_date, capture_slot, game.url):
+            due.append(game)
+    return due if limit is None else due[:limit]
+
+
 def nfl_is_within_capture_window(event_date: datetime, now: datetime) -> bool:
     hours_until = (as_utc(event_date) - now.astimezone(timezone.utc)).total_seconds() / 3600
     return 0 < hours_until <= NFL_CAPTURE_WINDOW_HOURS
@@ -616,15 +705,21 @@ def run_remote_collector(
         endpoint, token, pending_dir
     )
     discovered, discovery_errors = discover_nfl_games(headless, timeout)
-    due_games = upcoming_nfl_games(discovered, started_at)
+    capture_slot = hourly_capture_slot(started_at)
+    due_games = adaptive_due_nfl_games(discovered, capture_slot)
+    in_window = upcoming_nfl_games(
+        discovered,
+        started_at,
+        horizon_days=DISCOVERY_HORIZON_DAYS,
+    )
     undated = sum(game.date_hint is None for game in discovered)
     print(
-        f"{len(due_games)} NFL games fall within the seven-day date window "
+        f"{len(due_games)} of {len(in_window)} NFL games inside the 30-day "
+        f"window are due in this staggered cadence slot "
         f"({undated} discovered links had no date hint).",
         flush=True,
     )
 
-    capture_slot = hourly_capture_slot(started_at)
     uploaded = 0
     captured = 0
     queued = 0
@@ -641,7 +736,14 @@ def run_remote_collector(
             if not nfl_is_within_capture_window(event_date, datetime.now(timezone.utc)):
                 skipped += 1
                 print(
-                    f"SKIP: NFL game is outside the exact seven-day window: {game.url}",
+                    f"SKIP: NFL game is outside the exact 30-day window: {game.url}",
+                    flush=True,
+                )
+                continue
+            if not nfl_capture_is_due(event_date, capture_slot, game.url):
+                skipped += 1
+                print(
+                    f"SKIP: NFL game is not due in this adaptive cadence slot: {game.url}",
                     flush=True,
                 )
                 continue
@@ -711,14 +813,16 @@ def run_remote_collector(
         "status": status,
         "event_type": "nfl",
         "storage": "separate NFL database",
-        "cadence": "hourly",
+        "cadence": "adaptive: 6h from days 15-30, 3h from days 8-14, hourly in final 7 days",
         "capture_window_hours": NFL_CAPTURE_WINDOW_HOURS,
         "started_at": started_at.isoformat(),
         "capture_slot": capture_slot.isoformat(),
         "feed": NFL_FEED_URL,
         "discovered": len(discovered),
         "undated": undated,
+        "in_window": len(in_window),
         "due": len(due_games),
+        "skipped_by_cadence": len(in_window) - len(due_games),
         "uploaded": uploaded,
         "captured": captured,
         "queued": queued,
