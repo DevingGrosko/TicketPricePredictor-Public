@@ -8,8 +8,8 @@ import unittest
 
 
 class FlaskProductionStartupTests(unittest.TestCase):
-    def test_fresh_app_import_and_separate_endpoints(self):
-        """Exercise a fresh process so CI catches PythonAnywhere import failures."""
+    def test_fresh_app_import_with_pythonanywhere_deploy_allowlist(self):
+        """Prove the live app needs only files synchronized by the deploy key."""
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             env = os.environ.copy()
@@ -24,6 +24,29 @@ class FlaskProductionStartupTests(unittest.TestCase):
             script = textwrap.dedent(
                 """
                 from datetime import datetime, timedelta, timezone
+                import importlib.abc
+                import sys
+
+                # PythonAnywhere's restricted deploy key synchronizes
+                # Flask_App, models.py, and graph_builder.py. These modular
+                # compatibility files are intentionally absent from the live
+                # import path and must never be required by the WSGI app.
+                class BlockUndeployedConcertModules(importlib.abc.MetaPathFinder):
+                    blocked = {
+                        "concert_models",
+                        "concert_graph_builder",
+                        "concert_collector",
+                        "legacy_concert_migration",
+                    }
+
+                    def find_spec(self, fullname, path=None, target=None):
+                        if fullname in self.blocked:
+                            raise ImportError(
+                                f"{fullname} is unavailable in the restricted deployment"
+                            )
+                        return None
+
+                sys.meta_path.insert(0, BlockUndeployedConcertModules())
 
                 from Flask_App.flask_app import app
 
