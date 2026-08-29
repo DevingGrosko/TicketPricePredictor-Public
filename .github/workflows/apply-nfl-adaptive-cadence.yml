@@ -1,0 +1,55 @@
+name: Apply NFL 30-day adaptive cadence
+
+on:
+  push:
+    branches:
+      - feature/nfl-30-day-adaptive-cadence
+    paths:
+      - "nfl_adaptive_patch.ready"
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/nfl-30-day-adaptive-cadence
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Apply source changes
+        run: |
+          python tools/apply_nfl_adaptive_cadence.py
+          python tools/fix_nfl_adaptive_patch.py
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate adaptive cadence implementation
+        run: |
+          python -m py_compile \
+            nfl_collector.py \
+            nfl_schedule_collector.py \
+            Flask_App/nfl_blueprint.py
+          python -m unittest discover -s tests -v
+
+      - name: Commit tested implementation
+        run: |
+          rm -f \
+            nfl_adaptive_patch.ready \
+            tools/apply_nfl_adaptive_cadence.py \
+            tools/fix_nfl_adaptive_patch.py \
+            .github/workflows/apply-nfl-adaptive-cadence.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Extend NFL tracking to 30 days with adaptive cadence"
+          git push origin HEAD:feature/nfl-30-day-adaptive-cadence
