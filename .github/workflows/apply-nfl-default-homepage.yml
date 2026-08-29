@@ -32,7 +32,7 @@ jobs:
           python -m unittest discover -s tests -v
       - name: Commit implementation
         run: |
-          rm -f apply_nfl_default_homepage.py .github/workflows/apply-nfl-default-homepage.yml
+          rm -f apply_nfl_default_homepage.py
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
