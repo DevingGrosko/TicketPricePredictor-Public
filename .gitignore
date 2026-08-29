@@ -6,14 +6,17 @@ __pycache__/
 venv/
 .env
 
-# Local scraped data and deployment database
+# Local scraped data and deployment databases
 Event-collection.db
+Concert-collection.db
 *.db
 *.sqlite*
 vivid_listings.json
 quarter.json
 collector_audit/
 collector_backups/
+concert_audit/
+concert_backups/
 collector_health.json
 collector_state.json
 collector_remote_health.json
