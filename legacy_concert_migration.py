@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 import fcntl
 from pathlib import Path
 import re
-import sqlite3
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import selectinload, sessionmaker
@@ -45,22 +44,6 @@ def _source_id(url: str) -> str:
     if match is None:
         raise ValueError(f"Concert URL is missing its production ID: {url}")
     return match.group(1)
-
-
-def _write_pre_migration_backup(source: Path, timestamp: str) -> Path:
-    """Preserve the exact contaminated database before deleting legacy rows."""
-    backup_dir = source.parent / "legacy_concert_migration_backups"
-    backup_dir.mkdir(parents=True, exist_ok=True)
-    target = backup_dir / f"{source.stem}-before-concert-migration-{timestamp}.db"
-    if target.exists():
-        return target
-
-    temporary = target.with_suffix(".db.tmp")
-    temporary.unlink(missing_ok=True)
-    with sqlite3.connect(source) as source_db, sqlite3.connect(temporary) as backup_db:
-        source_db.backup(backup_db)
-    temporary.replace(target)
-    return target
 
 
 def migrate_legacy_concert_rows(
@@ -118,8 +101,9 @@ def migrate_legacy_concert_rows(
 
             if make_backups:
                 now = datetime.now(timezone.utc)
-                timestamp = now.strftime("%Y%m%dT%H%M%SZ")
-                _write_pre_migration_backup(baseball_db, timestamp)
+                # The normal SQLite backup mechanism is already optimized to
+                # create at most one copy per day, avoiding an extra multi-GB
+                # copy during a web-app reload.
                 create_daily_backup(now=now, source=baseball_db)
                 create_concert_daily_backup(now=now, source=concert_db)
 
