@@ -50,6 +50,7 @@ Database files, scraped JSON, browser profiles, runtime audit records, and crede
 - `nfl_collector.py`: Vivid NFL parsing, event capture, and feed-only fallback.
 - `nfl_schedule_collector.py`: complete-slate schedule seeding, Vivid resolution, coverage checks, and hourly collection.
 - `manual_provider_capture.py`: human-in-the-loop Ticketmaster and SeatGeek response diagnostics.
+- `hosted_provider_probe.py`: standard GitHub-hosted Chrome probe with block classification and sanitized response capture.
 - `concert_collector.py`: preserved concert collector code; no longer scheduled.
 - `Prediction.py`: baseball forecasting experiments.
 
@@ -82,6 +83,33 @@ PythonAnywhere dispatches GitHub Actions on its reliable 30-minute cadence.
 - Baseball and NFL use separate concurrency groups and pending queues.
 
 The NFL smoke test resolves a scheduled matchup and captures one current game without writing to a production database.
+
+## GitHub-hosted Ticketmaster and SeatGeek probe
+
+The **Hosted Ticketmaster or SeatGeek probe** workflow runs a standard headless Chrome session on a GitHub-hosted runner. It is separate from the Vivid production collector and does not write to any production database.
+
+To run it:
+
+1. Open the repository's **Actions** tab.
+2. Select **Hosted Ticketmaster or SeatGeek probe**.
+3. Choose **Run workflow**.
+4. Paste a full provider event URL and select the provider.
+5. Download the generated `provider-probe-*` artifact.
+
+The artifact contains:
+
+- `provider_probe_report.json`: sanitized response summaries, candidate section-price records, HTTP statuses, safe inventory-view clicks, and the final outcome.
+- `provider_probe.png`: the final browser screenshot.
+
+Possible outcomes are:
+
+- `section_inventory_found`
+- `provider_json_found_no_section_records`
+- `page_loaded_no_inventory_json`
+- `page_request_failed`
+- `blocked`
+
+The workflow uses ordinary Chrome navigation, limited scrolling, and non-purchasing inventory-view interactions. It does not hide WebDriver, change the User-Agent or browser fingerprint, rotate proxies, import session cookies, solve CAPTCHAs, or replay challenge tokens. A successful section-level response can be used to build a provider-specific parser; a blocked result is recorded rather than bypassed.
 
 ## Manual Ticketmaster and SeatGeek diagnostics
 

@@ -1,0 +1,121 @@
+name: Hosted Ticketmaster or SeatGeek probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      event_url:
+        description: Full Ticketmaster or SeatGeek event URL
+        required: true
+        type: string
+      provider:
+        description: Provider validation
+        required: true
+        default: auto
+        type: choice
+        options:
+          - auto
+          - ticketmaster
+          - seatgeek
+      duration_seconds:
+        description: Maximum ordinary-browser probe duration
+        required: true
+        default: "55"
+        type: string
+      include_sanitized_payloads:
+        description: Include sanitized provider JSON for parser development
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install browser dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Show standard browser versions
+        run: |
+          google-chrome --version || chromium --version || true
+          chromedriver --version || true
+
+      - name: Probe provider page with ordinary headless Chrome
+        id: capture
+        continue-on-error: true
+        env:
+          EVENT_URL: ${{ inputs.event_url }}
+          PROVIDER: ${{ inputs.provider }}
+          DURATION: ${{ inputs.duration_seconds }}
+          INCLUDE_PAYLOADS: ${{ inputs.include_sanitized_payloads }}
+        run: |
+          set +e
+          extra_args=()
+          if [[ "$INCLUDE_PAYLOADS" == "true" ]]; then
+            extra_args+=(--include-sanitized-payloads)
+          fi
+          python hosted_provider_probe.py "$EVENT_URL" \
+            --provider "$PROVIDER" \
+            --duration "$DURATION" \
+            --output provider_probe_report.json \
+            --screenshot provider_probe.png \
+            "${extra_args[@]}"
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit "$code"
+
+      - name: Publish diagnostic summary
+        if: always()
+        env:
+          PROBE_EXIT_CODE: ${{ steps.capture.outputs.exit_code }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report_path = Path("provider_probe_report.json")
+          if not report_path.exists():
+              print("## Provider probe\n\nNo report was produced.", file=open(os.environ["GITHUB_STEP_SUMMARY"], "a"))
+              raise SystemExit(0)
+
+          report = json.loads(report_path.read_text(encoding="utf-8"))
+          state = report.get("probe_state") or {}
+          lines = [
+              "## Provider probe",
+              "",
+              f"- Outcome: `{report.get('outcome', 'unknown')}`",
+              f"- Candidate section-price rows: `{report.get('candidate_count', 0)}`",
+              f"- Provider JSON responses parsed: `{report.get('json_responses_parsed', 0)}`",
+              f"- Responses examined: `{report.get('responses_examined', 0)}`",
+              f"- Main document statuses: `{state.get('main_document_statuses', [])}`",
+              f"- Block markers: `{state.get('blocked_markers', [])}`",
+              f"- Safe inventory clicks: `{state.get('safe_clicks', [])}`",
+              f"- Probe exit code: `{os.environ.get('PROBE_EXIT_CODE', '')}`",
+              "",
+              "The runner used standard headless Chrome without stealth, proxy rotation, CAPTCHA solving, challenge-token replay, or imported session cookies.",
+          ]
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as handle:
+              handle.write("\n".join(lines) + "\n")
+          PY
+
+      - name: Upload sanitized report and screenshot
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: provider-probe-${{ github.run_id }}
+          path: |
+            provider_probe_report.json
+            provider_probe.png
+          if-no-files-found: warn
+          retention-days: 7

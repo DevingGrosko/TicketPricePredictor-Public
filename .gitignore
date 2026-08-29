@@ -28,6 +28,7 @@ concert_remote_health.json
 concert_smoke_result.json
 nfl_remote_health.json
 nfl_smoke_result.json
+provider_probe_report.json
 dispatcher_state.json
 dispatcher.lock
 collector_pending/
