@@ -14,9 +14,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Package source
-        run: tar --exclude=.git --exclude=source.tar.gz -czf source.tar.gz .
+        run: tar --exclude=.git -czf /tmp/source.tar.gz .
       - uses: actions/upload-artifact@v7
         with:
           name: nfl-branch-source
-          path: source.tar.gz
+          path: /tmp/source.tar.gz
           retention-days: 1
