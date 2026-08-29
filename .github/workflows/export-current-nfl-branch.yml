@@ -1,0 +1,23 @@
+name: Export current NFL branch
+
+on:
+  push:
+    branches:
+      - feature/switch-concerts-to-nfl-hourly
+    paths:
+      - ".github/workflows/export-current-nfl-branch.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: tar --exclude=.git -czf /tmp/current-nfl-source.tar.gz .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: current-nfl-branch-source
+          path: /tmp/current-nfl-source.tar.gz
+          retention-days: 1
