@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Concert prices — TicketSignal{% endblock %}
+
+{% block content %}
+<section class="hero">
+  <div class="hero-copy">
+    <div class="eyebrow"><span></span> Concert price intelligence</div>
+    <h1>One week of movement.<br><em>One concert at a time.</em></h1>
+    <p class="hero-lede">Concert prices are tracked in their own database once per hour during the final seven days before showtime.</p>
+    <div class="hero-actions">
+      <a class="button button--primary" href="#explore-concerts">Explore concert history <span aria-hidden="true">&#8595;</span></a>
+      <a class="text-link" href="{{ url_for('home') }}">View baseball data <span aria-hidden="true">&#8594;</span></a>
+    </div>
+    <dl class="hero-stats">
+      <div><dt>{{ venue_count }}</dt><dd>Arenas tracked</dd></div>
+      <div><dt>{{ concert_count }}</dt><dd>Concerts recorded</dd></div>
+      <div><dt>{{ section_count }}</dt><dd>Unique sections</dd></div>
+    </dl>
+  </div>
+
+  <div class="hero-visual" aria-label="Concert collection policy">
+    <div class="signal-card">
+      <div class="signal-card__header">
+        <div><span>Concert pipeline</span><strong>Independent from baseball</strong></div>
+        <span class="live-pill"><i></i> Hourly</span>
+      </div>
+      <div class="signal-value"><strong>168h</strong><span>tracked before each concert</span></div>
+      <div class="chart" aria-hidden="true">
+        <div class="chart-grid"></div>
+        <svg viewBox="0 0 620 240" preserveAspectRatio="none" role="img">
+          <defs>
+            <linearGradient id="concertAreaGradient" x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stop-color="#8b5cf6" stop-opacity=".35"/>
+              <stop offset="100%" stop-color="#8b5cf6" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+          <path class="chart-area" d="M0 70 C70 45,120 100,180 78 S290 130,350 95 S470 160,620 125 L620 240 L0 240 Z"/>
+          <path class="chart-line" d="M0 70 C70 45,120 100,180 78 S290 130,350 95 S470 160,620 125"/>
+          <circle cx="470" cy="145" r="7"/>
+        </svg>
+        <span class="chart-tooltip">Hourly snapshots</span>
+      </div>
+      <div class="chart-labels"><span>7d</span><span>5d</span><span>3d</span><span>1d</span><span>Showtime</span></div>
+    </div>
+  </div>
+</section>
+
+<section class="explore-section" id="explore-concerts">
+  <div class="section-heading">
+    <div><span class="section-kicker">Concert data</span><h2>Follow one concert over time</h2></div>
+    <p>Choose an arena, concert, and section. Concert history never enters the baseball database or baseball analysis.</p>
+  </div>
+
+  <div class="analysis-shell">
+    <div class="analysis-panel is-active" role="tabpanel">
+      <div class="panel-copy">
+        <span class="panel-icon">&#9835;</span>
+        <span class="section-kicker">Single concert</span>
+        <h3>Inspect the final seven days</h3>
+        <p>See the lowest displayed listing price in a section at each hourly collection point.</p>
+        <ul><li>Separate concert database</li><li>Hourly observations</li><li>Dollar or percentage view</li></ul>
+      </div>
+      <form class="selection-form concert-selection-form">
+        <div class="field"><label for="concert-place">1. Choose an arena</label><select id="concert-place" class="place-select"><option value="">Select an arena</option>{% for place in concerts_dict %}<option value="{{ place }}">{{ place }}</option>{% endfor %}</select></div>
+        <div class="field"><label for="concert-title">2. Choose a concert</label><select id="concert-title" class="concert-select" disabled><option value="">Select a concert</option></select></div>
+        <div class="field"><label for="concert-section">3. Choose a section</label><select id="concert-section" class="section-select" disabled><option value="">Select a section</option></select></div>
+        <button class="button button--primary submit-analysis" type="submit" disabled>View concert trend <span>&#8594;</span></button>
+        <p class="form-note"><span>&#9432;</span> Concert layouts are analyzed event by event rather than averaged with baseball or other concerts.</p>
+      </form>
+    </div>
+  </div>
+</section>
+
+<script>
+  const concertsData = {{ concerts_dict | tojson }};
+  const concertSectionsData = {{ concert_sections_dict | tojson }};
+</script>
+{% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', filename='js/concerts.js') }}?v=1"></script>{% endblock %}
