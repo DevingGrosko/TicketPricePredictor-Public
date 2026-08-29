@@ -246,7 +246,7 @@ class _NFLAnchorParser(HTMLParser):
             DiscoveredNFLGame(
                 url=url,
                 title=title,
-                date_hint=date_hint_from_url(url) or date_hint_from_text(title, self.now),
+                date_hint=date_hint_from_text(title, self.now) or date_hint_from_url(url),
             )
         )
 
