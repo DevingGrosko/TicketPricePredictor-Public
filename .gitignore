@@ -33,6 +33,8 @@ dispatcher.lock
 collector_pending/
 concert_pending/
 nfl_pending/
+manual_provider_captures/
+*.har
 
 # Local artifacts
 *.log
