@@ -1,4 +1,4 @@
-name: Manual provider capture tests
+name: Manual and hosted provider capture tests
 
 on:
   pull_request:
@@ -6,15 +6,21 @@ on:
       - main
     paths:
       - "manual_provider_capture.py"
+      - "hosted_provider_probe.py"
       - "tests/test_manual_provider_capture.py"
+      - "tests/test_hosted_provider_probe.py"
       - ".github/workflows/manual-provider-capture-tests.yml"
+      - ".github/workflows/provider-probe.yml"
   push:
     branches:
       - main
     paths:
       - "manual_provider_capture.py"
+      - "hosted_provider_probe.py"
       - "tests/test_manual_provider_capture.py"
+      - "tests/test_hosted_provider_probe.py"
       - ".github/workflows/manual-provider-capture-tests.yml"
+      - ".github/workflows/provider-probe.yml"
   workflow_dispatch:
 
 permissions:
@@ -31,7 +37,10 @@ jobs:
           cache: pip
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
-      - name: Validate diagnostic parser
+      - name: Validate provider diagnostics
         run: |
-          python -m py_compile manual_provider_capture.py
-          python -m unittest tests.test_manual_provider_capture -v
+          python -m py_compile manual_provider_capture.py hosted_provider_probe.py
+          python -m unittest \
+            tests.test_manual_provider_capture \
+            tests.test_hosted_provider_probe \
+            -v
