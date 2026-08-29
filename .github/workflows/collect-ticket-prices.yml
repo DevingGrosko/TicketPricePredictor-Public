@@ -122,12 +122,12 @@ jobs:
         if: steps.cadence.outputs.run == 'true'
         run: python -m pip install "selenium>=4.26.1,<5" "SQLAlchemy>=2,<3"
 
-      - name: Discover and collect NFL games inside seven days
+      - name: Collect the complete scheduled NFL slate inside seven days
         if: steps.cadence.outputs.run == 'true'
         env:
           COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
         run: |
-          python nfl_collector.py remote-run \
+          python nfl_schedule_collector.py remote-run \
             --endpoint https://bunnyjeff.pythonanywhere.com/api/nfl/snapshot \
             --headless \
             --timeout 45 \
