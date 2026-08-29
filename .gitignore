@@ -9,6 +9,7 @@ venv/
 # Local scraped data and deployment databases
 Event-collection.db
 Concert-collection.db
+NFL-collection.db
 *.db
 *.sqlite*
 vivid_listings.json
@@ -17,16 +18,21 @@ collector_audit/
 collector_backups/
 concert_audit/
 concert_backups/
+nfl_audit/
+nfl_backups/
 *.concert-migration.lock
 collector_health.json
 collector_state.json
 collector_remote_health.json
 concert_remote_health.json
 concert_smoke_result.json
+nfl_remote_health.json
+nfl_smoke_result.json
 dispatcher_state.json
 dispatcher.lock
 collector_pending/
 concert_pending/
+nfl_pending/
 
 # Local artifacts
 *.log
