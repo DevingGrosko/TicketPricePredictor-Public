@@ -41,20 +41,28 @@ jobs:
           google-chrome --version || chromium --version || true
           chromedriver --version || true
 
-      - name: Resolve and capture one scheduled NFL game without production writes
+      - name: Validate the complete seven-day NFL schedule source
+        run: |
+          python nfl_schedule_collector.py schedule \
+            --horizon-hours 168 \
+            > nfl_schedule_result.json
+
+      - name: Capture one NFL event without writing to production
         env:
           REQUESTED_EVENT_URL: ${{ inputs.event_url }}
         run: |
-          python nfl_schedule_collector.py smoke "$REQUESTED_EVENT_URL" \
+          python nfl_collector.py smoke "$REQUESTED_EVENT_URL" \
             --headless \
             --timeout 45 \
             --output nfl_smoke_result.json
 
-      - name: Upload diagnostic result
+      - name: Upload diagnostic results
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: nfl-smoke-result-${{ github.run_id }}
-          path: nfl_smoke_result.json
+          path: |
+            nfl_schedule_result.json
+            nfl_smoke_result.json
           if-no-files-found: warn
           retention-days: 14
