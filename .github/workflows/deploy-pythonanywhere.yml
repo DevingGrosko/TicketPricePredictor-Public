@@ -8,6 +8,7 @@ on:
       - "Flask_App/**"
       - "collector.py"
       - "nfl_collector.py"
+      - "nfl_schedule_collector.py"
       - "concert_collector.py"
       - "concert_models.py"
       - "concert_graph_builder.py"
@@ -24,6 +25,7 @@ on:
       - "Flask_App/**"
       - "collector.py"
       - "nfl_collector.py"
+      - "nfl_schedule_collector.py"
       - "concert_collector.py"
       - "concert_models.py"
       - "concert_graph_builder.py"
@@ -58,6 +60,7 @@ jobs:
           python -m py_compile \
             collector.py \
             nfl_collector.py \
+            nfl_schedule_collector.py \
             concert_collector.py \
             concert_models.py \
             concert_graph_builder.py \
