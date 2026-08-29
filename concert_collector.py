@@ -1,28 +1,26 @@
-"""Collect Vivid Seats concert prices through the existing snapshot API.
+"""Collect Vivid Seats concert prices into the separate concert pipeline.
 
-This module deliberately leaves the MLB collector unchanged. It discovers
-concerts at a curated set of arenas, captures section-level prices during the
-final 72 hours, and sends the snapshots to the same authenticated endpoint.
+Concerts are discovered from curated arena feeds, tracked during the final
+seven days, sampled once per UTC hour, and uploaded to the concert-only API.
 """
 
 from __future__ import annotations
 
 import argparse
-import html
-import json
-import os
-import re
-import sys
-import time
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+import html
+import json
+import os
 from pathlib import Path
+import re
+import sys
+import time
 from typing import Any
 from urllib.parse import urljoin
 
 from collector import (
-    CAPTURE_WINDOW_HOURS,
     DISCOVERY_SETTLE_SECONDS,
     EventSnapshot,
     NEW_YORK,
@@ -32,19 +30,21 @@ from collector import (
     post_snapshot_with_retry,
     queue_snapshot,
     replay_pending_snapshots,
+    snapshot_from_payload,
     snapshot_to_payload,
     validated_vivid_url,
 )
+
 
 PROJECT_DIR = Path(__file__).resolve().parent
 DEFAULT_HEALTH_OUTPUT = PROJECT_DIR / "concert_remote_health.json"
 DEFAULT_PENDING_DIR = PROJECT_DIR / "concert_pending"
 DEFAULT_SMOKE_OUTPUT = PROJECT_DIR / "concert_smoke_result.json"
-DISCOVERY_HORIZON_DAYS = 3
+CONCERT_CAPTURE_WINDOW_HOURS = 7 * 24
+DISCOVERY_HORIZON_DAYS = 7
 SMOKE_HORIZON_DAYS = 45
 MIN_USABLE_SECTIONS = 10
 
-# Start with four major arenas whose Vivid venue feeds have been verified.
 CONCERT_VENUE_FEEDS = {
     "Madison Square Garden": "https://www.vividseats.com/madison-square-garden-tickets/venue/973",
     "Barclays Center": "https://www.vividseats.com/barclays-center-tickets/venue/9671",
@@ -87,7 +87,7 @@ def extract_concert_event_urls(
 
 
 class ConcertSnapshotParser:
-    """Convert a Vivid listings response into one lowest price per section."""
+    """Convert a listings response into the lowest displayed price per section."""
 
     @staticmethod
     def parse(payload: dict[str, Any]) -> EventSnapshot:
@@ -109,8 +109,8 @@ class ConcertSnapshotParser:
             if "OBSTRUCTED_VIEW" in set(listing.get("tags") or []):
                 continue
 
-            # Concert layouts often use GA, Pit, Floor, Lawn, or Standing Room.
-            # Unlike the MLB parser, section names do not need to end in a number.
+            # Concert layouts frequently use non-numeric labels such as GA,
+            # Pit, Floor, Lawn, and Standing Room.
             section = " ".join(str(listing.get("l") or "").split())
             if not section:
                 continue
@@ -169,7 +169,7 @@ class ConcertSnapshotParser:
 
 
 class VividConcertBrowser(VividBrowser):
-    """Reuse the existing browser capture logic with concert-only discovery."""
+    """Reuse browser capture while limiting venue discovery to concerts."""
 
     def discover_event_urls(self, venue_url: str) -> set[str]:
         from selenium.common.exceptions import TimeoutException
@@ -205,7 +205,10 @@ class VividConcertBrowser(VividBrowser):
 
 
 def upcoming_concerts(
-    urls: set[str], now: datetime, horizon_days: int, limit: int | None = None
+    urls: set[str],
+    now: datetime,
+    horizon_days: int = DISCOVERY_HORIZON_DAYS,
+    limit: int | None = None,
 ) -> list[str]:
     """Return ordered concert URLs inside a rolling calendar-date window."""
     today = now.astimezone(NEW_YORK).date()
@@ -218,6 +221,55 @@ def upcoming_concerts(
     ]
     eligible.sort(key=lambda url: (event_date_from_concert_url(url), url))
     return eligible if limit is None else eligible[:limit]
+
+
+def hourly_capture_slot(value: datetime) -> datetime:
+    """Map every run in an hour to one idempotent UTC storage slot."""
+    return value.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
+
+
+def concert_is_within_capture_window(event_date: datetime, now: datetime) -> bool:
+    hours_until = (as_utc(event_date) - now.astimezone(timezone.utc)).total_seconds() / 3600
+    return 0 < hours_until <= CONCERT_CAPTURE_WINDOW_HOURS
+
+
+def concert_snapshot_to_payload(
+    url: str,
+    event_date: datetime,
+    captured_at: datetime,
+    snapshot: EventSnapshot,
+) -> dict[str, Any]:
+    payload = snapshot_to_payload(url, event_date, captured_at, snapshot)
+    payload["event_type"] = "concert"
+    return payload
+
+
+def concert_snapshot_from_payload(
+    payload: dict[str, Any],
+) -> tuple[str, datetime, datetime, EventSnapshot]:
+    """Validate that an uploaded snapshot is a concert, not a baseball game."""
+    event_type = payload.get("event_type")
+    if event_type not in {None, "concert"}:
+        raise ValueError("Concert endpoint only accepts concert snapshots.")
+
+    url, event_date, captured_at, snapshot = snapshot_from_payload(payload)
+    if event_date_from_concert_url(url) is None:
+        raise ValueError("Concert endpoint only accepts Vivid concert URLs.")
+
+    title = str(payload.get("title") or "").strip()
+    if not title:
+        raise ValueError("Concert snapshot is missing its title.")
+    return (
+        url,
+        event_date,
+        captured_at,
+        EventSnapshot(
+            source_id=snapshot.source_id,
+            title=title,
+            venue=snapshot.venue,
+            sections=snapshot.sections,
+        ),
+    )
 
 
 def concert_cycle_exit_code(
@@ -259,7 +311,7 @@ def discover_concerts(headless: bool, timeout: int) -> tuple[set[str], list[str]
 def run_smoke_capture(
     requested_url: str, headless: bool, timeout: int, output: Path
 ) -> int:
-    """Capture one concert without writing anything to the production database."""
+    """Capture one concert without writing to either production database."""
     errors: list[str] = []
     if requested_url:
         candidates = [validated_vivid_url(requested_url)]
@@ -267,7 +319,10 @@ def run_smoke_capture(
         discovered, discovery_errors = discover_concerts(headless, timeout)
         errors.extend(discovery_errors)
         candidates = upcoming_concerts(
-            discovered, datetime.now(timezone.utc), SMOKE_HORIZON_DAYS, limit=12
+            discovered,
+            datetime.now(timezone.utc),
+            horizon_days=SMOKE_HORIZON_DAYS,
+            limit=12,
         )
 
     for url in candidates:
@@ -334,25 +389,19 @@ def run_remote_collector(
     health_output: Path,
     pending_dir: Path,
 ) -> int:
-    """Discover, capture, and upload concerts inside the final 72 hours."""
+    """Discover, capture, and upload concerts during their final seven days."""
     started_at = datetime.now(timezone.utc)
     replayed, endpoint_available, queue_errors = replay_pending_snapshots(
         endpoint, token, pending_dir
     )
     discovered, discovery_errors = discover_concerts(headless, timeout)
-    due_urls = upcoming_concerts(
-        discovered, started_at, DISCOVERY_HORIZON_DAYS
-    )
+    due_urls = upcoming_concerts(discovered, started_at)
     print(
-        f"{len(due_urls)} candidate concerts fall within the rolling date window.",
+        f"{len(due_urls)} candidate concerts fall within the seven-day window.",
         flush=True,
     )
 
-    capture_slot = started_at.replace(
-        minute=0 if started_at.minute < 30 else 30,
-        second=0,
-        microsecond=0,
-    )
+    capture_slot = hourly_capture_slot(started_at)
     uploaded = 0
     captured = 0
     queued = 0
@@ -366,20 +415,18 @@ def run_remote_collector(
             print(f"[{index}/{len(due_urls)}] Capturing concert {url}", flush=True)
             browser = VividConcertBrowser(headless=headless, timeout=timeout)
             raw_payload, event_date = browser.capture(url)
-            hours_until = (
-                as_utc(event_date) - datetime.now(timezone.utc)
-            ).total_seconds() / 3600
-            if hours_until <= 0:
+            if not concert_is_within_capture_window(event_date, datetime.now(timezone.utc)):
                 skipped += 1
-                print(f"SKIP: concert has started: {url}", flush=True)
-                continue
-            if hours_until > CAPTURE_WINDOW_HOURS:
-                skipped += 1
-                print(f"SKIP: concert is outside the exact 72-hour window: {url}", flush=True)
+                print(
+                    f"SKIP: concert is outside the exact seven-day window: {url}",
+                    flush=True,
+                )
                 continue
 
             snapshot = ConcertSnapshotParser.parse(raw_payload)
-            payload = snapshot_to_payload(url, event_date, capture_slot, snapshot)
+            payload = concert_snapshot_to_payload(
+                url, event_date, capture_slot, snapshot
+            )
             pending_path = queue_snapshot(payload, pending_dir)
             captured += 1
 
@@ -397,7 +444,7 @@ def run_remote_collector(
                     print(f"QUEUED: {message}", file=sys.stderr, flush=True)
                 else:
                     pending_path.unlink()
-                    uploaded += 1
+                    uploaded += response["status"] == "stored"
                     uploads.append(
                         {
                             "url": url,
@@ -439,6 +486,10 @@ def run_remote_collector(
 
     report = {
         "status": status,
+        "event_type": "concert",
+        "storage": "separate concert database",
+        "cadence": "hourly",
+        "capture_window_hours": CONCERT_CAPTURE_WINDOW_HOURS,
         "started_at": started_at.isoformat(),
         "capture_slot": capture_slot.isoformat(),
         "discovered": len(discovered),
@@ -457,7 +508,7 @@ def run_remote_collector(
     health_output.parent.mkdir(parents=True, exist_ok=True)
     health_output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(
-        f"Concert collection finished: {uploaded} uploaded, {queued} queued, "
+        f"Concert collection finished: {uploaded} stored, {queued} queued, "
         f"{replayed} replayed, {skipped} skipped, "
         f"{len(capture_errors)} capture failures, "
         f"{len(discovery_errors)} discovery failures.",
