@@ -1,0 +1,48 @@
+name: Temporary Vivid lowest-price validation
+
+on:
+  push:
+    branches:
+      - research/provider-scrape-comparison
+    paths:
+      - ".github/workflows/vivid-price-validation-smoke.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install "selenium>=4.26.1,<5" "SQLAlchemy>=2,<3"
+      - name: Capture Vivid section prices
+        run: |
+          python nfl_collector.py smoke \
+            "https://www.vividseats.com/new-england-patriots-tickets-foxborough-gillette-stadium-3-8-2027/production/6492648" \
+            --headless \
+            --timeout 45 \
+            --output vivid_price_validation.json
+      - name: Print price validation
+        run: |
+          python - <<'PY'
+          import json
+          d=json.load(open('vivid_price_validation.json'))
+          print(json.dumps({
+            'title': d.get('title'),
+            'event_date': d.get('event_date'),
+            'section_count': d.get('section_count'),
+            'lowest_section_price': d.get('lowest_section_price'),
+            'highest_section_price': d.get('highest_section_price'),
+          }, indent=2))
+          PY
+      - uses: actions/upload-artifact@v7
+        with:
+          name: vivid-price-validation-${{ github.run_id }}
+          path: vivid_price_validation.json
+          retention-days: 1
