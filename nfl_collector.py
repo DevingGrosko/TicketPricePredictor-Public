@@ -371,9 +371,21 @@ class VividNFLBrowser(VividBrowser):
             self.driver.execute_script("window.stop();")
 
         deadline = time.monotonic() + self.timeout
+        started_at = time.monotonic()
+        last_scroll_at = 0.0
         best: dict[str, DiscoveredNFLGame] = {}
         last_new_at: float | None = None
         while time.monotonic() < deadline:
+            now_monotonic = time.monotonic()
+            if now_monotonic - last_scroll_at >= 1.0:
+                try:
+                    self.driver.execute_script(
+                        "window.scrollTo(0, document.body.scrollHeight);"
+                    )
+                except Exception:
+                    pass
+                last_scroll_at = now_monotonic
+
             rows = extract_nfl_game_rows(
                 self.driver.page_source,
                 feed_url,
@@ -385,7 +397,19 @@ class VividNFLBrowser(VividBrowser):
             if len(best) > previous_count:
                 last_new_at = time.monotonic()
             elif best and last_new_at is not None:
-                if time.monotonic() - last_new_at >= DISCOVERY_SETTLE_SECONDS:
+                local_today = (
+                    datetime.now(timezone.utc).astimezone(NEW_YORK).date()
+                )
+                has_future_game = any(
+                    row.date_hint is not None and row.date_hint >= local_today
+                    for row in best.values()
+                )
+                if (
+                    has_future_game
+                    and time.monotonic() - last_new_at
+                    >= max(4.0, DISCOVERY_SETTLE_SECONDS)
+                    and time.monotonic() - started_at >= 6.0
+                ):
                     return sorted(
                         best.values(),
                         key=lambda row: (
@@ -447,6 +471,12 @@ def discover_nfl_games(headless: bool, timeout: int) -> tuple[list[DiscoveredNFL
         browser = VividNFLBrowser(headless=headless, timeout=timeout)
         games = browser.discover_games(NFL_FEED_URL)
         print(f"NFL feed: discovered {len(games)} game links.", flush=True)
+        for game in games:
+            print(
+                f"NFL DISCOVERED: {game.date_hint or 'unknown'} | "
+                f"{game.title} | {game.url}",
+                flush=True,
+            )
         return games, []
     except Exception as exc:
         message = f"NFL feed: {type(exc).__name__}: {exc}"
