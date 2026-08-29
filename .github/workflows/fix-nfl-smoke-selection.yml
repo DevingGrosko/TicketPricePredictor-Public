@@ -1,0 +1,63 @@
+name: Fix NFL smoke candidate selection
+
+on:
+  push:
+    branches:
+      - feature/switch-concerts-to-nfl-hourly
+    paths:
+      - "fix_nfl_smoke.ready"
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/switch-concerts-to-nfl-hourly
+          fetch-depth: 0
+
+      - name: Prefer canonical URL dates and reject past smoke candidates
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          collector = Path("nfl_collector.py")
+          text = collector.read_text(encoding="utf-8")
+          old_hint = "date_hint=date_hint_from_text(title, self.now) or date_hint_from_url(url),"
+          new_hint = "date_hint=date_hint_from_url(url) or date_hint_from_text(title, self.now),"
+          if old_hint not in text:
+              raise SystemExit("NFL date-priority target was not found")
+          text = text.replace(old_hint, new_hint, 1)
+
+          old_smoke = '''            raw_payload, event_date = browser.capture(game.url)\n            snapshot = NFLSnapshotParser.parse(raw_payload)\n            result = {\n                "status": "success",\n                "event_type": "nfl",\n                "captured_at": datetime.now(timezone.utc).isoformat(),\n'''
+          new_smoke = '''            raw_payload, event_date = browser.capture(game.url)\n            captured_at = datetime.now(timezone.utc)\n            if as_utc(event_date) <= captured_at:\n                raise ValueError(\n                    "NFL smoke candidate has already started; trying the next game."\n                )\n            if not requested_url and (\n                as_utc(event_date) - captured_at\n                > timedelta(days=SMOKE_HORIZON_DAYS, hours=1)\n            ):\n                raise ValueError(\n                    "NFL smoke candidate is outside the automatic 45-day horizon."\n                )\n            snapshot = NFLSnapshotParser.parse(raw_payload)\n            result = {\n                "status": "success",\n                "event_type": "nfl",\n                "captured_at": captured_at.isoformat(),\n'''
+          if old_smoke not in text:
+              raise SystemExit("NFL smoke-validation target was not found")
+          collector.write_text(text.replace(old_smoke, new_smoke, 1), encoding="utf-8")
+
+          tests = Path("tests/test_nfl_collector.py")
+          test_text = tests.read_text(encoding="utf-8")
+          method_name = "test_url_date_wins_over_stale_or_misleading_anchor_text"
+          if method_name not in test_text:
+              insertion = '''    def test_url_date_wins_over_stale_or_misleading_anchor_text(self):\n        now = datetime(2026, 8, 29, 12, tzinfo=timezone.utc)\n        page = """\n        <a href="/dallas-cowboys-new-york-giants-9-13-2026--sports-nfl-football/production/1234567">\n          Dallas Cowboys at New York Giants — Aug 18, 2026\n        </a>\n        """\n        rows = extract_nfl_game_rows(page, now=now)\n        self.assertEqual(len(rows), 1)\n        self.assertEqual(rows[0].date_hint.isoformat(), "2026-09-13")\n\n'''
+              target = "    def test_infers_year_across_new_year(self):\n"
+              if target not in test_text:
+                  raise SystemExit("NFL test insertion target was not found")
+              test_text = test_text.replace(target, insertion + target, 1)
+              tests.write_text(test_text, encoding="utf-8")
+          PY
+
+          python -m py_compile nfl_collector.py tests/test_nfl_collector.py
+          python -m unittest tests.test_nfl_collector -v
+
+      - name: Commit repair and remove temporary workflow
+        run: |
+          rm -f fix_nfl_smoke.ready .github/workflows/fix-nfl-smoke-selection.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Reject stale NFL smoke candidates"
+          git push origin HEAD:feature/switch-concerts-to-nfl-hourly
