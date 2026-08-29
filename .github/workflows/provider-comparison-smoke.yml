@@ -1,0 +1,93 @@
+name: Temporary provider scrape comparison
+
+on:
+  push:
+    branches:
+      - research/provider-scrape-comparison
+    paths:
+      - "extended_provider_probe.py"
+      - ".github/workflows/provider-comparison-smoke.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: Probe ${{ matrix.provider }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - provider: seatgeek
+            event_url: https://seatgeek.com/patriots-steelers-tickets
+          - provider: stubhub
+            event_url: https://www.stubhub.com/new-england-patriots-foxborough-tickets-9-20-2026/event/160425615/
+          - provider: tickpick
+            event_url: https://www.tickpick.com/buy-new-england-patriots-vs-pittsburgh-steelers-tickets-gillette-stadium-9-20-26-1pm/7729955/
+          - provider: gametime
+            event_url: https://gametime.co/patriots-steelers-tickets/performers/nflne/nflpit
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install browser dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run ordinary GitHub-hosted browser probe
+        id: capture
+        continue-on-error: true
+        env:
+          EVENT_URL: ${{ matrix.event_url }}
+          PROVIDER: ${{ matrix.provider }}
+        run: |
+          set +e
+          python extended_provider_probe.py "$EVENT_URL" \
+            --provider "$PROVIDER" \
+            --duration 55 \
+            --include-sanitized-payloads \
+            --output "${PROVIDER}_report.json" \
+            --screenshot "${PROVIDER}_screenshot.png"
+          code=$?
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          exit "$code"
+      - name: Print compact result
+        if: always()
+        env:
+          PROVIDER: ${{ matrix.provider }}
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          provider = os.environ["PROVIDER"]
+          path = Path(f"{provider}_report.json")
+          if not path.exists():
+              print(f"{provider}: no report")
+              raise SystemExit(0)
+          report = json.loads(path.read_text())
+          state = report.get("probe_state") or {}
+          print(json.dumps({
+              "provider": provider,
+              "outcome": report.get("outcome"),
+              "candidate_count": report.get("candidate_count"),
+              "json_responses_parsed": report.get("json_responses_parsed"),
+              "responses_examined": report.get("responses_examined"),
+              "document_statuses": state.get("main_document_statuses"),
+              "blocked_markers": state.get("blocked_markers"),
+              "safe_clicks": state.get("safe_clicks"),
+              "final_url": state.get("final_url"),
+              "page_title": state.get("page_title"),
+          }, indent=2))
+          PY
+      - name: Upload diagnostic
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: provider-comparison-${{ matrix.provider }}-${{ github.run_id }}
+          path: |
+            ${{ matrix.provider }}_report.json
+            ${{ matrix.provider }}_screenshot.png
+          if-no-files-found: warn
+          retention-days: 1
