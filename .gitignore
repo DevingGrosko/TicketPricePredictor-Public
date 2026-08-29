@@ -17,7 +17,6 @@ collector_audit/
 collector_backups/
 concert_audit/
 concert_backups/
-legacy_concert_migration_backups/
 *.concert-migration.lock
 collector_health.json
 collector_state.json
