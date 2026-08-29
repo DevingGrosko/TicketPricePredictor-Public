@@ -19,7 +19,7 @@
       <div class="nfl-matchup-banner__copy">
         <span class="nfl-section-kicker">Single-game market report</span>
         <h1>{{ gameLabel }}</h1>
-        <p><strong>{{ venue }}</strong><span>&middot;</span>{{ section }}</p>
+        <p><strong>{{ team }}</strong><span>&middot;</span>{{ venue }}<span>&middot;</span>{{ section }}</p>
       </div>
       <div class="nfl-window-badge">
         <span>Tracking window</span>
@@ -35,7 +35,7 @@
             <span>Market timeline</span>
             <strong>{% if displayType == 'money' %}Relative price movement{% else %}Lowest observed section price{% endif %}</strong>
           </div>
-          <a class="nfl-view-toggle" href="{{ url_for('nfl.nfl_graph', display=displayType, event=venue, section=section, game=game) }}">Show {{ displayLabel }} view</a>
+          <a class="nfl-view-toggle" href="{{ url_for('nfl.nfl_graph', display=displayType, team=team, section=section, game=game) }}">Show {{ displayLabel }} view</a>
         </div>
 
         {% if error %}
@@ -48,11 +48,11 @@
         {% else %}
           <div class="interactive-chart nfl-interactive-chart" data-display-mode="{{ displayMode }}" data-y-axis-label="{% if displayMode == 'money' %}Lowest observed section price{% else %}Relative price movement{% endif %}">
             <script type="application/json" class="interactive-chart__data">{{ {"x": chartX, "y": chartY} | tojson }}</script>
-            <svg class="interactive-chart__svg" viewBox="0 0 900 520" role="img" aria-label="Interactive NFL ticket price trend for {{ venue }}, {{ section }}"></svg>
+            <svg class="interactive-chart__svg" viewBox="0 0 900 520" role="img" aria-label="Interactive NFL ticket price trend for {{ team }}, {{ section }}"></svg>
             <div class="interactive-chart__tooltip" role="status" hidden></div>
             <p class="interactive-chart__hint"><span aria-hidden="true">&#9432;</span> Hover over the line to inspect each captured market observation.</p>
           </div>
-          <noscript><img src="data:image/png;base64,{{ img }}" class="result-chart" alt="NFL ticket price trend for {{ venue }}, {{ section }}"></noscript>
+          <noscript><img src="data:image/png;base64,{{ img }}" class="result-chart" alt="NFL ticket price trend for {{ team }}, {{ section }}"></noscript>
         {% endif %}
       </article>
 

@@ -16,25 +16,25 @@ function replaceNflOptions(select, values, placeholder) {
 
 const nflForm = document.querySelector('.nfl-selection-form');
 if (nflForm) {
-  const venueSelect = nflForm.querySelector('.place-select');
+  const teamSelect = nflForm.querySelector('.place-select');
   const gameSelect = nflForm.querySelector('.game-select');
   const sectionSelect = nflForm.querySelector('.section-select');
   const submit = nflForm.querySelector('.submit-analysis');
 
   const updateSubmit = () => {
-    submit.disabled = !(venueSelect.value && gameSelect.value && sectionSelect.value);
+    submit.disabled = !(teamSelect.value && gameSelect.value && sectionSelect.value);
   };
 
-  venueSelect.addEventListener('change', () => {
-    replaceNflOptions(gameSelect, nflGamesData[venueSelect.value] || [], 'Select a game');
+  teamSelect.addEventListener('change', () => {
+    replaceNflOptions(gameSelect, nflGamesData[teamSelect.value] || [], 'Select a game');
     replaceNflOptions(sectionSelect, [], 'Select a section');
     updateSubmit();
   });
 
   gameSelect.addEventListener('change', () => {
     const sections =
-      (nflGameSectionsData[venueSelect.value] &&
-        nflGameSectionsData[venueSelect.value][gameSelect.value]) || [];
+      (nflGameSectionsData[teamSelect.value] &&
+        nflGameSectionsData[teamSelect.value][gameSelect.value]) || [];
     replaceNflOptions(sectionSelect, sections, 'Select a section');
     updateSubmit();
   });
@@ -45,7 +45,7 @@ if (nflForm) {
     event.preventDefault();
     if (submit.disabled) return;
     const params = new URLSearchParams({
-      event: venueSelect.value,
+      team: teamSelect.value,
       game: gameSelect.value,
       section: sectionSelect.value,
     });

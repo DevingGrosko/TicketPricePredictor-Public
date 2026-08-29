@@ -15,7 +15,11 @@ from Flask_App.nfl_blueprint import (
     NFLIteration,
     NFLTicket,
     CreateNFLModel,
+    find_nfl_game,
     nfl_blueprint,
+    nfl_home,
+    nfl_home_team,
+    nfl_matchup_teams,
     store_nfl_snapshot,
 )
 
@@ -182,6 +186,91 @@ class NFLDatabaseIsolationTests(unittest.TestCase):
                     os.environ.pop("COLLECTOR_INGEST_TOKEN", None)
                 else:
                     os.environ["COLLECTOR_INGEST_TOKEN"] = old_token
+
+
+class NFLTeamGroupingTests(unittest.TestCase):
+    def test_provider_titles_resolve_to_distinct_home_teams(self):
+        self.assertEqual(
+            nfl_matchup_teams("Dallas Cowboys at New York Giants"),
+            ("Dallas Cowboys", "New York Giants"),
+        )
+        self.assertEqual(
+            nfl_home_team("Dallas Cowboys at New York Giants"),
+            "New York Giants",
+        )
+        self.assertEqual(
+            nfl_home_team("Buffalo Bills at New York Jets"),
+            "New York Jets",
+        )
+
+    @patch("Flask_App.nfl_blueprint.render_template")
+    def test_shared_stadium_games_are_split_into_home_team_groups(self, render):
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "nfl.db"
+            old_db = os.environ.get("NFL_DATABASE_PATH")
+            os.environ["NFL_DATABASE_PATH"] = str(db_path)
+            try:
+                sections = tuple(
+                    SectionSnapshot(
+                        section=f"Section {index}",
+                        price=100 + index,
+                        listing_count=2,
+                        row="A",
+                        quantity="2",
+                        displayed_price=str(100 + index),
+                        alternate_price="",
+                    )
+                    for index in range(10)
+                )
+                captured_at = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
+                giants_id, _, _ = store_nfl_snapshot(
+                    "https://www.vividseats.com/game/production/1111111",
+                    captured_at + timedelta(days=10),
+                    EventSnapshot(
+                        source_id="1111111",
+                        title="Dallas Cowboys at New York Giants",
+                        venue="MetLife Stadium",
+                        sections=sections,
+                    ),
+                    captured_at,
+                    db_path=db_path,
+                )
+                store_nfl_snapshot(
+                    "https://www.vividseats.com/game/production/2222222",
+                    captured_at + timedelta(days=11),
+                    EventSnapshot(
+                        source_id="2222222",
+                        title="Buffalo Bills at New York Jets",
+                        venue="MetLife Stadium",
+                        sections=sections,
+                    ),
+                    captured_at,
+                    db_path=db_path,
+                )
+
+                app = Flask(__name__)
+                app.register_blueprint(nfl_blueprint)
+                render.return_value = "ok"
+                with app.test_request_context("/nfl"):
+                    response = nfl_home()
+
+                self.assertEqual(response, "ok")
+                context = render.call_args.kwargs
+                self.assertEqual(
+                    list(context["games_dict"]),
+                    ["New York Giants", "New York Jets"],
+                )
+                self.assertEqual(context["team_count"], 2)
+                self.assertEqual(context["game_count"], 2)
+                self.assertIsNotNone(find_nfl_game("New York Giants", str(giants_id)))
+                self.assertIsNone(find_nfl_game("New York Jets", str(giants_id)))
+                # Existing venue-based bookmarks remain valid.
+                self.assertIsNotNone(find_nfl_game("MetLife Stadium", str(giants_id)))
+            finally:
+                if old_db is None:
+                    os.environ.pop("NFL_DATABASE_PATH", None)
+                else:
+                    os.environ["NFL_DATABASE_PATH"] = old_db
 
 
 if __name__ == "__main__":
