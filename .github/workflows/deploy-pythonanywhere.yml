@@ -10,6 +10,7 @@ on:
       - "concert_collector.py"
       - "concert_models.py"
       - "concert_graph_builder.py"
+      - "legacy_concert_migration.py"
       - "github_dispatcher.py"
       - "graph_builder.py"
       - "models.py"
@@ -24,6 +25,7 @@ on:
       - "concert_collector.py"
       - "concert_models.py"
       - "concert_graph_builder.py"
+      - "legacy_concert_migration.py"
       - "github_dispatcher.py"
       - "graph_builder.py"
       - "models.py"
@@ -56,6 +58,7 @@ jobs:
             concert_collector.py \
             concert_models.py \
             concert_graph_builder.py \
+            legacy_concert_migration.py \
             github_dispatcher.py \
             models.py \
             graph_builder.py \
