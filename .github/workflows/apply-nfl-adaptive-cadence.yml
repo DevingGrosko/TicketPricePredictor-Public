@@ -41,15 +41,25 @@ jobs:
             Flask_App/nfl_blueprint.py
           python -m unittest discover -s tests -v
 
-      - name: Commit tested implementation
+      - name: Commit tested non-workflow implementation
         run: |
-          rm -f \
-            nfl_adaptive_patch.ready \
-            tools/apply_nfl_adaptive_cadence.py \
-            tools/fix_nfl_adaptive_patch.py \
-            .github/workflows/apply-nfl-adaptive-cadence.yml
+          # GitHub Actions' installation token cannot modify workflow files.
+          # Keep those two files unchanged here; they are updated through the
+          # repository connector after the tested code commit lands.
+          git checkout -- \
+            .github/workflows/collect-ticket-prices.yml \
+            .github/workflows/nfl-smoke-test.yml
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add \
+            README.md \
+            nfl_collector.py \
+            nfl_schedule_collector.py \
+            Flask_App/nfl_blueprint.py \
+            Flask_App/templates/NFLHomeScreen.html \
+            Flask_App/templates/nfl_graph.html \
+            tests/test_nfl_blueprint.py \
+            tests/test_nfl_collector.py \
+            tests/test_nfl_schedule_collector.py
           git commit -m "Extend NFL tracking to 30 days with adaptive cadence"
           git push origin HEAD:feature/nfl-30-day-adaptive-cadence
