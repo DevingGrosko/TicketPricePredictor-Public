@@ -7,14 +7,13 @@ on:
     branches:
       - main
     paths:
-      # Run the current collector immediately after its workflow changes. This
-      # also provides a controlled way to replay preserved queues after an
-      # endpoint recovery without making ordinary code pushes scrape tickets.
+      # Run the current collectors immediately after this workflow changes.
+      # Ordinary code pushes do not start a ticket collection cycle.
       - ".github/workflows/collect-ticket-prices.yml"
   schedule:
     # Best-effort baseball recovery trigger. PythonAnywhere dispatches the
     # reliable :08/:38 cadence. The :53 fallback maps to the same half-hour
-    # baseball slot as :38 and is intentionally skipped by the concert job.
+    # baseball slot as :38 and is intentionally skipped by the hourly NFL job.
     - cron: "53 */6 * * *"
   workflow_dispatch:
     inputs:
@@ -79,14 +78,14 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  collect-concerts:
+  collect-nfl:
     concurrency:
-      group: concert-ticket-price-collector
+      group: nfl-ticket-price-collector
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - name: Select the hourly concert slot
+      - name: Select the hourly NFL slot
         id: cadence
         env:
           DISPATCH_SOURCE: ${{ inputs.dispatch_source }}
@@ -95,10 +94,10 @@ jobs:
           minute="$(date -u +%M)"
           if [[ "$EVENT_NAME" == "push" || "$DISPATCH_SOURCE" == "manual" || 10#$minute -lt 30 ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "Concert collection is due for this UTC hour."
+            echo "NFL collection is due for this UTC hour."
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping concerts; baseball continues on its 30-minute cadence."
+            echo "Skipping NFL; baseball continues on its 30-minute cadence."
           fi
 
       - if: steps.cadence.outputs.run == 'true'
@@ -110,43 +109,43 @@ jobs:
           python-version: "3.13"
           cache: pip
 
-      - name: Restore pending concert snapshot queue
+      - name: Restore pending NFL snapshot queue
         if: steps.cadence.outputs.run == 'true'
         uses: actions/cache/restore@v5
         with:
-          path: concert_pending
-          key: concert-pending-${{ github.run_id }}
+          path: nfl_pending
+          key: nfl-pending-${{ github.run_id }}
           restore-keys: |
-            concert-pending-
+            nfl-pending-
 
-      - name: Install concert collector dependencies
+      - name: Install NFL collector dependencies
         if: steps.cadence.outputs.run == 'true'
         run: python -m pip install "selenium>=4.26.1,<5" "SQLAlchemy>=2,<3"
 
-      - name: Discover and collect concerts inside seven days
+      - name: Discover and collect NFL games inside seven days
         if: steps.cadence.outputs.run == 'true'
         env:
           COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
         run: |
-          python concert_collector.py remote-run \
-            --endpoint https://bunnyjeff.pythonanywhere.com/api/concerts/snapshot \
+          python nfl_collector.py remote-run \
+            --endpoint https://bunnyjeff.pythonanywhere.com/api/nfl/snapshot \
             --headless \
             --timeout 45 \
-            --health-output concert_remote_health.json \
-            --pending-dir concert_pending
+            --health-output nfl_remote_health.json \
+            --pending-dir nfl_pending
 
-      - name: Save pending concert snapshot queue
+      - name: Save pending NFL snapshot queue
         if: always() && steps.cadence.outputs.run == 'true'
         uses: actions/cache/save@v5
         with:
-          path: concert_pending
-          key: concert-pending-${{ github.run_id }}
+          path: nfl_pending
+          key: nfl-pending-${{ github.run_id }}
 
-      - name: Upload concert collection report
+      - name: Upload NFL collection report
         if: always() && steps.cadence.outputs.run == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: concert-collector-report-${{ github.run_id }}
-          path: concert_remote_health.json
+          name: nfl-collector-report-${{ github.run_id }}
+          path: nfl_remote_health.json
           if-no-files-found: warn
           retention-days: 14
