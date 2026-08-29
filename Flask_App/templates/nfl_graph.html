@@ -1,49 +1,83 @@
 {% extends "base.html" %}
 {% block title %}NFL price trend — TicketSignal{% endblock %}
+{% block body_class %}nfl-theme{% endblock %}
+{% block head %}
+  <meta name="theme-color" content="#013369">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl.css') }}?v=1">
+{% endblock %}
 
 {% block content %}
-<section class="result-page">
-  <a class="back-link" href="{{ url_for('nfl.nfl_home') }}#explore-nfl"><span>&#8592;</span> New NFL analysis</a>
-  <div class="result-heading">
-    <div>
-      <span class="section-kicker">Single-game NFL analysis</span>
-      <h1>NFL ticket price history</h1>
-      <p>{{ venue }} <span>&middot;</span> {{ section }} <span>&middot;</span> {{ gameLabel }}</p>
-    </div>
-    <div class="result-badge"><small>Window</small><strong>7 days</strong></div>
-  </div>
+<div class="nfl-page nfl-result-page">
+  <section class="result-page nfl-result">
+    <a class="nfl-back-link" href="{{ url_for('nfl.nfl_home') }}#explore-nfl"><span aria-hidden="true">&#8592;</span> Build another NFL chart</a>
 
-  <div class="result-grid">
-    <article class="chart-card">
-      <div class="chart-card__top">
-        <div><span>Hourly price timeline</span><strong>{% if displayType == 'money' %}Relative movement{% else %}Lowest displayed price{% endif %}</strong></div>
-        <a class="view-toggle" href="{{ url_for('nfl.nfl_graph', display=displayType, event=venue, section=section, game=game) }}">Show {{ displayLabel }} view</a>
+    <header class="nfl-matchup-banner">
+      <div class="nfl-matchup-banner__mark" aria-hidden="true">
+        <span class="nfl-mini-shield"><i></i><strong>TS</strong></span>
       </div>
-      {% if error %}
-        <div class="empty-state"><span>!</span><h2>No data available</h2><p>{{ error }}</p><a class="button button--primary" href="{{ url_for('nfl.nfl_home') }}#explore-nfl">Try another selection</a></div>
-      {% else %}
-        <div class="interactive-chart" data-display-mode="{{ displayMode }}">
-          <script type="application/json" class="interactive-chart__data">{{ {"x": chartX, "y": chartY} | tojson }}</script>
-          <svg class="interactive-chart__svg" viewBox="0 0 900 520" role="img" aria-label="Interactive NFL ticket price trend for {{ venue }}, {{ section }}"></svg>
-          <div class="interactive-chart__tooltip" role="status" hidden></div>
-          <p class="interactive-chart__hint"><span aria-hidden="true">&#9432;</span> Hover over the line to inspect each hourly price point.</p>
+      <div class="nfl-matchup-banner__copy">
+        <span class="nfl-section-kicker">Single-game market report</span>
+        <h1>{{ gameLabel }}</h1>
+        <p><strong>{{ venue }}</strong><span>&middot;</span>{{ section }}</p>
+      </div>
+      <div class="nfl-window-badge">
+        <span>Tracking window</span>
+        <strong>7D</strong>
+        <small>Hourly snapshots</small>
+      </div>
+    </header>
+
+    <div class="nfl-result-grid">
+      <article class="chart-card nfl-chart-card">
+        <div class="chart-card__top nfl-chart-card__top">
+          <div>
+            <span>Market timeline</span>
+            <strong>{% if displayType == 'money' %}Relative price movement{% else %}Lowest observed section price{% endif %}</strong>
+          </div>
+          <a class="nfl-view-toggle" href="{{ url_for('nfl.nfl_graph', display=displayType, event=venue, section=section, game=game) }}">Show {{ displayLabel }} view</a>
         </div>
-        <noscript><img src="data:image/png;base64,{{ img }}" class="result-chart" alt="NFL ticket price trend for {{ venue }}, {{ section }}"></noscript>
-      {% endif %}
-    </article>
-    <aside class="insight-card">
-      <span class="panel-icon">&#9733;</span>
-      <span class="section-kicker">Reading the chart</span>
-      <h2>Each point is one hourly NFL snapshot.</h2>
-      <p>The chart counts down from seven days toward kickoff and uses only this game and this NFL database.</p>
-      <dl>
-        <div><dt>168h</dt><dd>Collection window</dd></div>
-        <div><dt>1h</dt><dd>Collection interval</dd></div>
-      </dl>
-      <p class="disclaimer">Historical listing prices do not guarantee future results.</p>
-    </aside>
-  </div>
-</section>
+
+        {% if error %}
+          <div class="empty-state nfl-empty-state">
+            <span>!</span>
+            <h2>No price history yet</h2>
+            <p>{{ error }}</p>
+            <a class="button nfl-button nfl-button--primary" href="{{ url_for('nfl.nfl_home') }}#explore-nfl">Try another selection</a>
+          </div>
+        {% else %}
+          <div class="interactive-chart nfl-interactive-chart" data-display-mode="{{ displayMode }}">
+            <script type="application/json" class="interactive-chart__data">{{ {"x": chartX, "y": chartY} | tojson }}</script>
+            <svg class="interactive-chart__svg" viewBox="0 0 900 520" role="img" aria-label="Interactive NFL ticket price trend for {{ venue }}, {{ section }}"></svg>
+            <div class="interactive-chart__tooltip" role="status" hidden></div>
+            <p class="interactive-chart__hint"><span aria-hidden="true">&#9432;</span> Hover over the line to inspect each hourly market observation.</p>
+          </div>
+          <noscript><img src="data:image/png;base64,{{ img }}" class="result-chart" alt="NFL ticket price trend for {{ venue }}, {{ section }}"></noscript>
+        {% endif %}
+      </article>
+
+      <aside class="nfl-insight-card">
+        <div class="nfl-insight-card__header">
+          <span class="nfl-football-icon" aria-hidden="true"><i></i></span>
+          <div><span class="nfl-section-kicker">Game plan</span><h2>Read the market from left to right.</h2></div>
+        </div>
+        <p>The chart counts down toward kickoff. Each point is the lowest observed listing price for this section during that hourly snapshot.</p>
+
+        <dl class="nfl-insight-stats">
+          <div><dt>168h</dt><dd>Maximum lookback</dd></div>
+          <div><dt>1h</dt><dd>Snapshot interval</dd></div>
+        </dl>
+
+        <div class="nfl-chart-guide">
+          <div><i class="nfl-chart-guide__line"></i><span><strong>Trend line</strong><small>How the observed section price moved.</small></span></div>
+          <div><i class="nfl-chart-guide__dot"></i><span><strong>Hourly point</strong><small>A captured market observation.</small></span></div>
+          <div><i class="nfl-chart-guide__kickoff"></i><span><strong>Kickoff side</strong><small>Time moves toward zero on the right.</small></span></div>
+        </div>
+
+        <p class="nfl-disclaimer">Listings can disappear or change between snapshots. Historical prices do not guarantee future results.</p>
+      </aside>
+    </div>
+  </section>
+</div>
 {% endblock %}
 
 {% block scripts %}<script src="{{ url_for('static', filename='js/graph.js') }}?v=1"></script>{% endblock %}
