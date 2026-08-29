@@ -1,0 +1,64 @@
+name: Temporary exact Gametime event probe
+
+on:
+  push:
+    branches:
+      - research/provider-scrape-comparison
+    paths:
+      - ".github/workflows/gametime-exact-smoke.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: Probe exact Gametime NFL event
+        continue-on-error: true
+        run: |
+          python extended_provider_probe.py \
+            "https://gametime.co/nfl-football/steelers-at-patriots-tickets/9-20-2026-foxborough-ma-gillette-stadium/events/695d912f2f00ace2743f5521" \
+            --provider gametime \
+            --duration 70 \
+            --include-sanitized-payloads \
+            --output gametime_exact_report.json \
+            --screenshot gametime_exact_screenshot.png
+      - name: Print result
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('gametime_exact_report.json')
+          if p.exists():
+              d=json.loads(p.read_text())
+              s=d.get('probe_state') or {}
+              print(json.dumps({
+                  'outcome':d.get('outcome'),
+                  'candidate_count':d.get('candidate_count'),
+                  'json_responses_parsed':d.get('json_responses_parsed'),
+                  'responses_examined':d.get('responses_examined'),
+                  'document_statuses':s.get('main_document_statuses'),
+                  'blocked_markers':s.get('blocked_markers'),
+                  'safe_clicks':s.get('safe_clicks'),
+                  'page_title':s.get('page_title'),
+              }, indent=2))
+          PY
+      - name: Upload diagnostic
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gametime-exact-${{ github.run_id }}
+          path: |
+            gametime_exact_report.json
+            gametime_exact_screenshot.png
+          if-no-files-found: warn
+          retention-days: 1
