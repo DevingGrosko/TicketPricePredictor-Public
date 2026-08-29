@@ -8,7 +8,6 @@ import json
 import os
 from pathlib import Path
 import sqlite3
-import sys
 from typing import Any
 
 from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint, create_engine
@@ -267,35 +266,3 @@ def write_concert_audit(
         if modified < cutoff:
             candidate.unlink()
     return path
-
-
-def _migrate_legacy_shared_storage_on_import() -> None:
-    """Run the one-time shared-database cleanup when the web app reloads."""
-    try:
-        from legacy_concert_migration import migrate_legacy_concert_rows
-    except (ImportError, AttributeError):
-        # This can occur only when legacy_concert_migration itself imports this
-        # module during tests or a direct CLI invocation.
-        return
-
-    try:
-        report = migrate_legacy_concert_rows()
-    except Exception as exc:
-        print(
-            f"Legacy concert migration warning: {type(exc).__name__}: {exc}",
-            file=sys.stderr,
-            flush=True,
-        )
-        return
-
-    if report["events_migrated"]:
-        print(
-            "Migrated legacy concert data out of the baseball database: "
-            f"{report['events_migrated']} events, "
-            f"{report['iterations_migrated']} iterations, "
-            f"{report['tickets_migrated']} ticket rows.",
-            flush=True,
-        )
-
-
-_migrate_legacy_shared_storage_on_import()
