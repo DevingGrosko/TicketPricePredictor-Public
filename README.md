@@ -9,7 +9,7 @@ Live app: https://bunnyjeff.pythonanywhere.com/
 - MLB games: every 30 minutes during the final 72 hours.
 - NFL games: every 6 hours from days 30–15, every 3 hours from days 14–8, and hourly during the final 7 days.
 - Each category has its own collector job, API route, pending queue, audit records, backups, SQLAlchemy tables, and SQLite database.
-- NFL analysis begins game by game and is organized by stadium, game, and section. Stadium-level aggregation can be added once enough comparable section history exists.
+- NFL analysis is organized by designated home team, game, and section. Teams that share a venue, such as the Giants/Jets or Rams/Chargers, remain separate in the website.
 - Existing concert data and pages are preserved as an archive, but the automated concert collector is paused while NFL data is prioritized.
 
 ## Tech stack

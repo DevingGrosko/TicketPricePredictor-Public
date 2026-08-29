@@ -183,16 +183,37 @@ def hourly_capture_slot(value: datetime) -> datetime:
     return value.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
 
 
-def is_nfl_game_title(title: str) -> bool:
+def nfl_matchup_teams(title: str) -> tuple[str, str] | None:
+    """Return the two NFL teams in title order: away/first, then home/second."""
     normalized = " ".join(str(title or "").split()).casefold()
     if not normalized or any(marker in normalized for marker in NON_GAME_MARKERS):
-        return False
+        return None
 
-    team_count = sum(name.casefold() in normalized for name in NFL_TEAM_NAMES)
+    matches = sorted(
+        (
+            (normalized.find(name.casefold()), name)
+            for name in NFL_TEAM_NAMES
+            if name.casefold() in normalized
+        ),
+        key=lambda item: item[0],
+    )
+    if len(matches) != 2:
+        return None
+    return matches[0][1], matches[1][1]
+
+
+def nfl_home_team(title: str) -> str | None:
+    """Use the second team in a provider matchup title as the home-team bucket."""
+    matchup = nfl_matchup_teams(title)
+    return matchup[1] if matchup else None
+
+
+def is_nfl_game_title(title: str) -> bool:
+    normalized = " ".join(str(title or "").split()).casefold()
     has_matchup_separator = any(
         separator in normalized for separator in (" at ", " vs ", " vs. ", " versus ")
     )
-    return team_count >= 2 and has_matchup_separator
+    return nfl_matchup_teams(title) is not None and has_matchup_separator
 
 
 def nfl_snapshot_from_payload(payload: dict[str, Any]):
@@ -434,20 +455,24 @@ def format_nfl_title(event: NFLEvent) -> str:
     )
 
 
-def find_nfl_game(venue: str, identifier: str | None) -> NFLEvent | None:
+def find_nfl_game(team_or_venue: str, identifier: str | None) -> NFLEvent | None:
+    """Find a game in its home-team bucket, while accepting legacy venue links."""
     if not identifier or not str(identifier).isdigit():
         return None
     model = CreateNFLModel()
     try:
         with model.getSession()() as session:
-            return (
+            event = (
                 session.query(NFLEvent)
-                .filter(
-                    NFLEvent.venue == venue,
-                    NFLEvent.id == int(identifier),
-                )
+                .filter(NFLEvent.id == int(identifier))
                 .first()
             )
+            if event is None:
+                return None
+            home_team = nfl_home_team(event.title)
+            if team_or_venue not in {home_team, event.venue}:
+                return None
+            return event
     finally:
         model.engine.dispose()
 
@@ -458,7 +483,7 @@ class NFLGraphBuilder:
 
     def single_game_graph(
         self,
-        venue: str,
+        home_team: str,
         event_id: int,
         section: str,
         display_mode: str,
@@ -468,10 +493,10 @@ class NFLGraphBuilder:
             with model.getSession()() as session:
                 event = (
                     session.query(NFLEvent)
-                    .filter(NFLEvent.venue == venue, NFLEvent.id == event_id)
+                    .filter(NFLEvent.id == event_id)
                     .first()
                 )
-                if event is None:
+                if event is None or nfl_home_team(event.title) != home_team:
                     return [], []
 
                 tickets = (
@@ -523,15 +548,22 @@ def nfl_home():
             games_dict: dict[str, list[dict[str, str]]] = {}
             game_sections_dict: dict[str, dict[str, list[str]]] = {}
             for game in games:
-                games_dict.setdefault(game.venue, []).append(
+                home_team = nfl_home_team(game.title)
+                if home_team is None:
+                    continue
+                games_dict.setdefault(home_team, []).append(
                     {"value": str(game.id), "label": format_nfl_title(game)}
                 )
-                game_sections_dict.setdefault(game.venue, {})[
+                game_sections_dict.setdefault(home_team, {})[
                     str(game.id)
                 ] = sorted(set(game.sections or []))
 
-            stadium_count = len(games_dict)
-            game_count = len(games)
+            games_dict = dict(sorted(games_dict.items()))
+            game_sections_dict = {
+                team: game_sections_dict[team] for team in games_dict
+            }
+            team_count = len(games_dict)
+            game_count = sum(len(team_games) for team_games in games_dict.values())
             section_count = len(
                 {
                     section
@@ -547,7 +579,7 @@ def nfl_home():
         "NFLHomeScreen.html",
         games_dict=games_dict,
         game_sections_dict=game_sections_dict,
-        stadium_count=stadium_count,
+        team_count=team_count,
         game_count=game_count,
         section_count=section_count,
     )
@@ -555,17 +587,19 @@ def nfl_home():
 
 @nfl_blueprint.get("/nfl/graph")
 def nfl_graph():
-    venue = request.args.get("event") or ""
+    selection = request.args.get("team") or request.args.get("event") or ""
     event_id = request.args.get("game")
     section = request.args.get("section") or ""
     display_mode = "percentage" if request.args.get("display") == "percentage" else "money"
-    selected = find_nfl_game(venue, event_id)
+    selected = find_nfl_game(selection, event_id)
+    team = nfl_home_team(selected.title) if selected else selection
+    venue = selected.venue if selected else ""
     label = format_nfl_title(selected) if selected else "Unknown NFL game"
 
     builder = NFLGraphBuilder()
     y, x = (
-        builder.single_game_graph(venue, selected.id, section, display_mode)
-        if selected
+        builder.single_game_graph(team, selected.id, section, display_mode)
+        if selected and team
         else ([], [])
     )
     toggle_mode = "percentage" if display_mode == "money" else "money"
@@ -575,6 +609,7 @@ def nfl_graph():
         return render_template(
             "nfl_graph.html",
             error="No NFL price data is available for that selection.",
+            team=team,
             venue=venue,
             section=section,
             game=event_id or "",
@@ -589,6 +624,7 @@ def nfl_graph():
         chartX=x,
         chartY=y,
         displayMode=display_mode,
+        team=team,
         venue=venue,
         section=section,
         game=str(selected.id),
