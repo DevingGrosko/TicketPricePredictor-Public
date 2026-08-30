@@ -1452,41 +1452,71 @@ def _event_is_completed(event: NFLEvent, now: datetime) -> bool:
     return event_datetime_eastern(event.event_date) <= now.astimezone(EASTERN)
 
 
-def _nfl_home_context(archive_mode: bool) -> dict[str, Any]:
+def _nfl_home_context() -> dict[str, Any]:
+    """Expose every tracked game through one persistent NFL history."""
     model = CreateNFLModel()
     now = datetime.now(timezone.utc)
     try:
         with model.getSession()() as session:
-            all_games = session.query(NFLEvent).order_by(NFLEvent.event_date).all()
-            completed_count = sum(_event_is_completed(game, now) for game in all_games)
-            upcoming_count = len(all_games) - completed_count
-            games = [
+            all_games = (
+                session.query(NFLEvent)
+                .order_by(NFLEvent.event_date)
+                .all()
+            )
+            upcoming_games = [
                 game
                 for game in all_games
-                if _event_is_completed(game, now) == archive_mode
+                if not _event_is_completed(game, now)
             ]
-            if archive_mode:
-                games.reverse()
+            completed_games = [
+                game
+                for game in all_games
+                if _event_is_completed(game, now)
+            ]
+            # Upcoming games stay chronological; completed games follow
+            # newest first. Both remain in the same selectable history.
+            games = upcoming_games + list(reversed(completed_games))
+            upcoming_count = len(upcoming_games)
+            completed_count = len(completed_games)
 
             games_dict: dict[str, list[dict[str, str]]] = {}
             game_sections_dict: dict[str, dict[str, list[str]]] = {}
+            stadium_game_counts: dict[str, int] = {}
             for game in games:
                 home_team = nfl_event_home_team(game)
                 if home_team is None:
                     continue
+                completed = _event_is_completed(game, now)
+                status = "Completed" if completed else "Upcoming"
+                venue = nfl_display_venue(game)
                 games_dict.setdefault(home_team, []).append(
-                    {"value": str(game.id), "label": format_nfl_title(game)}
+                    {
+                        "value": str(game.id),
+                        "label": (
+                            f"{status} · {format_nfl_title(game)} · "
+                            f"{venue}"
+                        ),
+                        "status": status.casefold(),
+                        "venue": venue,
+                    }
                 )
                 game_sections_dict.setdefault(home_team, {})[
                     str(game.id)
                 ] = sorted(set(game.sections or []))
+                if venue:
+                    stadium_game_counts[venue] = (
+                        stadium_game_counts.get(venue, 0) + 1
+                    )
 
             games_dict = dict(sorted(games_dict.items()))
             game_sections_dict = {
                 team: game_sections_dict[team] for team in games_dict
             }
+            stadium_game_counts = dict(sorted(stadium_game_counts.items()))
             team_count = len(games_dict)
-            game_count = sum(len(team_games) for team_games in games_dict.values())
+            game_count = sum(
+                len(team_games) for team_games in games_dict.values()
+            )
             section_count = len(
                 {
                     section
@@ -1504,7 +1534,8 @@ def _nfl_home_context(archive_mode: bool) -> dict[str, Any]:
         "team_count": team_count,
         "game_count": game_count,
         "section_count": section_count,
-        "archive_mode": archive_mode,
+        "stadium_count": len(stadium_game_counts),
+        "stadium_game_counts": stadium_game_counts,
         "upcoming_count": upcoming_count,
         "completed_count": completed_count,
     }
@@ -1512,12 +1543,14 @@ def _nfl_home_context(archive_mode: bool) -> dict[str, Any]:
 
 @nfl_blueprint.get("/nfl")
 def nfl_home():
-    return render_template("NFLHomeScreen.html", **_nfl_home_context(False))
+    return render_template("NFLHomeScreen.html", **_nfl_home_context())
 
 
 @nfl_blueprint.get("/nfl/archive")
 def nfl_archive():
-    return render_template("NFLHomeScreen.html", **_nfl_home_context(True))
+    """Retain old bookmarks while serving the unified NFL history."""
+    return nfl_home()
+
 
 
 @nfl_blueprint.get("/nfl/map")
