@@ -1,0 +1,364 @@
+name: Audit production NFL venue metadata
+
+on:
+  push:
+    branches:
+      - audit/nfl-venue-integrity-2026-08-30
+    paths:
+      - ".github/workflows/audit-nfl-venues.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure PythonAnywhere SSH key
+        env:
+          PYTHONANYWHERE_SSH_KEY: ${{ secrets.PYTHONANYWHERE_SSH_KEY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$PYTHONANYWHERE_SSH_KEY" > ~/.ssh/pythonanywhere_deploy
+          chmod 600 ~/.ssh/pythonanywhere_deploy
+          ssh-keyscan -t rsa,ed25519 -H ssh.pythonanywhere.com > ~/.ssh/known_hosts
+          ssh-keygen -lf ~/.ssh/known_hosts -E sha256 | grep -F 'SHA256:zy2jmqxNg/fs6tFZK55OjHTI3B2UofzOiUvTPtcX3/Y'
+
+      - name: Export production NFL events read-only
+        run: |
+          ssh \
+            -i ~/.ssh/pythonanywhere_deploy \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            bunnyjeff@ssh.pythonanywhere.com 'bash -s' > production_nfl_events.json <<'REMOTE'
+          set -euo pipefail
+          /home/bunnyjeff/venv/bin/python - <<'PY'
+          import json
+          from pathlib import Path
+          import sqlite3
+
+          path = Path('/home/bunnyjeff/TicketPricePredictor/NFL-collection.db')
+          if not path.exists():
+              raise SystemExit(f'Missing production NFL database: {path}')
+
+          with sqlite3.connect(path) as db:
+              db.row_factory = sqlite3.Row
+              rows = db.execute(
+                  '''
+                  SELECT
+                      e.id,
+                      e.source_id,
+                      e.title,
+                      e.event_date,
+                      e.venue,
+                      e.source_url,
+                      e.sections,
+                      COUNT(DISTINCT i.id) AS iteration_count,
+                      MAX(i.captured_at) AS latest_capture
+                  FROM nfl_event AS e
+                  LEFT JOIN nfl_iterations AS i ON i.event_id = e.id
+                  GROUP BY
+                      e.id, e.source_id, e.title, e.event_date,
+                      e.venue, e.source_url, e.sections
+                  ORDER BY e.event_date, e.id
+                  '''
+              ).fetchall()
+
+          events = []
+          for row in rows:
+              raw_sections = row['sections']
+              if isinstance(raw_sections, str):
+                  try:
+                      sections = json.loads(raw_sections)
+                  except json.JSONDecodeError:
+                      sections = []
+              elif isinstance(raw_sections, list):
+                  sections = raw_sections
+              else:
+                  sections = []
+              events.append(
+                  {
+                      'id': row['id'],
+                      'source_id': row['source_id'],
+                      'title': row['title'],
+                      'event_date': row['event_date'],
+                      'venue': row['venue'],
+                      'source_url': row['source_url'],
+                      'section_count': len(sections),
+                      'sections': sections,
+                      'iteration_count': row['iteration_count'],
+                      'latest_capture': row['latest_capture'],
+                  }
+              )
+
+          print(
+              json.dumps(
+                  {
+                      'database_path': str(path),
+                      'database_size_bytes': path.stat().st_size,
+                      'event_count': len(events),
+                      'events': events,
+                  },
+                  indent=2,
+              )
+          )
+          PY
+          REMOTE
+          python -m json.tool production_nfl_events.json > /dev/null
+
+      - name: Compare stored venues with the structured NFL schedule
+        run: |
+          python - <<'PY'
+          from collections import defaultdict
+          from datetime import datetime, timedelta, timezone
+          import json
+          import re
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+          from zoneinfo import ZoneInfo
+
+          EASTERN = ZoneInfo('America/New_York')
+          source = json.loads(Path('production_nfl_events.json').read_text())
+          stored = source.get('events') or []
+
+          def parse_stored_event_time(raw):
+              value = datetime.fromisoformat(str(raw))
+              if value.tzinfo is None:
+                  value = value.replace(tzinfo=EASTERN)
+              return value.astimezone(timezone.utc)
+
+          if stored:
+              stored_times = [parse_stored_event_time(row['event_date']) for row in stored]
+              start = min(stored_times) - timedelta(days=3)
+              end = max(stored_times) + timedelta(days=3)
+          else:
+              start = datetime.now(timezone.utc) - timedelta(days=7)
+              end = datetime.now(timezone.utc) + timedelta(days=35)
+
+          dates = f'{start.astimezone(EASTERN):%Y%m%d}-{end.astimezone(EASTERN):%Y%m%d}'
+          schedule_url = (
+              'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard'
+              f'?dates={dates}&limit=1000'
+          )
+          request = Request(
+              schedule_url,
+              headers={
+                  'Accept': 'application/json',
+                  'User-Agent': 'TicketSignal-NFL-venue-audit/1.0',
+              },
+          )
+          with urlopen(request, timeout=30) as response:
+              schedule_payload = json.loads(response.read().decode('utf-8'))
+
+          schedule = []
+          team_names = set()
+          for event in schedule_payload.get('events') or []:
+              competitions = event.get('competitions') or []
+              competition = competitions[0] if competitions else {}
+              sides = {}
+              for competitor in competition.get('competitors') or []:
+                  team = competitor.get('team') or {}
+                  name = ' '.join(str(team.get('displayName') or '').split())
+                  side = str(competitor.get('homeAway') or '').lower()
+                  if side in {'home', 'away'} and name:
+                      sides[side] = name
+                      team_names.add(name)
+              if not sides.get('home') or not sides.get('away'):
+                  continue
+              venue_data = competition.get('venue') or {}
+              address = venue_data.get('address') or {}
+              schedule.append(
+                  {
+                      'schedule_id': str(event.get('id') or competition.get('id') or ''),
+                      'name': ' '.join(str(event.get('name') or '').split()),
+                      'event_date': datetime.fromisoformat(
+                          str(event['date']).replace('Z', '+00:00')
+                      ).astimezone(timezone.utc),
+                      'away_team': sides['away'],
+                      'home_team': sides['home'],
+                      'venue': ' '.join(str(venue_data.get('fullName') or '').split()),
+                      'city': ' '.join(str(address.get('city') or '').split()),
+                      'state': ' '.join(str(address.get('state') or '').split()),
+                  }
+              )
+
+          def normalize(value):
+              return re.sub(r'[^a-z0-9]+', '', str(value or '').lower())
+
+          equivalent_groups = [
+              {'arrowheadstadium', 'gehafieldatarrowheadstadium'},
+              {'highmarkstadium', 'newhighmarkstadium'},
+          ]
+          legacy_groups = {
+              'fedexfield': 'Northwest Stadium',
+              'firstenergystadium': 'Huntington Bank Field',
+              'clevelandbrownsstadium': 'Huntington Bank Field',
+              'heinzfield': 'Acrisure Stadium',
+              'paulbrownstadium': 'Paycor Stadium',
+              'tiaabankfield': 'EverBank Stadium',
+              'everbankfield': 'EverBank Stadium',
+              'centurylinkfield': 'Lumen Field',
+              'reliantstadium': 'NRG Stadium',
+              'mercedesbenzsuperdome': 'Caesars Superdome',
+              'universityofphoenixstadium': 'State Farm Stadium',
+              'sunlifestadium': 'Hard Rock Stadium',
+              'landsharkstadium': 'Hard Rock Stadium',
+              'lpfield': 'Nissan Stadium',
+          }
+
+          def compare_venue(provider, scheduled):
+              left = normalize(provider)
+              right = normalize(scheduled)
+              if left and left == right:
+                  return 'exact'
+              if left and right and (left in right or right in left):
+                  return 'same_place_noncanonical'
+              if any(left in group and right in group for group in equivalent_groups):
+                  return 'same_place_noncanonical'
+              if left in legacy_groups and normalize(legacy_groups[left]) == right:
+                  return 'legacy_name'
+              return 'mismatch'
+
+          audited = []
+          for row in stored:
+              stored_time = parse_stored_event_time(row['event_date'])
+              title_normalized = str(row.get('title') or '').casefold()
+              candidates = []
+              for game in schedule:
+                  if game['away_team'].casefold() not in title_normalized:
+                      continue
+                  if game['home_team'].casefold() not in title_normalized:
+                      continue
+                  difference = abs((game['event_date'] - stored_time).total_seconds())
+                  if difference <= 36 * 3600:
+                      candidates.append((difference, game))
+              candidates.sort(key=lambda item: item[0])
+              if not candidates:
+                  audited.append(
+                      {
+                          **row,
+                          'audit_status': 'unmatched_schedule',
+                          'schedule_id': None,
+                          'schedule_venue': None,
+                          'schedule_home_team': None,
+                          'schedule_away_team': None,
+                          'kickoff_difference_minutes': None,
+                      }
+                  )
+                  continue
+
+              difference, game = candidates[0]
+              audited.append(
+                  {
+                      **row,
+                      'audit_status': compare_venue(row.get('venue'), game['venue']),
+                      'schedule_id': game['schedule_id'],
+                      'schedule_venue': game['venue'],
+                      'schedule_home_team': game['home_team'],
+                      'schedule_away_team': game['away_team'],
+                      'schedule_city': game['city'],
+                      'schedule_state': game['state'],
+                      'kickoff_difference_minutes': round(difference / 60, 1),
+                  }
+              )
+
+          counts = defaultdict(int)
+          for row in audited:
+              counts[row['audit_status']] += 1
+
+          unique_pairs = {}
+          for row in audited:
+              key = (
+                  row.get('schedule_home_team') or '',
+                  row.get('venue') or '',
+                  row.get('schedule_venue') or '',
+                  row.get('audit_status') or '',
+              )
+              unique_pairs[key] = {
+                  'home_team': row.get('schedule_home_team'),
+                  'provider_venue': row.get('venue'),
+                  'schedule_venue': row.get('schedule_venue'),
+                  'audit_status': row.get('audit_status'),
+              }
+
+          shared = defaultdict(set)
+          for row in audited:
+              if row.get('schedule_venue') and row.get('schedule_home_team'):
+                  shared[row['schedule_venue']].add(row['schedule_home_team'])
+
+          report = {
+              'generated_at': datetime.now(timezone.utc).isoformat(),
+              'schedule_source': schedule_url,
+              'database_size_bytes': source.get('database_size_bytes'),
+              'stored_event_count': len(stored),
+              'schedule_event_count_in_query': len(schedule),
+              'status_counts': dict(sorted(counts.items())),
+              'all_schedule_matched': counts.get('unmatched_schedule', 0) == 0,
+              'all_same_physical_venue': (
+                  counts.get('mismatch', 0) == 0
+                  and counts.get('unmatched_schedule', 0) == 0
+              ),
+              'canonical_name_issues': (
+                  counts.get('same_place_noncanonical', 0)
+                  + counts.get('legacy_name', 0)
+              ),
+              'unique_venue_pairs': sorted(
+                  unique_pairs.values(),
+                  key=lambda item: (
+                      item.get('home_team') or '',
+                      item.get('provider_venue') or '',
+                  ),
+              ),
+              'shared_schedule_venues': {
+                  venue: sorted(teams)
+                  for venue, teams in sorted(shared.items())
+                  if len(teams) > 1
+              },
+              'events': audited,
+          }
+          Path('nfl_venue_audit.json').write_text(
+              json.dumps(report, indent=2) + '\n',
+              encoding='utf-8',
+          )
+
+          lines = [
+              '# Production NFL venue audit',
+              '',
+              f"Generated: {report['generated_at']}",
+              f"Stored events: {report['stored_event_count']}",
+              f"Status counts: {report['status_counts']}",
+              f"All events matched to schedule: {report['all_schedule_matched']}",
+              f"All events use the same physical venue as schedule: {report['all_same_physical_venue']}",
+              '',
+              '| Home team | Stored/Vivid venue | Schedule venue | Result |',
+              '|---|---|---|---|',
+          ]
+          for item in report['unique_venue_pairs']:
+              lines.append(
+                  f"| {item.get('home_team') or 'Unmatched'} | "
+                  f"{item.get('provider_venue') or ''} | "
+                  f"{item.get('schedule_venue') or ''} | "
+                  f"{item.get('audit_status') or ''} |"
+              )
+          Path('nfl_venue_audit.md').write_text('\n'.join(lines) + '\n')
+
+          print(json.dumps(report['status_counts'], indent=2))
+          if not report['all_same_physical_venue']:
+              raise SystemExit('One or more stored NFL events failed venue validation.')
+          PY
+
+      - name: Upload venue audit
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nfl-venue-audit-${{ github.run_id }}
+          path: |
+            production_nfl_events.json
+            nfl_venue_audit.json
+            nfl_venue_audit.md
+          if-no-files-found: error
+          retention-days: 14
