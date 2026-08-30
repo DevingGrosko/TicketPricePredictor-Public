@@ -1,0 +1,596 @@
+.nfl-form-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.nfl-form-actions .button {
+  width: 100%;
+  min-height: 52px;
+}
+
+.nfl-map-launch {
+  border: 1px solid rgba(255, 255, 255, .28);
+  background: rgba(255, 255, 255, .07);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+}
+
+.nfl-map-launch:hover:not(:disabled),
+.nfl-map-launch:focus-visible:not(:disabled) {
+  border-color: rgba(255, 255, 255, .62);
+  background: rgba(255, 255, 255, .13);
+}
+
+.nfl-map-launch:disabled {
+  cursor: not-allowed;
+  opacity: .42;
+}
+
+.nfl-chart-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.nfl-map-page {
+  min-height: calc(100vh - 160px);
+}
+
+.nfl-map-view {
+  width: min(1500px, calc(100% - 40px));
+}
+
+.nfl-map-banner {
+  margin-bottom: 22px;
+}
+
+.nfl-map-error {
+  margin-top: 48px;
+}
+
+.nfl-stadium-map-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 330px;
+  gap: 22px;
+  align-items: start;
+}
+
+.nfl-stadium-map-card,
+.nfl-map-search-card,
+.nfl-map-section-card,
+.nfl-map-source-card,
+.nfl-map-capture-note {
+  border: 1px solid rgba(255, 255, 255, .13);
+  background: linear-gradient(145deg, rgba(11, 30, 57, .97), rgba(3, 17, 34, .96));
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .26);
+}
+
+.nfl-stadium-map-card {
+  border-radius: 26px;
+  padding: 22px;
+  overflow: hidden;
+}
+
+.nfl-stadium-map-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 14px;
+}
+
+.nfl-stadium-map-card__top > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.nfl-stadium-map-card__top span,
+.nfl-map-capture-note span {
+  color: #9fb2c9;
+  font-size: .74rem;
+  font-weight: 700;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
+.nfl-stadium-map-card__top strong {
+  color: #fff;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 1.12rem;
+}
+
+.nfl-map-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.nfl-map-controls button,
+.nfl-map-search-row button,
+.nfl-map-level-filter button {
+  border: 1px solid rgba(255, 255, 255, .18);
+  background: rgba(255, 255, 255, .075);
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+  transition: border-color .18s ease, background .18s ease, transform .18s ease;
+}
+
+.nfl-map-controls button {
+  min-width: 40px;
+  height: 38px;
+  border-radius: 10px;
+  padding: 0 11px;
+}
+
+.nfl-map-controls button:hover,
+.nfl-map-controls button:focus-visible,
+.nfl-map-search-row button:hover,
+.nfl-map-search-row button:focus-visible,
+.nfl-map-level-filter button:hover,
+.nfl-map-level-filter button:focus-visible {
+  border-color: rgba(255, 255, 255, .5);
+  background: rgba(255, 255, 255, .14);
+}
+
+.nfl-map-controls button:active,
+.nfl-map-search-row button:active,
+.nfl-map-level-filter button:active {
+  transform: translateY(1px);
+}
+
+.nfl-map-level-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 34px;
+  margin-bottom: 13px;
+}
+
+.nfl-map-level-filter button {
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: .75rem;
+}
+
+.nfl-map-level-filter button.is-active {
+  border-color: #fff;
+  background: #fff;
+  color: #013369;
+}
+
+.nfl-stadium-map-stage {
+  position: relative;
+  min-height: 610px;
+  border: 1px solid rgba(255, 255, 255, .11);
+  border-radius: 22px;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 50% 49%, rgba(31, 127, 77, .2), transparent 31%),
+    linear-gradient(180deg, rgba(5, 18, 35, .98), rgba(1, 10, 24, .99));
+  cursor: grab;
+  touch-action: none;
+}
+
+.nfl-stadium-map-stage.is-dragging {
+  cursor: grabbing;
+}
+
+.nfl-stadium-map-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, .025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, .025) 1px, transparent 1px);
+  background-size: 36px 36px;
+}
+
+.nfl-stadium-map-svg {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  height: 100%;
+  min-height: 610px;
+  user-select: none;
+}
+
+.nfl-map-bowl-shadow {
+  fill: rgba(0, 0, 0, .34);
+}
+
+.nfl-map-field-shell {
+  fill: #0d5b38;
+  stroke: rgba(255, 255, 255, .75);
+  stroke-width: 3;
+}
+
+.nfl-map-field-endzone {
+  fill: #013369;
+}
+
+.nfl-map-field-line {
+  stroke: rgba(255, 255, 255, .52);
+  stroke-width: 2;
+}
+
+.nfl-map-field-hash {
+  stroke: rgba(255, 255, 255, .42);
+  stroke-width: 1.5;
+}
+
+.nfl-map-field-text {
+  fill: rgba(255, 255, 255, .86);
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: .15em;
+  text-anchor: middle;
+}
+
+.nfl-stadium-section {
+  cursor: pointer;
+  outline: none;
+}
+
+.nfl-stadium-section path {
+  stroke: rgba(4, 15, 29, .9);
+  stroke-width: 2;
+  transition: fill .16s ease, stroke .16s ease, opacity .16s ease, filter .16s ease;
+}
+
+.nfl-stadium-section.level-0 path,
+.nfl-map-legend__swatch--inner {
+  fill: #f1f5f9;
+}
+
+.nfl-stadium-section.level-1 path {
+  fill: #cbd8e6;
+}
+
+.nfl-stadium-section.level-2 path,
+.nfl-map-legend__swatch--middle {
+  fill: #8ca5bf;
+}
+
+.nfl-stadium-section.level-3 path {
+  fill: #54789d;
+}
+
+.nfl-stadium-section.level-4 path,
+.nfl-map-legend__swatch--outer {
+  fill: #24527f;
+}
+
+.nfl-stadium-section.level-5 path,
+.nfl-stadium-section.level-6 path,
+.nfl-stadium-section.level-7 path {
+  fill: #123b67;
+}
+
+.nfl-stadium-section text {
+  fill: #06172a;
+  font-family: "DM Sans", sans-serif;
+  font-size: 11px;
+  font-weight: 800;
+  pointer-events: none;
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+
+.nfl-stadium-section.level-3 text,
+.nfl-stadium-section.level-4 text,
+.nfl-stadium-section.level-5 text,
+.nfl-stadium-section.level-6 text,
+.nfl-stadium-section.level-7 text {
+  fill: #fff;
+}
+
+.nfl-stadium-section:hover path,
+.nfl-stadium-section:focus-visible path,
+.nfl-stadium-section.is-match path {
+  stroke: #fff;
+  stroke-width: 4;
+  filter: brightness(1.2);
+}
+
+.nfl-stadium-section.is-dimmed {
+  opacity: .13;
+  pointer-events: none;
+}
+
+.nfl-stadium-section.is-selected path,
+.nfl-map-legend__swatch--selected {
+  fill: #d50a0a;
+  stroke: #fff;
+  stroke-width: 5;
+  filter: drop-shadow(0 0 10px rgba(213, 10, 10, .62));
+}
+
+.nfl-stadium-section.is-selected text {
+  fill: #fff;
+}
+
+.nfl-map-tooltip {
+  position: absolute;
+  z-index: 4;
+  min-width: 180px;
+  max-width: 260px;
+  padding: 11px 13px;
+  border: 1px solid rgba(255, 255, 255, .2);
+  border-radius: 12px;
+  background: rgba(2, 12, 27, .96);
+  box-shadow: 0 14px 40px rgba(0, 0, 0, .42);
+  color: #fff;
+  pointer-events: none;
+  transform: translate(12px, 12px);
+}
+
+.nfl-map-tooltip strong,
+.nfl-map-tooltip span {
+  display: block;
+}
+
+.nfl-map-tooltip strong {
+  margin-bottom: 3px;
+  font-family: "Space Grotesk", sans-serif;
+}
+
+.nfl-map-tooltip span {
+  color: #bdcadd;
+  font-size: .82rem;
+}
+
+.nfl-map-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 18px;
+  margin-top: 14px;
+  color: #b8c8da;
+  font-size: .77rem;
+}
+
+.nfl-map-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.nfl-map-legend__swatch {
+  width: 12px;
+  height: 12px;
+  border: 1px solid rgba(255, 255, 255, .45);
+  border-radius: 3px;
+}
+
+.nfl-map-disclaimer {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 13px 0 0;
+  color: #91a5bd;
+  font-size: .78rem;
+  line-height: 1.55;
+}
+
+.nfl-map-sidebar {
+  display: grid;
+  gap: 16px;
+  position: sticky;
+  top: 20px;
+}
+
+.nfl-map-search-card,
+.nfl-map-section-card,
+.nfl-map-source-card,
+.nfl-map-capture-note {
+  border-radius: 20px;
+  padding: 20px;
+}
+
+.nfl-map-search-card label {
+  display: block;
+  margin-bottom: 9px;
+  color: #fff;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: .95rem;
+  font-weight: 700;
+}
+
+.nfl-map-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.nfl-map-search-row input {
+  min-width: 0;
+  height: 43px;
+  border: 1px solid rgba(255, 255, 255, .18);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, .075);
+  color: #fff;
+  font: inherit;
+  padding: 0 12px;
+  outline: none;
+}
+
+.nfl-map-search-row input::placeholder {
+  color: #8399b3;
+}
+
+.nfl-map-search-row input:focus {
+  border-color: rgba(255, 255, 255, .62);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, .07);
+}
+
+.nfl-map-search-row button {
+  border-radius: 11px;
+  padding: 0 14px;
+}
+
+.nfl-map-search-card > p,
+.nfl-map-source-card > p,
+.nfl-map-section-card > p {
+  margin: 10px 0 0;
+  color: #9fb2c9;
+  font-size: .83rem;
+  line-height: 1.55;
+}
+
+.nfl-map-section-card h2,
+.nfl-map-source-card h2 {
+  margin: 8px 0 0;
+  color: #fff;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 1.28rem;
+  line-height: 1.22;
+}
+
+.nfl-map-section-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin: 18px 0;
+}
+
+.nfl-map-section-stats div {
+  padding: 13px;
+  border: 1px solid rgba(255, 255, 255, .1);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, .045);
+}
+
+.nfl-map-section-stats dt {
+  color: #fff;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.nfl-map-section-stats dd {
+  margin: 4px 0 0;
+  color: #8fa4bd;
+  font-size: .7rem;
+  line-height: 1.3;
+}
+
+.nfl-map-history-link {
+  display: flex;
+  width: 100%;
+  justify-content: center;
+}
+
+.nfl-map-history-link[aria-disabled="true"] {
+  opacity: .42;
+  pointer-events: none;
+}
+
+.nfl-map-provider-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 15px;
+  color: #fff;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.nfl-map-provider-link:hover,
+.nfl-map-provider-link:focus-visible {
+  text-decoration: underline;
+}
+
+.nfl-map-capture-note {
+  display: grid;
+  gap: 5px;
+}
+
+.nfl-map-capture-note strong {
+  color: #fff;
+  font-size: .92rem;
+}
+
+@media (max-width: 1100px) {
+  .nfl-stadium-map-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .nfl-map-sidebar {
+    position: static;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .nfl-map-capture-note {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 760px) {
+  .nfl-map-view {
+    width: min(100% - 20px, 1500px);
+  }
+
+  .nfl-form-actions,
+  .nfl-map-sidebar {
+    grid-template-columns: 1fr;
+  }
+
+  .nfl-map-capture-note {
+    grid-column: auto;
+  }
+
+  .nfl-stadium-map-card {
+    padding: 14px;
+    border-radius: 18px;
+  }
+
+  .nfl-stadium-map-card__top {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .nfl-stadium-map-stage,
+  .nfl-stadium-map-svg {
+    min-height: 480px;
+  }
+
+  .nfl-map-section-stats {
+    grid-template-columns: 1fr;
+  }
+
+  .nfl-chart-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 480px) {
+  .nfl-stadium-map-stage,
+  .nfl-stadium-map-svg {
+    min-height: 410px;
+  }
+
+  .nfl-map-controls {
+    width: 100%;
+  }
+
+  .nfl-map-controls button {
+    flex: 1;
+  }
+
+  .nfl-map-search-row {
+    grid-template-columns: 1fr;
+  }
+
+  .nfl-map-search-row button {
+    height: 41px;
+  }
+}
