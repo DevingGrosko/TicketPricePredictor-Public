@@ -552,7 +552,7 @@ known.forEach((name) => {
   }
 });
 function match(hints) {
-  for (let index = hints.length - 1; index >= 0; index -= 1) {
+  for (let index = 0; index < hints.length; index += 1) {
     const hint = hints[index];
     const key = normalize(hint);
     const exactMatches = exact.get(key) || [];
