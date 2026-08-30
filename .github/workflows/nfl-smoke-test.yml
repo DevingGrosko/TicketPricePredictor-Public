@@ -7,9 +7,14 @@ on:
     paths:
       - "nfl_collector.py"
       - "nfl_schedule_collector.py"
+      - "nfl_metadata.py"
       - "collector.py"
+      - "Flask_App/nfl_blueprint.py"
+      - "Flask_App/static/js/nfl-map.js"
+      - "Flask_App/templates/nfl_map.html"
       - "tests/test_nfl_collector.py"
       - "tests/test_nfl_schedule_collector.py"
+      - "tests/test_nfl_metadata_enhancements.py"
       - ".github/workflows/nfl-smoke-test.yml"
   workflow_dispatch:
     inputs:
@@ -55,6 +60,45 @@ jobs:
             --headless \
             --timeout 45 \
             --output nfl_smoke_result.json
+
+      - name: Require usable real section geometry
+        run: |
+          python - <<'PY'
+          import json
+          import math
+          from pathlib import Path
+
+          payload = json.loads(
+              Path("nfl_smoke_result.json").read_text(encoding="utf-8")
+          )
+          geometry = payload.get("map_geometry") or {}
+          mapped = int(geometry.get("mapped_section_count") or 0)
+          known = int(
+              geometry.get("known_section_count")
+              or payload.get("section_count")
+              or 0
+          )
+          ratio = float(geometry.get("coverage_ratio") or 0)
+          shape_count = sum(
+              len(row.get("shapes") or [])
+              for row in geometry.get("sections") or []
+          )
+          required = max(4, min(12, math.ceil(known * 0.6)))
+          if mapped < required or ratio < 0.6:
+              raise SystemExit(
+                  "Provider geometry is not usable: "
+                  f"{mapped}/{known} sections ({ratio:.1%})"
+              )
+          if shape_count < mapped:
+              raise SystemExit(
+                  "Provider geometry has fewer SVG shapes than matched sections: "
+                  f"{shape_count} < {mapped}"
+              )
+          print(
+              f"Verified {mapped}/{known} real provider sections "
+              f"({ratio:.1%}) across {shape_count} SVG shapes."
+          )
+          PY
 
       - name: Upload diagnostic results
         if: always()
