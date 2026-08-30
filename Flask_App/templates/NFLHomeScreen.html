@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}NFL ticket trends — TicketSignal{% endblock %}
+{% block title %}{% if archive_mode %}NFL price archive{% else %}NFL ticket trends{% endif %} — TicketSignal{% endblock %}
 {% block body_class %}nfl-theme{% endblock %}
 {% block head %}
   <meta name="theme-color" content="#013369">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl.css') }}?v=1">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-responsive.css') }}?v=1">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-map.css') }}?v=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-map.css') }}?v=2">
 {% endblock %}
 
 {% block content %}
@@ -14,19 +14,29 @@
     <div class="nfl-hero__copy">
       <div class="nfl-kicker">
         <span class="nfl-mini-shield" aria-hidden="true"><i></i><strong>TS</strong></span>
-        <span>NFL market tracker</span>
-        <span class="nfl-live-tag"><i></i> Adaptive</span>
+        <span>{% if archive_mode %}NFL completed-game archive{% else %}NFL market tracker{% endif %}</span>
+        <span class="nfl-live-tag"><i></i> {% if archive_mode %}Historical{% else %}Adaptive{% endif %}</span>
       </div>
-      <h1>Track the market.<br><em>Beat kickoff.</em></h1>
-      <p class="nfl-hero__lede">Watch section-level ticket prices move through the final 30 days before an NFL game. Choose a home team, matchup, and section to inspect the adaptive market history.</p>
+      {% if archive_mode %}
+        <h1>Review the market.<br><em>After kickoff.</em></h1>
+        <p class="nfl-hero__lede">Completed games are kept here with their full section-level price history. Every listed kickoff time is displayed in Eastern Time.</p>
+      {% else %}
+        <h1>Track the market.<br><em>Beat kickoff.</em></h1>
+        <p class="nfl-hero__lede">Watch section-level ticket prices move through the final 30 days before an NFL game. Choose a home team, matchup, and section to inspect the adaptive market history. All kickoff times are Eastern.</p>
+      {% endif %}
       <div class="nfl-hero__actions">
-        <a class="button nfl-button nfl-button--primary" href="#explore-nfl">Build a price chart <span aria-hidden="true">&#8595;</span></a>
+        <a class="button nfl-button nfl-button--primary" href="#explore-nfl">{% if archive_mode %}Open archived chart{% else %}Build a price chart{% endif %} <span aria-hidden="true">&#8595;</span></a>
+        {% if archive_mode %}
+          <a class="nfl-text-link" href="{{ url_for('nfl.nfl_home') }}">Upcoming games ({{ upcoming_count }}) <span aria-hidden="true">&#8594;</span></a>
+        {% else %}
+          <a class="nfl-text-link" href="{{ url_for('nfl.nfl_archive') }}">Completed archive ({{ completed_count }}) <span aria-hidden="true">&#8594;</span></a>
+        {% endif %}
         <a class="nfl-text-link" href="{{ url_for('home') }}">Switch to baseball <span aria-hidden="true">&#8594;</span></a>
       </div>
 
       <dl class="nfl-metrics" aria-label="NFL database totals">
         <div><dt>{{ team_count }}</dt><dd>Home teams</dd></div>
-        <div><dt>{{ game_count }}</dt><dd>Games tracked</dd></div>
+        <div><dt>{{ game_count }}</dt><dd>{% if archive_mode %}Games archived{% else %}Upcoming games{% endif %}</dd></div>
         <div><dt>{{ section_count }}</dt><dd>Sections observed</dd></div>
       </dl>
     </div>
@@ -34,10 +44,10 @@
     <div class="nfl-scoreboard" aria-label="NFL collection window and cadence">
       <div class="nfl-scoreboard__topline">
         <div>
-          <span>Market clock</span>
+          <span>{% if archive_mode %}Historical clock{% else %}Market clock{% endif %}</span>
           <strong>Thirty-day price movement</strong>
         </div>
-        <span class="nfl-status"><i></i> Live feed</span>
+        <span class="nfl-status"><i></i> {% if archive_mode %}Stored history{% else %}Live feed{% endif %}</span>
       </div>
 
       <div class="nfl-clock">
@@ -70,7 +80,7 @@
 
       <div class="nfl-scoreboard__footer">
         <div><span>Cadence</span><strong>6h → 3h → 1h</strong></div>
-        <div><span>Scope</span><strong>One home team at a time</strong></div>
+        <div><span>Timezone</span><strong>Eastern Time</strong></div>
       </div>
     </div>
   </section>
@@ -78,16 +88,16 @@
   <section class="nfl-data-bar" id="how-it-works" aria-label="NFL tracker methodology">
     <div><span>01</span><strong>Thirty-day window</strong><small>Collection begins up to 720 hours before kickoff.</small></div>
     <div><span>02</span><strong>Adaptive cadence</strong><small>Every 6 hours, then 3 hours, then hourly in the final week.</small></div>
-    <div><span>03</span><strong>Section-level history</strong><small>NFL observations stay separate from baseball data.</small></div>
+    <div><span>03</span><strong>Section-level history</strong><small>Upcoming and completed NFL games remain separated.</small></div>
   </section>
 
   <section class="nfl-explore" id="explore-nfl">
     <div class="nfl-section-heading">
       <div>
-        <span class="nfl-section-kicker">Build your matchup view</span>
-        <h2>Call the play in three steps.</h2>
+        <span class="nfl-section-kicker">{% if archive_mode %}Review a completed matchup{% else %}Build your matchup view{% endif %}</span>
+        <h2>{% if archive_mode %}Replay the market in three steps.{% else %}Call the play in three steps.{% endif %}</h2>
       </div>
-      <p>Select the home team, game, and section you care about. The chart then shows how that section’s observed market price changed across the month leading into kickoff.</p>
+      <p>Select the designated home team, game, and section. The chart shows how that section’s observed market price changed across the month leading into kickoff.</p>
     </div>
 
     <div class="nfl-analysis-shell">
@@ -97,11 +107,11 @@
         </div>
         <span class="nfl-section-kicker">Single-game analysis</span>
         <h3>A longer read on the road to kickoff.</h3>
-        <p>Use the adaptive history to see whether a section is holding firm, drifting lower, or getting more expensive as inventory changes.</p>
+        <p>Use the adaptive history to see whether a section held firm, drifted lower, or became more expensive as inventory changed.</p>
         <div class="nfl-feature-list">
-          <div><span>720h</span><p><strong>Full 30-day window</strong><small>Early movement through the final whistle countdown.</small></p></div>
+          <div><span>720h</span><p><strong>Full 30-day window</strong><small>Early movement through the final kickoff countdown.</small></p></div>
           <div><span>6→3→1h</span><p><strong>Adaptive snapshots</strong><small>More frequent observations as kickoff gets closer.</small></p></div>
-          <div><span>$ / %</span><p><strong>Two chart modes</strong><small>View dollar prices or relative movement.</small></p></div>
+          <div><span>ET</span><p><strong>Eastern timestamps</strong><small>Kickoff and latest-capture labels use EST or EDT.</small></p></div>
         </div>
       </div>
 
@@ -110,6 +120,9 @@
           <div><span>Price chart setup</span><strong>Choose your view</strong></div>
           <span class="nfl-form__count">3 picks</span>
         </div>
+        {% if not games_dict %}
+          <p class="nfl-form-note"><span aria-hidden="true">&#9432;</span> {% if archive_mode %}No completed NFL games are stored yet.{% else %}No upcoming NFL games are currently stored.{% endif %}</p>
+        {% endif %}
         <div class="field nfl-field-control">
           <label for="nfl-team"><span>1</span> Home team</label>
           <select id="nfl-team" class="place-select">
