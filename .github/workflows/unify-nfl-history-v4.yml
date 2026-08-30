@@ -1,0 +1,91 @@
+name: Unify NFL game history v4
+
+on:
+  push:
+    branches:
+      - fix/unify-nfl-game-history
+    paths:
+      - ".github/workflows/unify-nfl-history-v4.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/unify-nfl-game-history
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Apply the validated unified-history transformation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          workflow = Path(".github/workflows/unify-nfl-history-v3.yml").read_text(
+              encoding="utf-8"
+          )
+          start_marker = "          python - <<'PY'\n"
+          end_marker = "\n          PY\n"
+          start = workflow.find(start_marker)
+          end = workflow.find(end_marker, start)
+          if start < 0 or end < 0:
+              raise SystemExit("Could not extract the v3 transformation")
+
+          raw_script = workflow[start + len(start_marker):end]
+          script_lines = [
+              line[10:] if line.startswith("          ") else line
+              for line in raw_script.splitlines()
+          ]
+          script = "\n".join(script_lines) + "\n"
+          exec(compile(script, "unify-nfl-history-v3", "exec"), {})
+
+          template_path = Path("Flask_App/templates/NFLHomeScreen.html")
+          template = template_path.read_text(encoding="utf-8")
+          old = "<span>NFL market history</span>"
+          new = "<span>NFL market tracker</span>"
+          if template.count(old) != 1:
+              raise SystemExit(
+                  f"Expected one NFL startup marker target, found {template.count(old)}"
+              )
+          template_path.write_text(template.replace(old, new), encoding="utf-8")
+          PY
+
+      - name: Compile transformed Python
+        run: |
+          python -m py_compile \
+            Flask_App/nfl_blueprint.py \
+            tests/test_nfl_metadata_enhancements.py
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate unified NFL history
+        run: python -m unittest discover -s tests -v
+
+      - name: Commit the unified history
+        run: |
+          rm .github/workflows/unify-nfl-history.yml
+          rm .github/workflows/unify-nfl-history-v2.yml
+          rm .github/workflows/unify-nfl-history-v3.yml
+          rm .github/workflows/unify-nfl-history-v4.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            Flask_App/nfl_blueprint.py \
+            Flask_App/templates/NFLHomeScreen.html \
+            tests/test_nfl_metadata_enhancements.py \
+            README.md \
+            .github/workflows/unify-nfl-history.yml \
+            .github/workflows/unify-nfl-history-v2.yml \
+            .github/workflows/unify-nfl-history-v3.yml \
+            .github/workflows/unify-nfl-history-v4.yml
+          git commit -m "Keep all NFL games in one market history"
+          git push origin HEAD:fix/unify-nfl-game-history
