@@ -235,19 +235,35 @@ class NFLMetadataEnhancementTests(unittest.TestCase):
 
                 with app.test_request_context("/nfl"):
                     self.assertEqual(nfl_home(), "ok")
-                upcoming_context = render.call_args.kwargs
-                self.assertEqual(upcoming_context["game_count"], 1)
-                self.assertFalse(upcoming_context["archive_mode"])
-                self.assertIn("New York Giants", upcoming_context["games_dict"])
+                history_context = render.call_args.kwargs
+                self.assertEqual(history_context["game_count"], 2)
+                self.assertEqual(history_context["upcoming_count"], 1)
+                self.assertEqual(history_context["completed_count"], 1)
+                self.assertEqual(history_context["stadium_count"], 1)
+                self.assertEqual(
+                    history_context["stadium_game_counts"],
+                    {"U.S. Bank Stadium": 2},
+                )
+                self.assertIn("New York Giants", history_context["games_dict"])
+                self.assertIn("New York Jets", history_context["games_dict"])
+                self.assertTrue(
+                    history_context["games_dict"]["New York Giants"][0]["label"]
+                    .startswith("Upcoming ·")
+                )
+                self.assertTrue(
+                    history_context["games_dict"]["New York Jets"][0]["label"]
+                    .startswith("Completed ·")
+                )
 
                 render.reset_mock(return_value=True)
-                render.return_value = "archive"
+                render.return_value = "history"
                 with app.test_request_context("/nfl/archive"):
-                    self.assertEqual(nfl_archive(), "archive")
-                archive_context = render.call_args.kwargs
-                self.assertEqual(archive_context["game_count"], 1)
-                self.assertTrue(archive_context["archive_mode"])
-                self.assertIn("New York Jets", archive_context["games_dict"])
+                    self.assertEqual(nfl_archive(), "history")
+                legacy_context = render.call_args.kwargs
+                self.assertEqual(legacy_context["game_count"], 2)
+                self.assertIn("New York Giants", legacy_context["games_dict"])
+                self.assertIn("New York Jets", legacy_context["games_dict"])
+
 
                 render.reset_mock(return_value=True)
                 render.return_value = "map"
