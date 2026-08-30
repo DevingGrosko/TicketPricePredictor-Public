@@ -10,7 +10,7 @@ on:
       # Run the current collectors immediately after this workflow changes.
       # Ordinary code pushes do not start a ticket collection cycle. A
       # workflow-only commit also provides a clean new run ID when replaying
-      # snapshots that were queued during a deployment.
+      # snapshots that were queued during a deployment or verifying a resolver fix.
       - ".github/workflows/collect-ticket-prices.yml"
   schedule:
     # Best-effort baseball recovery trigger. PythonAnywhere dispatches the
