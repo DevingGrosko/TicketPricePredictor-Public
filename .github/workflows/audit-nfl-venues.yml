@@ -13,126 +13,203 @@ permissions:
 jobs:
   audit:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
-      - name: Configure PythonAnywhere SSH key
-        env:
-          PYTHONANYWHERE_SSH_KEY: ${{ secrets.PYTHONANYWHERE_SSH_KEY }}
-        run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$PYTHONANYWHERE_SSH_KEY" > ~/.ssh/pythonanywhere_deploy
-          chmod 600 ~/.ssh/pythonanywhere_deploy
-          ssh-keyscan -t rsa,ed25519 -H ssh.pythonanywhere.com > ~/.ssh/known_hosts
-          ssh-keygen -lf ~/.ssh/known_hosts -E sha256 | grep -F 'SHA256:zy2jmqxNg/fs6tFZK55OjHTI3B2UofzOiUvTPtcX3/Y'
-
-      - name: Export production NFL events read-only
-        run: |
-          ssh \
-            -i ~/.ssh/pythonanywhere_deploy \
-            -o BatchMode=yes \
-            -o IdentitiesOnly=yes \
-            -o StrictHostKeyChecking=yes \
-            bunnyjeff@ssh.pythonanywhere.com 'bash -s' > production_nfl_events.json <<'REMOTE'
-          set -euo pipefail
-          /home/bunnyjeff/venv/bin/python - <<'PY'
-          import json
-          from pathlib import Path
-          import sqlite3
-
-          path = Path('/home/bunnyjeff/TicketPricePredictor/NFL-collection.db')
-          if not path.exists():
-              raise SystemExit(f'Missing production NFL database: {path}')
-
-          with sqlite3.connect(path) as db:
-              db.row_factory = sqlite3.Row
-              rows = db.execute(
-                  '''
-                  SELECT
-                      e.id,
-                      e.source_id,
-                      e.title,
-                      e.event_date,
-                      e.venue,
-                      e.source_url,
-                      e.sections,
-                      COUNT(DISTINCT i.id) AS iteration_count,
-                      MAX(i.captured_at) AS latest_capture
-                  FROM nfl_event AS e
-                  LEFT JOIN nfl_iterations AS i ON i.event_id = e.id
-                  GROUP BY
-                      e.id, e.source_id, e.title, e.event_date,
-                      e.venue, e.source_url, e.sections
-                  ORDER BY e.event_date, e.id
-                  '''
-              ).fetchall()
-
-          events = []
-          for row in rows:
-              raw_sections = row['sections']
-              if isinstance(raw_sections, str):
-                  try:
-                      sections = json.loads(raw_sections)
-                  except json.JSONDecodeError:
-                      sections = []
-              elif isinstance(raw_sections, list):
-                  sections = raw_sections
-              else:
-                  sections = []
-              events.append(
-                  {
-                      'id': row['id'],
-                      'source_id': row['source_id'],
-                      'title': row['title'],
-                      'event_date': row['event_date'],
-                      'venue': row['venue'],
-                      'source_url': row['source_url'],
-                      'section_count': len(sections),
-                      'sections': sections,
-                      'iteration_count': row['iteration_count'],
-                      'latest_capture': row['latest_capture'],
-                  }
-              )
-
-          print(
-              json.dumps(
-                  {
-                      'database_path': str(path),
-                      'database_size_bytes': path.stat().st_size,
-                      'event_count': len(events),
-                      'events': events,
-                  },
-                  indent=2,
-              )
-          )
-          PY
-          REMOTE
-          python -m json.tool production_nfl_events.json > /dev/null
-
-      - name: Compare stored venues with the structured NFL schedule
+      - name: Read every public production NFL game and compare venues
         run: |
           python - <<'PY'
           from collections import defaultdict
           from datetime import datetime, timedelta, timezone
+          from html.parser import HTMLParser
+          import html
           import json
-          import re
           from pathlib import Path
+          import re
+          import time
+          from urllib.parse import urlencode
           from urllib.request import Request, urlopen
           from zoneinfo import ZoneInfo
 
+          BASE_URL = 'https://bunnyjeff.pythonanywhere.com'
           EASTERN = ZoneInfo('America/New_York')
-          source = json.loads(Path('production_nfl_events.json').read_text())
-          stored = source.get('events') or []
 
-          def parse_stored_event_time(raw):
-              value = datetime.fromisoformat(str(raw))
-              if value.tzinfo is None:
-                  value = value.replace(tzinfo=EASTERN)
-              return value.astimezone(timezone.utc)
+          def fetch_text(url, timeout=30):
+              request = Request(
+                  url,
+                  headers={
+                      'Accept': 'text/html,application/json',
+                      'User-Agent': 'TicketSignal-NFL-venue-audit/1.0',
+                  },
+              )
+              with urlopen(request, timeout=timeout) as response:
+                  return response.read().decode('utf-8'), response.status
+
+          class MapPageParser(HTMLParser):
+              def __init__(self):
+                  super().__init__(convert_charrefs=True)
+                  self.in_banner = False
+                  self.banner_depth = 0
+                  self.in_banner_paragraph = False
+                  self.in_heading = False
+                  self.paragraph_text = []
+                  self.heading_text = []
+                  self.provider_url = ''
+                  self.error_text = []
+                  self.in_error = False
+                  self.error_depth = 0
+
+              @staticmethod
+              def classes(attrs):
+                  values = dict(attrs).get('class') or ''
+                  return set(str(values).split())
+
+              def handle_starttag(self, tag, attrs):
+                  classes = self.classes(attrs)
+                  if tag == 'header' and 'nfl-map-banner' in classes:
+                      self.in_banner = True
+                      self.banner_depth = 1
+                  elif self.in_banner:
+                      self.banner_depth += 1
+
+                  if self.in_banner and tag == 'p':
+                      self.in_banner_paragraph = True
+                  if self.in_banner and tag == 'h1':
+                      self.in_heading = True
+
+                  if tag == 'a' and 'nfl-map-provider-link' in classes:
+                      self.provider_url = str(dict(attrs).get('href') or '')
+
+                  if tag == 'div' and 'nfl-map-error' in classes:
+                      self.in_error = True
+                      self.error_depth = 1
+                  elif self.in_error:
+                      self.error_depth += 1
+
+              def handle_endtag(self, tag):
+                  if tag == 'p' and self.in_banner_paragraph:
+                      self.in_banner_paragraph = False
+                  if tag == 'h1' and self.in_heading:
+                      self.in_heading = False
+
+                  if self.in_banner:
+                      self.banner_depth -= 1
+                      if self.banner_depth <= 0:
+                          self.in_banner = False
+                  if self.in_error:
+                      self.error_depth -= 1
+                      if self.error_depth <= 0:
+                          self.in_error = False
+
+              def handle_data(self, data):
+                  if self.in_banner_paragraph:
+                      self.paragraph_text.append(data)
+                  if self.in_heading:
+                      self.heading_text.append(data)
+                  if self.in_error:
+                      self.error_text.append(data)
+
+          def parse_game_label(label):
+              normalized = ' '.join(str(label or '').split())
+              match = re.match(
+                  r'^(?P<title>.+?)\s+—\s+'
+                  r'(?P<date>[A-Z][a-z]{2}\s+\d{1,2},\s+\d{4})\s+·\s+'
+                  r'(?P<time>\d{1,2}:\d{2}\s+[AP]M)$',
+                  normalized,
+              )
+              if not match:
+                  raise ValueError(f'Unexpected NFL game label: {label!r}')
+              local = datetime.strptime(
+                  f"{match.group('date')} {match.group('time')}",
+                  '%b %d, %Y %I:%M %p',
+              ).replace(tzinfo=EASTERN)
+              return match.group('title'), local.astimezone(timezone.utc)
+
+          home_html, home_status = fetch_text(f'{BASE_URL}/nfl')
+          if home_status != 200:
+              raise SystemExit(f'NFL page returned HTTP {home_status}')
+          match = re.search(
+              r'const\s+nflGamesData\s*=\s*(\{.*?\});\s*'
+              r'const\s+nflGameSectionsData',
+              home_html,
+              flags=re.DOTALL,
+          )
+          if not match:
+              raise SystemExit('Could not locate nflGamesData in the production page.')
+          games_data = json.loads(html.unescape(match.group(1)))
+
+          stored = []
+          page_errors = []
+          for team, games in games_data.items():
+              for game in games:
+                  game_id = str(game.get('value') or '')
+                  label = str(game.get('label') or '')
+                  title, event_date = parse_game_label(label)
+                  map_url = f"{BASE_URL}/nfl/map?{urlencode({'team': team, 'game': game_id})}"
+                  try:
+                      map_html, map_status = fetch_text(map_url)
+                  except Exception as exc:
+                      page_errors.append(
+                          f'{team} game {game_id}: {type(exc).__name__}: {exc}'
+                      )
+                      continue
+                  if map_status != 200:
+                      page_errors.append(f'{team} game {game_id}: HTTP {map_status}')
+                      continue
+
+                  parser = MapPageParser()
+                  parser.feed(map_html)
+                  error_text = ' '.join(' '.join(parser.error_text).split())
+                  if error_text:
+                      page_errors.append(f'{team} game {game_id}: {error_text}')
+                      continue
+
+                  paragraph = ' '.join(' '.join(parser.paragraph_text).split())
+                  parts = [part.strip() for part in paragraph.split('·')]
+                  if len(parts) < 3:
+                      page_errors.append(
+                          f'{team} game {game_id}: could not parse map banner {paragraph!r}'
+                      )
+                      continue
+                  venue = parts[1]
+                  section_match = re.search(r'(\d+)\s+sections?', parts[-1])
+                  section_count = int(section_match.group(1)) if section_match else None
+                  stored.append(
+                      {
+                          'id': game_id,
+                          'home_team_bucket': team,
+                          'title': title,
+                          'event_date': event_date.isoformat(),
+                          'venue': venue,
+                          'source_url': parser.provider_url,
+                          'section_count': section_count,
+                          'map_url': map_url,
+                      }
+                  )
+                  time.sleep(0.05)
+
+          Path('production_nfl_events.json').write_text(
+              json.dumps(
+                  {
+                      'source_page': f'{BASE_URL}/nfl',
+                      'event_count': len(stored),
+                      'page_errors': page_errors,
+                      'events': stored,
+                  },
+                  indent=2,
+              ) + '\n',
+              encoding='utf-8',
+          )
+
+          if page_errors:
+              raise SystemExit(
+                  'One or more production map pages could not be audited: '
+                  + '; '.join(page_errors[:5])
+              )
 
           if stored:
-              stored_times = [parse_stored_event_time(row['event_date']) for row in stored]
+              stored_times = [datetime.fromisoformat(row['event_date']) for row in stored]
               start = min(stored_times) - timedelta(days=3)
               end = max(stored_times) + timedelta(days=3)
           else:
@@ -144,29 +221,22 @@ jobs:
               'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard'
               f'?dates={dates}&limit=1000'
           )
-          request = Request(
-              schedule_url,
-              headers={
-                  'Accept': 'application/json',
-                  'User-Agent': 'TicketSignal-NFL-venue-audit/1.0',
-              },
-          )
-          with urlopen(request, timeout=30) as response:
-              schedule_payload = json.loads(response.read().decode('utf-8'))
+          schedule_text, schedule_status = fetch_text(schedule_url)
+          if schedule_status != 200:
+              raise SystemExit(f'Schedule API returned HTTP {schedule_status}')
+          schedule_payload = json.loads(schedule_text)
 
           schedule = []
-          team_names = set()
           for event in schedule_payload.get('events') or []:
               competitions = event.get('competitions') or []
               competition = competitions[0] if competitions else {}
               sides = {}
               for competitor in competition.get('competitors') or []:
-                  team = competitor.get('team') or {}
-                  name = ' '.join(str(team.get('displayName') or '').split())
+                  team_data = competitor.get('team') or {}
+                  name = ' '.join(str(team_data.get('displayName') or '').split())
                   side = str(competitor.get('homeAway') or '').lower()
                   if side in {'home', 'away'} and name:
                       sides[side] = name
-                      team_names.add(name)
               if not sides.get('home') or not sides.get('away'):
                   continue
               venue_data = competition.get('venue') or {}
@@ -225,8 +295,8 @@ jobs:
 
           audited = []
           for row in stored:
-              stored_time = parse_stored_event_time(row['event_date'])
-              title_normalized = str(row.get('title') or '').casefold()
+              stored_time = datetime.fromisoformat(row['event_date']).astimezone(timezone.utc)
+              title_normalized = row['title'].casefold()
               candidates = []
               for game in schedule:
                   if game['away_team'].casefold() not in title_normalized:
@@ -255,7 +325,7 @@ jobs:
               audited.append(
                   {
                       **row,
-                      'audit_status': compare_venue(row.get('venue'), game['venue']),
+                      'audit_status': compare_venue(row['venue'], game['venue']),
                       'schedule_id': game['schedule_id'],
                       'schedule_venue': game['venue'],
                       'schedule_home_team': game['home_team'],
@@ -263,6 +333,9 @@ jobs:
                       'schedule_city': game['city'],
                       'schedule_state': game['state'],
                       'kickoff_difference_minutes': round(difference / 60, 1),
+                      'home_team_bucket_matches_schedule': (
+                          row['home_team_bucket'] == game['home_team']
+                      ),
                   }
               )
 
@@ -273,13 +346,13 @@ jobs:
           unique_pairs = {}
           for row in audited:
               key = (
-                  row.get('schedule_home_team') or '',
+                  row.get('schedule_home_team') or row.get('home_team_bucket') or '',
                   row.get('venue') or '',
                   row.get('schedule_venue') or '',
                   row.get('audit_status') or '',
               )
               unique_pairs[key] = {
-                  'home_team': row.get('schedule_home_team'),
+                  'home_team': row.get('schedule_home_team') or row.get('home_team_bucket'),
                   'provider_venue': row.get('venue'),
                   'schedule_venue': row.get('schedule_venue'),
                   'audit_status': row.get('audit_status'),
@@ -290,13 +363,18 @@ jobs:
               if row.get('schedule_venue') and row.get('schedule_home_team'):
                   shared[row['schedule_venue']].add(row['schedule_home_team'])
 
+          bucket_mismatches = [
+              row for row in audited
+              if row.get('home_team_bucket_matches_schedule') is False
+          ]
           report = {
               'generated_at': datetime.now(timezone.utc).isoformat(),
+              'production_source': f'{BASE_URL}/nfl and /nfl/map',
               'schedule_source': schedule_url,
-              'database_size_bytes': source.get('database_size_bytes'),
               'stored_event_count': len(stored),
               'schedule_event_count_in_query': len(schedule),
               'status_counts': dict(sorted(counts.items())),
+              'all_map_pages_readable': not page_errors,
               'all_schedule_matched': counts.get('unmatched_schedule', 0) == 0,
               'all_same_physical_venue': (
                   counts.get('mismatch', 0) == 0
@@ -306,6 +384,7 @@ jobs:
                   counts.get('same_place_noncanonical', 0)
                   + counts.get('legacy_name', 0)
               ),
+              'home_team_bucket_mismatch_count': len(bucket_mismatches),
               'unique_venue_pairs': sorted(
                   unique_pairs.values(),
                   key=lambda item: (
@@ -329,12 +408,13 @@ jobs:
               '# Production NFL venue audit',
               '',
               f"Generated: {report['generated_at']}",
-              f"Stored events: {report['stored_event_count']}",
+              f"Publicly tracked events: {report['stored_event_count']}",
               f"Status counts: {report['status_counts']}",
               f"All events matched to schedule: {report['all_schedule_matched']}",
               f"All events use the same physical venue as schedule: {report['all_same_physical_venue']}",
+              f"Home-team grouping mismatches: {report['home_team_bucket_mismatch_count']}",
               '',
-              '| Home team | Stored/Vivid venue | Schedule venue | Result |',
+              '| Home team | Website/Vivid venue | Schedule venue | Result |',
               '|---|---|---|---|',
           ]
           for item in report['unique_venue_pairs']:
@@ -347,8 +427,9 @@ jobs:
           Path('nfl_venue_audit.md').write_text('\n'.join(lines) + '\n')
 
           print(json.dumps(report['status_counts'], indent=2))
-          if not report['all_same_physical_venue']:
-              raise SystemExit('One or more stored NFL events failed venue validation.')
+          print(f"Home-team grouping mismatches: {len(bucket_mismatches)}")
+          if not report['all_same_physical_venue'] or bucket_mismatches:
+              raise SystemExit('One or more production NFL venue assignments failed validation.')
           PY
 
       - name: Upload venue audit
