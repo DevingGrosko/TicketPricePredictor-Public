@@ -27,6 +27,19 @@ jobs:
       - name: Install application dependencies
         run: python -m pip install -r requirements.txt
 
+      - name: Normalize README wording for the patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("README.md")
+          text = path.read_text(encoding="utf-8")
+          text = text.replace(
+              "- `/baseball`: direct baseball alias.\n",
+              "- `/baseball`: alias for the baseball homepage.\n",
+          )
+          path.write_text(text, encoding="utf-8")
+          PY
+
       - name: Apply map integration patch
         run: python apply_nfl_map_feature.py
 
