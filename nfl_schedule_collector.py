@@ -49,6 +49,7 @@ from nfl_collector import (
     run_remote_collector as run_feed_only_collector,
     run_smoke_capture as run_feed_smoke_capture,
 )
+from nfl_metadata import canonical_venue_name, eastern_iso, geometry_section_count
 
 
 ESPN_SCOREBOARD_URL = (
@@ -71,6 +72,9 @@ class ScheduledNFLGame:
     home_team: str
     venue: str
     name: str
+    city: str = ""
+    country: str = ""
+    neutral_site: bool = False
 
     @property
     def matchup_key(self) -> tuple[str, str]:
@@ -81,6 +85,18 @@ class ScheduledNFLGame:
         from collector import NEW_YORK
 
         return self.event_date.astimezone(NEW_YORK).date()
+
+    def snapshot_metadata(self, provider_venue: str) -> dict[str, Any]:
+        return {
+            "schedule_id": self.schedule_id,
+            "away_team": self.away_team,
+            "home_team": self.home_team,
+            "canonical_venue": canonical_venue_name(self.venue or provider_venue),
+            "city": self.city,
+            "country": self.country,
+            "neutral_site": self.neutral_site,
+            "provider_venue": " ".join(str(provider_venue or "").split()),
+        }
 
 
 @dataclass(frozen=True)
@@ -190,11 +206,18 @@ def parse_schedule_payload(
             continue
 
         venue_data = competition.get("venue") or {}
-        venue = (
-            " ".join(str(venue_data.get("fullName") or "").split())
-            if isinstance(venue_data, dict)
-            else ""
-        )
+        venue = ""
+        city = ""
+        country = ""
+        if isinstance(venue_data, dict):
+            venue = canonical_venue_name(venue_data.get("fullName"))
+            address = venue_data.get("address") or {}
+            if isinstance(address, dict):
+                city = " ".join(str(address.get("city") or "").split())
+                country = " ".join(
+                    str(address.get("country") or address.get("countryCode") or "").split()
+                )
+        neutral_site = bool(competition.get("neutralSite") is True)
         schedule_id = str(event.get("id") or competition.get("id") or "").strip()
         if not schedule_id:
             schedule_id = f"{event_date.isoformat()}:{away_team}:{home_team}"
@@ -209,6 +232,9 @@ def parse_schedule_payload(
             home_team=home_team,
             venue=venue,
             name=name,
+            city=city,
+            country=country,
+            neutral_site=neutral_site,
         )
 
     return sorted(
@@ -557,7 +583,10 @@ def run_schedule_collector(
     for index, resolution in enumerate(resolutions, start=1):
         game = resolution.game
         if not resolution.candidates:
-            message = f"{game.away_team} at {game.home_team} ({game.event_date.isoformat()})"
+            message = (
+                f"{game.away_team} at {game.home_team} "
+                f"({eastern_iso(game.event_date)})"
+            )
             unresolved.append(message)
             print(f"NFL COVERAGE MISSING: {message}", file=sys.stderr, flush=True)
             continue
@@ -581,6 +610,7 @@ def run_schedule_collector(
                 event_date,
                 capture_slot,
                 snapshot,
+                schedule=game.snapshot_metadata(snapshot.venue),
             )
             pending_path = queue_snapshot(payload, pending_dir)
             captured += 1
@@ -609,8 +639,14 @@ def run_schedule_collector(
                             ),
                             "url": url,
                             "title": snapshot.title,
-                            "venue": snapshot.venue,
+                            "provider_venue": snapshot.venue,
+                            "canonical_venue": game.snapshot_metadata(
+                                snapshot.venue
+                            )["canonical_venue"],
                             "sections": len(snapshot.sections),
+                            "map_geometry_sections": geometry_section_count(
+                                getattr(snapshot, "map_geometry", None)
+                            ),
                             "resolution_source": resolution.source,
                             "result": response["status"],
                         }
@@ -651,8 +687,9 @@ def run_schedule_collector(
         "coverage_mode": "schedule-backed",
         "schedule_status": "available",
         "schedule_source": schedule_source,
-        "started_at": started_at.isoformat(),
-        "capture_slot": capture_slot.isoformat(),
+        "timezone": "America/New_York",
+        "started_at": eastern_iso(started_at),
+        "capture_slot": eastern_iso(capture_slot),
         "capture_window_hours": NFL_CAPTURE_WINDOW_HOURS,
         "cadence_policy": {
             "days_15_to_30_hours": 6,
@@ -746,15 +783,24 @@ def run_schedule_smoke(
             "event_type": "nfl",
             "coverage_mode": "schedule-backed",
             "schedule_source": schedule_source,
+            "timezone": "America/New_York",
+            "schedule": resolution.game.snapshot_metadata(snapshot.venue),
             "schedule_id": resolution.game.schedule_id,
             "resolution_source": resolution.source,
-            "captured_at": datetime.now(timezone.utc).isoformat(),
-            "event_date": event_date.isoformat(),
+            "captured_at": eastern_iso(datetime.now(timezone.utc)),
+            "event_date": eastern_iso(event_date),
             "source_url": url,
             "source_id": snapshot.source_id,
             "title": snapshot.title,
-            "venue": snapshot.venue,
+            "provider_venue": snapshot.venue,
+            "canonical_venue": canonical_venue_name(
+                resolution.game.venue or snapshot.venue
+            ),
             "section_count": len(snapshot.sections),
+            "map_geometry_sections": geometry_section_count(
+                getattr(snapshot, "map_geometry", None)
+            ),
+            "map_geometry": getattr(snapshot, "map_geometry", None),
             "lowest_section_price": min(row.price for row in snapshot.sections),
             "highest_section_price": max(row.price for row in snapshot.sections),
             "sections": [asdict(row) for row in snapshot.sections],
@@ -762,7 +808,8 @@ def run_schedule_smoke(
         _write_health(output, result)
         print(
             f"NFL SCHEDULE SMOKE PASSED: {snapshot.title} resolved via "
-            f"{resolution.source} with {len(snapshot.sections)} sections.",
+            f"{resolution.source} with {len(snapshot.sections)} sections and "
+            f"{result['map_geometry_sections']} provider polygons.",
             flush=True,
         )
         return 0
@@ -773,6 +820,8 @@ def run_schedule_smoke(
             "status": "failure",
             "event_type": "nfl",
             "coverage_mode": "schedule-backed",
+            "timezone": "America/New_York",
+            "captured_at": eastern_iso(datetime.now(timezone.utc)),
             "scheduled_candidates": len(schedule),
             "errors": errors,
         },
@@ -806,11 +855,12 @@ def main() -> int:
             json.dumps(
                 {
                     "source": source,
+                    "timezone": "America/New_York",
                     "count": len(games),
                     "games": [
                         {
                             **asdict(game),
-                            "event_date": game.event_date.isoformat(),
+                            "event_date": eastern_iso(game.event_date),
                         }
                         for game in games
                     ],
