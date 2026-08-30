@@ -44,6 +44,7 @@ from nfl_metadata import (
     eastern_iso,
     extract_map_geometry_from_json,
     extract_map_geometry_from_svg,
+    geometry_is_usable,
     geometry_section_count,
     sanitize_map_geometry,
 )
@@ -749,12 +750,13 @@ return best;
                     )
                 candidates.append(self._dom_map_geometry(known_sections, url))
                 geometry = choose_best_geometry(candidates, known_sections)
-                if geometry is not None:
+                if geometry_is_usable(geometry, known_sections):
                     captured_payload["_map_geometry"] = geometry
                     captured_payload["_map_geometry_diagnostics"] = {
                         "status": "captured",
                         "source": geometry.get("source"),
                         "mapped_sections": geometry_section_count(geometry),
+                        "coverage_ratio": geometry.get("coverage_ratio"),
                         "network_map_responses": len(map_bodies),
                     }
                     return captured_payload, event_date
@@ -763,8 +765,13 @@ return best;
                 if not map_view_opened and elapsed >= 0.5:
                     map_view_opened = self._open_map_view()
                 if elapsed >= MAP_GEOMETRY_SETTLE_SECONDS:
+                    if geometry is not None:
+                        captured_payload["_map_geometry"] = geometry
                     captured_payload["_map_geometry_diagnostics"] = {
-                        "status": "unavailable",
+                        "status": "partial" if geometry is not None else "unavailable",
+                        "source": geometry.get("source") if geometry else None,
+                        "mapped_sections": geometry_section_count(geometry),
+                        "coverage_ratio": geometry.get("coverage_ratio") if geometry else 0,
                         "network_map_responses": len(map_bodies),
                         "map_view_opened": map_view_opened,
                     }
