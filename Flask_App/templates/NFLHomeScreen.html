@@ -5,6 +5,7 @@
   <meta name="theme-color" content="#013369">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl.css') }}?v=1">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-responsive.css') }}?v=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-map.css') }}?v=1">
 {% endblock %}
 
 {% block content %}
@@ -124,7 +125,10 @@
           <label for="nfl-section"><span>3</span> Section</label>
           <select id="nfl-section" class="section-select" disabled><option value="">Select a section</option></select>
         </div>
-        <button class="button nfl-button nfl-button--primary submit-analysis" type="submit" disabled>Open price trend <span aria-hidden="true">&#8594;</span></button>
+        <div class="nfl-form-actions">
+          <button class="button nfl-button nfl-button--primary submit-analysis" type="submit" disabled>Open price trend <span aria-hidden="true">&#8594;</span></button>
+          <button class="button nfl-map-launch" type="button" data-map-launch data-map-base="{{ url_for('nfl.nfl_map') }}" disabled>Explore stadium map <span aria-hidden="true">&#8594;</span></button>
+        </div>
         <p class="nfl-form-note"><span aria-hidden="true">&#9432;</span> Prices are historical marketplace observations, not a guarantee of future availability.</p>
       </form>
     </div>
@@ -137,4 +141,4 @@
 </script>
 {% endblock %}
 
-{% block scripts %}<script src="{{ url_for('static', filename='js/nfl.js') }}?v=2"></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/nfl.js') }}?v=3"></script>{% endblock %}

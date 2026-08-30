@@ -5,6 +5,7 @@
   <meta name="theme-color" content="#013369">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl.css') }}?v=1">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-responsive.css') }}?v=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-map.css') }}?v=1">
 {% endblock %}
 
 {% block content %}
@@ -35,7 +36,10 @@
             <span>Market timeline</span>
             <strong>{% if displayType == 'money' %}Relative price movement{% else %}Lowest observed section price{% endif %}</strong>
           </div>
-          <a class="nfl-view-toggle" href="{{ url_for('nfl.nfl_graph', display=displayType, team=team, section=section, game=game) }}">Show {{ displayLabel }} view</a>
+          <div class="nfl-chart-actions">
+            <a class="nfl-view-toggle" href="{{ url_for('nfl.nfl_map', team=team, section=section, game=game) }}">View stadium map</a>
+            <a class="nfl-view-toggle" href="{{ url_for('nfl.nfl_graph', display=displayType, team=team, section=section, game=game) }}">Show {{ displayLabel }} view</a>
+          </div>
         </div>
 
         {% if error %}

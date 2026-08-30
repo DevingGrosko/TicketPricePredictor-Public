@@ -17,7 +17,7 @@ import re
 import sqlite3
 from typing import Any
 
-from flask import Blueprint, jsonify, render_template, request
+from flask import Blueprint, jsonify, render_template, request, url_for
 from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint, create_engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.mutable import MutableList
@@ -477,6 +477,65 @@ def find_nfl_game(team_or_venue: str, identifier: str | None) -> NFLEvent | None
         model.engine.dispose()
 
 
+def nfl_map_section_data(
+    event_id: int,
+) -> tuple[list[dict[str, Any]], datetime | None]:
+    """Return every known section plus its most recent stored market values."""
+    model = CreateNFLModel()
+    try:
+        with model.getSession()() as session:
+            event = (
+                session.query(NFLEvent)
+                .filter(NFLEvent.id == event_id)
+                .first()
+            )
+            if event is None:
+                return [], None
+
+            latest = (
+                session.query(NFLIteration)
+                .filter(NFLIteration.event_id == event_id)
+                .order_by(
+                    NFLIteration.captured_at.desc(),
+                    NFLIteration.id.desc(),
+                )
+                .first()
+            )
+            tickets_by_section = {
+                ticket.section: ticket for ticket in (latest.tickets if latest else [])
+            }
+            section_names = sorted(
+                set(event.sections or []) | set(tickets_by_section),
+                key=str.casefold,
+            )
+            section_data = []
+            for name in section_names:
+                ticket = tickets_by_section.get(name)
+                section_data.append(
+                    {
+                        "name": name,
+                        "price": ticket.price if ticket is not None else None,
+                        "listing_count": (
+                            ticket.listing_count if ticket is not None else None
+                        ),
+                    }
+                )
+            return section_data, latest.captured_at if latest else None
+    finally:
+        model.engine.dispose()
+
+
+def format_nfl_capture_label(value: datetime | None) -> str:
+    if value is None:
+        return "No snapshots stored"
+    captured = value
+    if captured.tzinfo is None:
+        captured = captured.replace(tzinfo=timezone.utc)
+    else:
+        captured = captured.astimezone(timezone.utc)
+    return f"{captured:%b} {captured.day}, {captured:%Y} · {captured:%H:%M} UTC"
+
+
 class NFLGraphBuilder:
     def __init__(self):
         self.plotter = GraphBuilder()
@@ -582,6 +641,55 @@ def nfl_home():
         team_count=team_count,
         game_count=game_count,
         section_count=section_count,
+    )
+
+
+@nfl_blueprint.get("/nfl/map")
+def nfl_map():
+    selection = request.args.get("team") or request.args.get("event") or ""
+    event_id = request.args.get("game")
+    selected = find_nfl_game(selection, event_id)
+    if selected is None:
+        return render_template(
+            "nfl_map.html",
+            error="Choose a valid tracked NFL game before opening its stadium map.",
+        )
+
+    team = nfl_home_team(selected.title) or selection
+    section_data, latest_capture = nfl_map_section_data(selected.id)
+    if not section_data:
+        return render_template(
+            "nfl_map.html",
+            error="No section data has been collected for that NFL game yet.",
+        )
+
+    selected_section = request.args.get("section") or ""
+    known_sections = {item["name"] for item in section_data}
+    if selected_section not in known_sections:
+        selected_section = ""
+
+    map_data = {
+        "team": team,
+        "game": str(selected.id),
+        "venue": selected.venue,
+        "sections": section_data,
+        "selected_section": selected_section,
+        "graph_url": url_for("nfl.nfl_graph"),
+    }
+    return render_template(
+        "nfl_map.html",
+        error=None,
+        team=team,
+        venue=selected.venue,
+        game=str(selected.id),
+        gameLabel=format_nfl_title(selected),
+        section_count=len(section_data),
+        priced_section_count=sum(
+            item["price"] is not None for item in section_data
+        ),
+        latest_capture_label=format_nfl_capture_label(latest_capture),
+        source_url=selected.source_url,
+        map_data=map_data,
     )
 
 

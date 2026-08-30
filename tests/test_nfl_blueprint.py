@@ -19,6 +19,7 @@ from Flask_App.nfl_blueprint import (
     nfl_blueprint,
     nfl_home,
     nfl_home_team,
+    nfl_map,
     nfl_matchup_teams,
     store_nfl_snapshot,
 )
@@ -266,6 +267,81 @@ class NFLTeamGroupingTests(unittest.TestCase):
                 self.assertIsNone(find_nfl_game("New York Jets", str(giants_id)))
                 # Existing venue-based bookmarks remain valid.
                 self.assertIsNotNone(find_nfl_game("MetLife Stadium", str(giants_id)))
+            finally:
+                if old_db is None:
+                    os.environ.pop("NFL_DATABASE_PATH", None)
+                else:
+                    os.environ["NFL_DATABASE_PATH"] = old_db
+
+
+class NFLStadiumMapTests(unittest.TestCase):
+    @patch("Flask_App.nfl_blueprint.render_template")
+    def test_map_route_uses_latest_section_snapshot(self, render):
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "nfl.db"
+            old_db = os.environ.get("NFL_DATABASE_PATH")
+            os.environ["NFL_DATABASE_PATH"] = str(db_path)
+            try:
+                def snapshot(source_id, base_price):
+                    return EventSnapshot(
+                        source_id=source_id,
+                        title="Dallas Cowboys at New York Giants",
+                        venue="MetLife Stadium",
+                        sections=tuple(
+                            SectionSnapshot(
+                                section=f"Section {index}",
+                                price=base_price + index,
+                                listing_count=index + 1,
+                                row="A",
+                                quantity="2",
+                                displayed_price=str(base_price + index),
+                                alternate_price="",
+                            )
+                            for index in range(10)
+                        ),
+                    )
+
+                first_capture = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
+                game_id, _, _ = store_nfl_snapshot(
+                    "https://www.vividseats.com/game/production/3333333",
+                    first_capture + timedelta(days=10),
+                    snapshot("3333333", 100),
+                    first_capture,
+                    db_path=db_path,
+                )
+                store_nfl_snapshot(
+                    "https://www.vividseats.com/game/production/3333333",
+                    first_capture + timedelta(days=10),
+                    snapshot("3333333", 200),
+                    first_capture + timedelta(hours=1),
+                    db_path=db_path,
+                )
+
+                app = Flask(__name__)
+                app.register_blueprint(nfl_blueprint)
+                render.return_value = "map"
+                path = (
+                    f"/nfl/map?team=New%20York%20Giants&game={game_id}"
+                    "&section=Section%201"
+                )
+                with app.test_request_context(path):
+                    response = nfl_map()
+
+                self.assertEqual(response, "map")
+                self.assertEqual(render.call_args.args[0], "nfl_map.html")
+                context = render.call_args.kwargs
+                self.assertEqual(context["team"], "New York Giants")
+                self.assertEqual(context["venue"], "MetLife Stadium")
+                self.assertEqual(context["section_count"], 10)
+                self.assertEqual(context["priced_section_count"], 10)
+                by_name = {
+                    item["name"]: item for item in context["map_data"]["sections"]
+                }
+                self.assertEqual(by_name["Section 1"]["price"], 201)
+                self.assertEqual(by_name["Section 1"]["listing_count"], 2)
+                self.assertEqual(
+                    context["map_data"]["selected_section"], "Section 1"
+                )
             finally:
                 if old_db is None:
                     os.environ.pop("NFL_DATABASE_PATH", None)
