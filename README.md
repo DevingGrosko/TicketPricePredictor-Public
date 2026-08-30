@@ -33,9 +33,9 @@ Active endpoints and pages:
 
 - `/api/collector/snapshot`: authenticated MLB ingestion with a 72-hour window.
 - `/api/nfl/snapshot`: authenticated NFL ingestion with a 720-hour window.
-- `/`: NFL analysis and the default public homepage.
-- `/nfl`: direct NFL analysis route.
-- `/baseball`: baseball analysis.
+- `/`: baseball analysis and the default public homepage.
+- `/baseball`: direct baseball alias.
+- `/nfl`: NFL analysis.
 
 Archived concert routes remain available at `/concerts` and `/api/concerts/snapshot`, but GitHub Actions no longer performs new concert collection.
 

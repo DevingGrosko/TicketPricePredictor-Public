@@ -256,12 +256,26 @@ def schedule_cadence_summary(
     return {"in_window": in_window, "due_now": due}
 
 
-def matchup_key_from_title(title: str) -> tuple[str, str] | None:
+def ordered_matchup_from_title(title: str) -> tuple[str, str] | None:
+    """Return provider teams in displayed order: away/first, home/second."""
     normalized = " ".join(str(title or "").split()).casefold()
-    teams = [team for team in NFL_TEAM_NAMES if team.casefold() in normalized]
-    if len(teams) != 2:
+    matches = sorted(
+        (
+            (normalized.find(team.casefold()), team)
+            for team in NFL_TEAM_NAMES
+            if team.casefold() in normalized
+        ),
+        key=lambda item: item[0],
+    )
+    if len(matches) != 2:
         return None
-    return tuple(sorted(teams))
+    return matches[0][1], matches[1][1]
+
+
+def matchup_key_from_title(title: str) -> tuple[str, str] | None:
+    """Return an unordered key for diagnostics and compatibility."""
+    matchup = ordered_matchup_from_title(title)
+    return tuple(sorted(matchup)) if matchup else None
 
 
 def _dedupe_candidates(rows: Iterable[DiscoveredNFLGame]) -> tuple[DiscoveredNFLGame, ...]:
@@ -280,8 +294,11 @@ def candidates_for_schedule_game(
     game: ScheduledNFLGame,
     rows: Iterable[DiscoveredNFLGame],
 ) -> tuple[DiscoveredNFLGame, ...]:
+    expected_order = (game.away_team, game.home_team)
     matches = [
-        row for row in rows if matchup_key_from_title(row.title) == game.matchup_key
+        row
+        for row in rows
+        if ordered_matchup_from_title(row.title) == expected_order
     ]
     same_date = [row for row in matches if row.date_hint == game.local_date]
     return _dedupe_candidates(same_date or matches)
@@ -394,9 +411,11 @@ def validate_captured_match(
     event_date: datetime,
     title: str,
 ) -> None:
-    if matchup_key_from_title(title) != scheduled.matchup_key:
+    expected_order = (scheduled.away_team, scheduled.home_team)
+    if ordered_matchup_from_title(title) != expected_order:
         raise ValueError(
-            f"Captured title does not match scheduled teams: {title}"
+            "Captured title does not match scheduled teams in away/home order: "
+            f"{title}"
         )
     difference = abs((as_utc(event_date) - scheduled.event_date).total_seconds())
     if difference > EVENT_TIME_TOLERANCE_HOURS * 3600:

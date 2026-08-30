@@ -116,15 +116,17 @@ class FlaskProductionStartupTests(unittest.TestCase):
 
                 homepage = client.get("/")
                 assert homepage.status_code == 200
-                assert b"NFL market tracker" in homepage.data
-                assert b"Dallas Cowboys" in homepage.data
+                assert b"Ticket price intelligence" in homepage.data
+                assert b"NFL market tracker" not in homepage.data
+
+                baseball_alias = client.get("/baseball")
+                assert baseball_alias.status_code == 200
+                assert b"Ticket price intelligence" in baseball_alias.data
 
                 nfl_page = client.get("/nfl")
                 assert nfl_page.status_code == 200
+                assert b"NFL market tracker" in nfl_page.data
                 assert b"Dallas Cowboys" in nfl_page.data
-
-                baseball_page = client.get("/baseball")
-                assert baseball_page.status_code == 200
                 """
             )
             result = subprocess.run(
