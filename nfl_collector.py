@@ -619,7 +619,7 @@ document.querySelectorAll('svg').forEach((root) => {
   root.querySelectorAll('path, polygon, polyline, rect').forEach((element) => {
     const hints = [];
     let node = element;
-    while (node && node !== root.parentElement) {
+    while (node && node !== root) {
       ['aria-label', 'data-section', 'data-section-name', 'data-name',
        'data-testid', 'name', 'title', 'id', 'class'].forEach((attribute) => {
         const value = node.getAttribute && node.getAttribute(attribute);
