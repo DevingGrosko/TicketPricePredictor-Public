@@ -10,6 +10,7 @@ Live app: https://bunnyjeff.pythonanywhere.com/
 - NFL games: every 6 hours from days 30–15, every 3 hours from days 14–8, and hourly during the final 7 days.
 - Each category has its own collector job, API route, pending queue, audit records, backups, SQLAlchemy tables, and SQLite database.
 - NFL analysis is organized by designated home team, game, and section. Teams that share a venue, such as the Giants/Jets or Rams/Chargers, remain separate in the website.
+- Each tracked NFL game has an interactive stadium-bowl schematic generated from its collected section names and numbers, with direct links to price history and the provider's exact event map.
 - Existing concert data and pages are preserved as an archive, but the automated concert collector is paused while NFL data is prioritized.
 
 ## Tech stack
@@ -34,8 +35,9 @@ Active endpoints and pages:
 - `/api/collector/snapshot`: authenticated MLB ingestion with a 72-hour window.
 - `/api/nfl/snapshot`: authenticated NFL ingestion with a 720-hour window.
 - `/`: baseball analysis and the default public homepage.
-- `/baseball`: direct baseball alias.
 - `/nfl`: NFL analysis.
+- `/nfl/map`: interactive schematic section explorer for a selected game and stadium.
+- `/baseball`: alias for the baseball homepage.
 
 Archived concert routes remain available at `/concerts` and `/api/concerts/snapshot`, but GitHub Actions no longer performs new concert collection.
 

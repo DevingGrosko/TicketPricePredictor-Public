@@ -97,6 +97,7 @@ class FlaskProductionStartupTests(unittest.TestCase):
                 first = client.post("/api/nfl/snapshot", json=payload, headers=headers)
                 assert first.status_code == 201, first.get_data(as_text=True)
                 assert first.get_json()["status"] == "stored"
+                nfl_event_id = first.get_json()["event_id"]
 
                 duplicate = client.post(
                     "/api/nfl/snapshot", json=payload, headers=headers
@@ -127,6 +128,13 @@ class FlaskProductionStartupTests(unittest.TestCase):
                 assert nfl_page.status_code == 200
                 assert b"NFL market tracker" in nfl_page.data
                 assert b"Dallas Cowboys" in nfl_page.data
+
+                map_page = client.get(
+                    f"/nfl/map?team=New%20York%20Giants&game={nfl_event_id}"
+                )
+                assert map_page.status_code == 200
+                assert b"Interactive section explorer" in map_page.data
+                assert b"MetLife Stadium" in map_page.data
                 """
             )
             result = subprocess.run(

@@ -20,15 +20,19 @@ if (nflForm) {
   const gameSelect = nflForm.querySelector('.game-select');
   const sectionSelect = nflForm.querySelector('.section-select');
   const submit = nflForm.querySelector('.submit-analysis');
+  const mapButton = nflForm.querySelector('[data-map-launch]');
 
-  const updateSubmit = () => {
+  const updateActions = () => {
     submit.disabled = !(teamSelect.value && gameSelect.value && sectionSelect.value);
+    if (mapButton) {
+      mapButton.disabled = !(teamSelect.value && gameSelect.value);
+    }
   };
 
   teamSelect.addEventListener('change', () => {
     replaceNflOptions(gameSelect, nflGamesData[teamSelect.value] || [], 'Select a game');
     replaceNflOptions(sectionSelect, [], 'Select a section');
-    updateSubmit();
+    updateActions();
   });
 
   gameSelect.addEventListener('change', () => {
@@ -36,10 +40,22 @@ if (nflForm) {
       (nflGameSectionsData[teamSelect.value] &&
         nflGameSectionsData[teamSelect.value][gameSelect.value]) || [];
     replaceNflOptions(sectionSelect, sections, 'Select a section');
-    updateSubmit();
+    updateActions();
   });
 
-  sectionSelect.addEventListener('change', updateSubmit);
+  sectionSelect.addEventListener('change', updateActions);
+
+  if (mapButton) {
+    mapButton.addEventListener('click', () => {
+      if (mapButton.disabled) return;
+      const params = new URLSearchParams({
+        team: teamSelect.value,
+        game: gameSelect.value,
+      });
+      if (sectionSelect.value) params.set('section', sectionSelect.value);
+      window.location.assign(`${mapButton.dataset.mapBase}?${params.toString()}`);
+    });
+  }
 
   nflForm.addEventListener('submit', (event) => {
     event.preventDefault();
