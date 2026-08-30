@@ -1,0 +1,38 @@
+name: Fix NFL SVG label priority
+
+on:
+  push:
+    branches:
+      - feature/nfl-eastern-metadata-real-maps
+    paths:
+      - ".github/workflows/fix-nfl-dom-label-priority.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/nfl-eastern-metadata-real-maps
+          fetch-depth: 0
+      - name: Prefer the closest SVG label ancestor
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("nfl_collector.py")
+          source = path.read_text(encoding="utf-8")
+          old = "for (let index = hints.length - 1; index >= 0; index -= 1) {"
+          new = "for (let index = 0; index < hints.length; index += 1) {"
+          if source.count(old) != 1:
+              raise SystemExit(f"Expected exactly one SVG label loop, found {source.count(old)}")
+          path.write_text(source.replace(old, new), encoding="utf-8")
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add nfl_collector.py
+          git commit -m "Prefer closest Vivid SVG section labels"
+          git push origin HEAD:feature/nfl-eastern-metadata-real-maps
