@@ -5,7 +5,8 @@
   <meta name="theme-color" content="#013369">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl.css') }}?v=1">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-responsive.css') }}?v=1">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-map.css') }}?v=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-map.css') }}?v=2">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-map-provider.css') }}?v=1">
 {% endblock %}
 
 {% block content %}
@@ -28,7 +29,7 @@
         <div class="nfl-matchup-banner__copy">
           <span class="nfl-section-kicker">Interactive section explorer</span>
           <h1>{{ gameLabel }}</h1>
-          <p><strong>{{ team }}</strong><span>&middot;</span>{{ venue }}<span>&middot;</span>{{ section_count }} sections</p>
+          <p><strong>{{ team }}</strong><span>&middot;</span>{{ venue }}{% if city %}<span>&middot;</span>{{ city }}{% if country %}, {{ country }}{% endif %}{% endif %}{% if neutral_site %}<span>&middot;</span>Neutral site{% endif %}<span>&middot;</span>{{ section_count }} sections</p>
         </div>
         <div class="nfl-window-badge">
           <span>Latest market read</span>
@@ -41,7 +42,7 @@
         <article class="nfl-stadium-map-card">
           <div class="nfl-stadium-map-card__top">
             <div>
-              <span>Stadium bowl</span>
+              <span>{% if has_provider_geometry %}Provider section geometry{% else %}Stadium bowl schematic{% endif %}</span>
               <strong>Click a section to inspect it</strong>
             </div>
             <div class="nfl-map-controls" aria-label="Map controls">
@@ -53,8 +54,8 @@
 
           <div class="nfl-map-level-filter" data-map-levels aria-label="Filter stadium levels"></div>
 
-          <div class="nfl-stadium-map-stage" data-map-stage>
-            <svg class="nfl-stadium-map-svg" data-stadium-map viewBox="0 0 1000 700" role="img" aria-label="Interactive schematic section map for {{ venue }}"></svg>
+          <div class="nfl-stadium-map-stage{% if has_provider_geometry %} has-provider-geometry{% endif %}" data-map-stage>
+            <svg class="nfl-stadium-map-svg" data-stadium-map viewBox="0 0 1000 700" role="img" aria-label="Interactive {% if has_provider_geometry %}provider section map{% else %}stadium schematic{% endif %} for {{ venue }}"></svg>
             <div class="nfl-map-tooltip" data-map-tooltip role="status" hidden></div>
           </div>
 
@@ -65,7 +66,11 @@
             <span><i class="nfl-map-legend__swatch nfl-map-legend__swatch--selected"></i> Selected section</span>
           </div>
 
-          <p class="nfl-map-disclaimer"><span aria-hidden="true">&#9432;</span> This is a navigational schematic generated from the stadium’s section numbers and level names, not an official architectural seating chart. Use the provider map for the exact event layout.</p>
+          {% if has_provider_geometry %}
+            <p class="nfl-map-disclaimer nfl-map-disclaimer--verified"><span aria-hidden="true">&#10003;</span> Section shapes were captured from this event’s provider map and matched to {{ map_geometry_sections }} collected section names. Ticket prices still come from the latest independent market snapshot.</p>
+          {% else %}
+            <p class="nfl-map-disclaimer"><span aria-hidden="true">&#9432;</span> Provider geometry was not complete enough for this event, so this remains a navigational schematic generated from section names. Use the provider map for the exact layout.</p>
+          {% endif %}
         </article>
 
         <aside class="nfl-map-sidebar">
@@ -93,13 +98,13 @@
 
           <div class="nfl-map-source-card">
             <span class="nfl-section-kicker">Exact event layout</span>
-            <h2>Open the provider’s seating chart.</h2>
-            <p>Use the external event page when you need exact section shapes, sidelines, tunnels, suites, or event-specific configuration.</p>
+            <h2>Open the live provider seating chart.</h2>
+            <p>{% if has_provider_geometry %}The map above uses sanitized provider polygons captured with the event. The live page remains the source for current tunnels, suites, rows, and inventory.{% else %}The live provider page is the source for exact section shapes, sidelines, tunnels, suites, and event-specific configuration.{% endif %}</p>
             <a class="nfl-map-provider-link" href="{{ source_url }}" target="_blank" rel="noreferrer">Open Vivid seating map <span aria-hidden="true">&#8599;</span></a>
           </div>
 
           <div class="nfl-map-capture-note">
-            <span>Latest stored snapshot</span>
+            <span>Latest stored snapshot · Eastern Time</span>
             <strong>{{ latest_capture_label }}</strong>
           </div>
         </aside>
@@ -111,4 +116,4 @@
 </div>
 {% endblock %}
 
-{% block scripts %}{% if not error %}<script src="{{ url_for('static', filename='js/nfl-map.js') }}?v=1"></script>{% endif %}{% endblock %}
+{% block scripts %}{% if not error %}<script src="{{ url_for('static', filename='js/nfl-map.js') }}?v=2"></script>{% endif %}{% endblock %}
