@@ -9,6 +9,7 @@ on:
       - "collector.py"
       - "nfl_collector.py"
       - "nfl_schedule_collector.py"
+      - "nfl_metadata.py"
       - "concert_collector.py"
       - "concert_models.py"
       - "concert_graph_builder.py"
@@ -26,6 +27,7 @@ on:
       - "collector.py"
       - "nfl_collector.py"
       - "nfl_schedule_collector.py"
+      - "nfl_metadata.py"
       - "concert_collector.py"
       - "concert_models.py"
       - "concert_graph_builder.py"
@@ -61,6 +63,7 @@ jobs:
             collector.py \
             nfl_collector.py \
             nfl_schedule_collector.py \
+            nfl_metadata.py \
             concert_collector.py \
             concert_models.py \
             concert_graph_builder.py \
@@ -102,13 +105,14 @@ jobs:
           for attempt in $(seq 1 8); do
             home_status="$(curl -sS --max-time 15 -o /tmp/home.html -w '%{http_code}' "$base/" || true)"
             nfl_status="$(curl -sS --max-time 15 -o /tmp/nfl.html -w '%{http_code}' "$base/nfl" || true)"
+            nfl_archive_status="$(curl -sS --max-time 15 -o /tmp/nfl-archive.html -w '%{http_code}' "$base/nfl/archive" || true)"
             concerts_status="$(curl -sS --max-time 15 -o /tmp/concerts.html -w '%{http_code}' "$base/concerts" || true)"
             baseball_api_status="$(curl -sS --max-time 15 -o /tmp/baseball-api.txt -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$base/api/collector/snapshot" || true)"
             nfl_api_status="$(curl -sS --max-time 15 -o /tmp/nfl-api.txt -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$base/api/nfl/snapshot" || true)"
             concert_api_status="$(curl -sS --max-time 15 -o /tmp/concert-api.txt -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$base/api/concerts/snapshot" || true)"
 
-            echo "Attempt $attempt: home=$home_status nfl=$nfl_status concerts=$concerts_status baseball_api=$baseball_api_status nfl_api=$nfl_api_status concert_api=$concert_api_status"
-            if [[ "$home_status" == "200" && "$nfl_status" == "200" && "$concerts_status" == "200" && "$baseball_api_status" == "401" && "$nfl_api_status" == "401" && "$concert_api_status" == "401" ]]; then
+            echo "Attempt $attempt: home=$home_status nfl=$nfl_status nfl_archive=$nfl_archive_status concerts=$concerts_status baseball_api=$baseball_api_status nfl_api=$nfl_api_status concert_api=$concert_api_status"
+            if [[ "$home_status" == "200" && "$nfl_status" == "200" && "$nfl_archive_status" == "200" && "$concerts_status" == "200" && "$baseball_api_status" == "401" && "$nfl_api_status" == "401" && "$concert_api_status" == "401" ]]; then
               echo "PythonAnywhere startup verification passed."
               exit 0
             fi
@@ -119,6 +123,8 @@ jobs:
           cat /tmp/home.html || true
           echo "NFL response:"
           cat /tmp/nfl.html || true
+          echo "NFL archive response:"
+          cat /tmp/nfl-archive.html || true
           echo "Concerts response:"
           cat /tmp/concerts.html || true
           echo "Baseball API response:"
