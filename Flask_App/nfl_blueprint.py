@@ -15,10 +15,21 @@ import os
 from pathlib import Path
 import re
 import sqlite3
+import threading
 from typing import Any
 
 from flask import Blueprint, jsonify, render_template, request, url_for
-from sqlalchemy import DateTime, ForeignKey, Integer, JSON, String, UniqueConstraint, create_engine
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    JSON,
+    String,
+    UniqueConstraint,
+    create_engine,
+    text,
+)
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.mutable import MutableList
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
@@ -30,6 +41,15 @@ from models import (
     event_datetime_eastern,
     event_datetime_for_storage,
     hours_before_event,
+)
+from nfl_metadata import (
+    EASTERN,
+    canonical_venue_name,
+    eastern_iso,
+    eastern_label,
+    geometry_is_usable,
+    geometry_section_count,
+    sanitize_map_geometry,
 )
 
 
@@ -98,6 +118,8 @@ NON_GAME_MARKERS = (
 )
 
 nfl_blueprint = Blueprint("nfl", __name__)
+_SCHEMA_LOCK = threading.Lock()
+_SCHEMA_READY: set[str] = set()
 
 
 class NFLBase(DeclarativeBase):
@@ -115,7 +137,19 @@ class NFLEvent(NFLBase):
         MutableList.as_mutable(JSON), default=list, nullable=False
     )
     source_url: Mapped[str] = mapped_column(String, nullable=False, unique=True, index=True)
+    # `venue` is retained as the original provider field for legacy bookmarks.
     venue: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    schedule_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    away_team: Mapped[str | None] = mapped_column(String, nullable=True)
+    home_team: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    canonical_venue: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
+    city: Mapped[str | None] = mapped_column(String, nullable=True)
+    country: Mapped[str | None] = mapped_column(String, nullable=True)
+    neutral_site: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    provider_venue: Mapped[str | None] = mapped_column(String, nullable=True)
+    map_geometry: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    map_source: Mapped[str | None] = mapped_column(String, nullable=True)
+    geometry_updated_at: Mapped[datetime | None] = mapped_column(DateTime(), nullable=True)
 
     iterations: Mapped[list["NFLIteration"]] = relationship(
         back_populates="event", cascade="all, delete-orphan"
@@ -159,6 +193,81 @@ def nfl_database_path() -> Path:
     return Path(configured).expanduser().resolve()
 
 
+def _ensure_nfl_schema(engine: Any, db_path: Path) -> None:
+    """Add nullable NFL metadata columns to an existing isolated SQLite DB."""
+    key = str(db_path)
+    with _SCHEMA_LOCK:
+        if key in _SCHEMA_READY:
+            return
+        with engine.begin() as connection:
+            current = {
+                row[1]
+                for row in connection.exec_driver_sql(
+                    "PRAGMA table_info(nfl_event)"
+                ).fetchall()
+            }
+            additions = {
+                "schedule_id": "VARCHAR",
+                "away_team": "VARCHAR",
+                "home_team": "VARCHAR",
+                "canonical_venue": "VARCHAR",
+                "city": "VARCHAR",
+                "country": "VARCHAR",
+                "neutral_site": "BOOLEAN",
+                "provider_venue": "VARCHAR",
+                "map_geometry": "JSON",
+                "map_source": "VARCHAR",
+                "geometry_updated_at": "DATETIME",
+            }
+            for column, sql_type in additions.items():
+                if column not in current:
+                    connection.exec_driver_sql(
+                        f"ALTER TABLE nfl_event ADD COLUMN {column} {sql_type}"
+                    )
+            connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_nfl_event_schedule_id "
+                "ON nfl_event (schedule_id)"
+            )
+            connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_nfl_event_home_team "
+                "ON nfl_event (home_team)"
+            )
+            connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_nfl_event_canonical_venue "
+                "ON nfl_event (canonical_venue)"
+            )
+
+            rows = connection.execute(
+                text(
+                    "SELECT id, title, venue, provider_venue, canonical_venue, "
+                    "away_team, home_team FROM nfl_event"
+                )
+            ).mappings()
+            for row in rows:
+                matchup = nfl_matchup_teams(row["title"])
+                provider_venue = row["provider_venue"] or row["venue"]
+                canonical_venue = row["canonical_venue"] or canonical_venue_name(
+                    provider_venue
+                )
+                connection.execute(
+                    text(
+                        "UPDATE nfl_event SET provider_venue = :provider_venue, "
+                        "canonical_venue = :canonical_venue, "
+                        "away_team = COALESCE(away_team, :away_team), "
+                        "home_team = COALESCE(home_team, :home_team) "
+                        "WHERE id = :event_id"
+                    ),
+                    {
+                        "event_id": row["id"],
+                        "provider_venue": provider_venue,
+                        "canonical_venue": canonical_venue,
+                        "away_team": matchup[0] if matchup else None,
+                        "home_team": matchup[1] if matchup else None,
+                    },
+                )
+        _SCHEMA_READY.add(key)
+
+
 class CreateNFLModel:
     """Open only the independent NFL SQLite database."""
 
@@ -171,6 +280,7 @@ class CreateNFLModel:
             connect_args={"timeout": 30},
         )
         NFLBase.metadata.create_all(self.engine)
+        _ensure_nfl_schema(self.engine, self.db_path)
         self.SessionLocal = sessionmaker(
             bind=self.engine, autoflush=False, expire_on_commit=False
         )
@@ -208,12 +318,72 @@ def nfl_home_team(title: str) -> str | None:
     return matchup[1] if matchup else None
 
 
+def nfl_event_home_team(event: NFLEvent) -> str | None:
+    return event.home_team or nfl_home_team(event.title)
+
+
+def nfl_event_away_team(event: NFLEvent) -> str | None:
+    matchup = nfl_matchup_teams(event.title)
+    return event.away_team or (matchup[0] if matchup else None)
+
+
+def nfl_display_venue(event: NFLEvent) -> str:
+    return event.canonical_venue or canonical_venue_name(
+        event.provider_venue or event.venue
+    )
+
+
 def is_nfl_game_title(title: str) -> bool:
     normalized = " ".join(str(title or "").split()).casefold()
     has_matchup_separator = any(
         separator in normalized for separator in (" at ", " vs ", " vs. ", " versus ")
     )
     return nfl_matchup_teams(title) is not None and has_matchup_separator
+
+
+def _clean_metadata_text(value: Any, maximum: int = 250) -> str:
+    return " ".join(str(value or "").split())[:maximum]
+
+
+def normalize_nfl_schedule_metadata(
+    raw: Any,
+    *,
+    title: str,
+    provider_venue: str,
+) -> dict[str, Any]:
+    matchup = nfl_matchup_teams(title)
+    if matchup is None:
+        raise ValueError("NFL schedule metadata requires a valid matchup title.")
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise ValueError("NFL schedule metadata must be an object.")
+
+    away_team = _clean_metadata_text(raw.get("away_team")) or matchup[0]
+    home_team = _clean_metadata_text(raw.get("home_team")) or matchup[1]
+    if (away_team, home_team) != matchup:
+        raise ValueError(
+            "NFL schedule metadata does not match the captured away/home order."
+        )
+
+    neutral_site = raw.get("neutral_site")
+    if neutral_site is not None and not isinstance(neutral_site, bool):
+        raise ValueError("NFL neutral_site metadata must be true, false, or null.")
+
+    schedule_id = _clean_metadata_text(raw.get("schedule_id"), maximum=160)
+    canonical_venue = canonical_venue_name(
+        raw.get("canonical_venue") or provider_venue
+    )
+    return {
+        "schedule_id": schedule_id or None,
+        "away_team": away_team,
+        "home_team": home_team,
+        "canonical_venue": canonical_venue,
+        "city": _clean_metadata_text(raw.get("city")),
+        "country": _clean_metadata_text(raw.get("country")),
+        "neutral_site": neutral_site,
+        "provider_venue": _clean_metadata_text(provider_venue),
+    }
 
 
 def nfl_snapshot_from_payload(payload: dict[str, Any]):
@@ -225,7 +395,57 @@ def nfl_snapshot_from_payload(payload: dict[str, Any]):
         raise ValueError("NFL snapshot URL is missing a Vivid production ID.")
     if not is_nfl_game_title(snapshot.title):
         raise ValueError("NFL endpoint only accepts actual NFL game matchups.")
-    return url, event_date, captured_at, snapshot
+    schedule_metadata = normalize_nfl_schedule_metadata(
+        payload.get("schedule"),
+        title=snapshot.title,
+        provider_venue=snapshot.venue,
+    )
+    map_geometry = sanitize_map_geometry(
+        payload.get("map_geometry"),
+        [row.section for row in snapshot.sections],
+    )
+    return (
+        url,
+        event_date,
+        captured_at,
+        snapshot,
+        schedule_metadata,
+        map_geometry,
+    )
+
+
+def _apply_event_metadata(
+    event: NFLEvent,
+    snapshot: Any,
+    schedule_metadata: dict[str, Any],
+    map_geometry: dict[str, Any] | None,
+    stored_capture: datetime,
+) -> None:
+    incoming_schedule_id = schedule_metadata.get("schedule_id")
+    if event.schedule_id and incoming_schedule_id and event.schedule_id != incoming_schedule_id:
+        raise ValueError("NFL schedule ID changed for an existing provider event.")
+
+    event.schedule_id = event.schedule_id or incoming_schedule_id
+    event.away_team = schedule_metadata.get("away_team") or event.away_team
+    event.home_team = schedule_metadata.get("home_team") or event.home_team
+    event.provider_venue = snapshot.venue
+    event.canonical_venue = (
+        schedule_metadata.get("canonical_venue")
+        or event.canonical_venue
+        or canonical_venue_name(snapshot.venue)
+    )
+    event.city = schedule_metadata.get("city") or event.city
+    event.country = schedule_metadata.get("country") or event.country
+    if schedule_metadata.get("neutral_site") is not None:
+        event.neutral_site = schedule_metadata["neutral_site"]
+
+    if map_geometry is not None:
+        previous_count = geometry_section_count(event.map_geometry)
+        incoming_count = geometry_section_count(map_geometry)
+        if incoming_count >= previous_count:
+            event.map_geometry = map_geometry
+            event.map_source = str(map_geometry.get("source") or "provider")
+            event.geometry_updated_at = stored_capture
 
 
 def store_nfl_snapshot(
@@ -235,10 +455,21 @@ def store_nfl_snapshot(
     captured_at: datetime,
     *,
     db_path: str | Path | None = None,
+    schedule_metadata: dict[str, Any] | None = None,
+    map_geometry: dict[str, Any] | None = None,
 ) -> tuple[int, int, bool]:
     model = CreateNFLModel(db_path)
     stored_event_date = event_datetime_for_storage(event_date)
     stored_captured_at = captured_datetime_for_storage(hourly_capture_slot(captured_at))
+    normalized_metadata = normalize_nfl_schedule_metadata(
+        schedule_metadata,
+        title=snapshot.title,
+        provider_venue=snapshot.venue,
+    )
+    normalized_geometry = sanitize_map_geometry(
+        map_geometry,
+        [row.section for row in snapshot.sections],
+    )
 
     try:
         with model.getSession()() as session:
@@ -273,6 +504,14 @@ def store_nfl_snapshot(
                     for row in snapshot.sections
                     if row.section not in known_sections
                 ]
+
+            _apply_event_metadata(
+                event,
+                snapshot,
+                normalized_metadata,
+                normalized_geometry,
+                stored_captured_at,
+            )
 
             existing = (
                 session.query(NFLIteration)
@@ -335,7 +574,8 @@ def create_nfl_daily_backup(
         model.engine.dispose()
 
     backup_dir.mkdir(parents=True, exist_ok=True)
-    target = backup_dir / f"NFL-collection-{now:%Y-%m-%d}.db"
+    local_now = now.astimezone(EASTERN)
+    target = backup_dir / f"NFL-collection-{local_now:%Y-%m-%d}.db"
     if not target.exists():
         temporary = target.with_suffix(".db.tmp")
         temporary.unlink(missing_ok=True)
@@ -357,23 +597,35 @@ def write_nfl_audit(
     iteration_id: int,
     captured_at: datetime,
     audit_dir: Path = DEFAULT_NFL_AUDIT_DIR,
+    *,
+    schedule_metadata: dict[str, Any] | None = None,
+    map_geometry: dict[str, Any] | None = None,
 ) -> Path:
     audit_dir.mkdir(parents=True, exist_ok=True)
     normalized_capture = hourly_capture_slot(captured_at)
-    path = audit_dir / f"{normalized_capture:%Y-%m-%d}.jsonl"
+    local_capture = normalized_capture.astimezone(EASTERN)
+    path = audit_dir / f"{local_capture:%Y-%m-%d}.jsonl"
     record = {
-        "schema_version": 1,
+        "schema_version": 2,
         "event_type": "nfl",
-        "captured_at": normalized_capture.isoformat(),
-        "event_date": event_date.isoformat(),
+        "timezone": "America/New_York",
+        "captured_at": eastern_iso(normalized_capture),
+        "event_date": eastern_iso(event_date),
         "event_id": event_id,
         "iteration_id": iteration_id,
         "source_id": snapshot.source_id,
         "title": snapshot.title,
-        "venue": snapshot.venue,
+        "provider_venue": snapshot.venue,
+        "canonical_venue": (schedule_metadata or {}).get("canonical_venue")
+        or canonical_venue_name(snapshot.venue),
+        "schedule": schedule_metadata,
         "url": url,
         "currency": "USD",
         "section_count": len(snapshot.sections),
+        "map_geometry_source": (
+            map_geometry.get("source") if isinstance(map_geometry, dict) else None
+        ),
+        "map_geometry_sections": geometry_section_count(map_geometry),
         "sections": [asdict(row) for row in snapshot.sections],
     }
     with path.open("a", encoding="utf-8") as handle:
@@ -403,7 +655,14 @@ def ingest_nfl_snapshot():
         return jsonify({"status": "error", "error": "invalid JSON body"}), 400
 
     try:
-        url, event_date, captured_at, snapshot = nfl_snapshot_from_payload(payload)
+        (
+            url,
+            event_date,
+            captured_at,
+            snapshot,
+            schedule_metadata,
+            map_geometry,
+        ) = nfl_snapshot_from_payload(payload)
         now = datetime.now(timezone.utc)
         captured_at_utc = captured_at.astimezone(timezone.utc)
         event_date_utc = event_date.astimezone(timezone.utc)
@@ -419,7 +678,12 @@ def ingest_nfl_snapshot():
 
         create_nfl_daily_backup(now=now)
         event_id, iteration_id, stored = store_nfl_snapshot(
-            url, event_date, snapshot, captured_at
+            url,
+            event_date,
+            snapshot,
+            captured_at,
+            schedule_metadata=schedule_metadata,
+            map_geometry=map_geometry,
         )
         if stored:
             write_nfl_audit(
@@ -429,6 +693,8 @@ def ingest_nfl_snapshot():
                 event_id,
                 iteration_id,
                 captured_at,
+                schedule_metadata=schedule_metadata,
+                map_geometry=map_geometry,
             )
     except (KeyError, TypeError, ValueError) as exc:
         return jsonify({"status": "error", "error": str(exc)}), 400
@@ -438,10 +704,12 @@ def ingest_nfl_snapshot():
         {
             "status": status,
             "event_type": "nfl",
+            "timezone": "America/New_York",
             "event_id": event_id,
             "iteration_id": iteration_id,
             "sections": len(snapshot.sections),
-            "captured_at": hourly_capture_slot(captured_at).isoformat(),
+            "map_geometry_sections": geometry_section_count(map_geometry),
+            "captured_at": eastern_iso(hourly_capture_slot(captured_at)),
         }
     ), 201 if stored else 200
 
@@ -451,12 +719,12 @@ def format_nfl_title(event: NFLEvent) -> str:
     hour = event_date.hour % 12 or 12
     return (
         f"{event.title} — {event_date:%b} {event_date.day}, {event_date.year} "
-        f"· {hour}:{event_date.minute:02d} {event_date:%p}"
+        f"· {hour}:{event_date.minute:02d} {event_date:%p} {event_date:%Z}"
     )
 
 
 def find_nfl_game(team_or_venue: str, identifier: str | None) -> NFLEvent | None:
-    """Find a game in its home-team bucket, while accepting legacy venue links."""
+    """Find a game in its team bucket while preserving old venue bookmarks."""
     if not identifier or not str(identifier).isdigit():
         return None
     model = CreateNFLModel()
@@ -469,8 +737,13 @@ def find_nfl_game(team_or_venue: str, identifier: str | None) -> NFLEvent | None
             )
             if event is None:
                 return None
-            home_team = nfl_home_team(event.title)
-            if team_or_venue not in {home_team, event.venue}:
+            accepted = {
+                nfl_event_home_team(event),
+                event.venue,
+                event.provider_venue,
+                nfl_display_venue(event),
+            }
+            if team_or_venue not in accepted:
                 return None
             return event
     finally:
@@ -531,9 +804,7 @@ def format_nfl_capture_label(value: datetime | None) -> str:
     captured = value
     if captured.tzinfo is None:
         captured = captured.replace(tzinfo=timezone.utc)
-    else:
-        captured = captured.astimezone(timezone.utc)
-    return f"{captured:%b} {captured.day}, {captured:%Y} · {captured:%H:%M} UTC"
+    return eastern_label(captured)
 
 
 class NFLGraphBuilder:
@@ -555,7 +826,7 @@ class NFLGraphBuilder:
                     .filter(NFLEvent.id == event_id)
                     .first()
                 )
-                if event is None or nfl_home_team(event.title) != home_team:
+                if event is None or nfl_event_home_team(event) != home_team:
                     return [], []
 
                 tickets = (
@@ -598,16 +869,30 @@ class NFLGraphBuilder:
         return self.plotter.create_plot(x, y, display_mode)
 
 
-@nfl_blueprint.get("/nfl")
-def nfl_home():
+def _event_is_completed(event: NFLEvent, now: datetime) -> bool:
+    return event_datetime_eastern(event.event_date) <= now.astimezone(EASTERN)
+
+
+def _nfl_home_context(archive_mode: bool) -> dict[str, Any]:
     model = CreateNFLModel()
+    now = datetime.now(timezone.utc)
     try:
         with model.getSession()() as session:
-            games = session.query(NFLEvent).order_by(NFLEvent.event_date).all()
+            all_games = session.query(NFLEvent).order_by(NFLEvent.event_date).all()
+            completed_count = sum(_event_is_completed(game, now) for game in all_games)
+            upcoming_count = len(all_games) - completed_count
+            games = [
+                game
+                for game in all_games
+                if _event_is_completed(game, now) == archive_mode
+            ]
+            if archive_mode:
+                games.reverse()
+
             games_dict: dict[str, list[dict[str, str]]] = {}
             game_sections_dict: dict[str, dict[str, list[str]]] = {}
             for game in games:
-                home_team = nfl_home_team(game.title)
+                home_team = nfl_event_home_team(game)
                 if home_team is None:
                     continue
                 games_dict.setdefault(home_team, []).append(
@@ -634,14 +919,26 @@ def nfl_home():
     finally:
         model.engine.dispose()
 
-    return render_template(
-        "NFLHomeScreen.html",
-        games_dict=games_dict,
-        game_sections_dict=game_sections_dict,
-        team_count=team_count,
-        game_count=game_count,
-        section_count=section_count,
-    )
+    return {
+        "games_dict": games_dict,
+        "game_sections_dict": game_sections_dict,
+        "team_count": team_count,
+        "game_count": game_count,
+        "section_count": section_count,
+        "archive_mode": archive_mode,
+        "upcoming_count": upcoming_count,
+        "completed_count": completed_count,
+    }
+
+
+@nfl_blueprint.get("/nfl")
+def nfl_home():
+    return render_template("NFLHomeScreen.html", **_nfl_home_context(False))
+
+
+@nfl_blueprint.get("/nfl/archive")
+def nfl_archive():
+    return render_template("NFLHomeScreen.html", **_nfl_home_context(True))
 
 
 @nfl_blueprint.get("/nfl/map")
@@ -655,7 +952,7 @@ def nfl_map():
             error="Choose a valid tracked NFL game before opening its stadium map.",
         )
 
-    team = nfl_home_team(selected.title) or selection
+    team = nfl_event_home_team(selected) or selection
     section_data, latest_capture = nfl_map_section_data(selected.id)
     if not section_data:
         return render_template(
@@ -668,11 +965,16 @@ def nfl_map():
     if selected_section not in known_sections:
         selected_section = ""
 
+    geometry = sanitize_map_geometry(selected.map_geometry, known_sections)
+    has_provider_geometry = geometry_is_usable(geometry, known_sections)
+    venue = nfl_display_venue(selected)
     map_data = {
         "team": team,
         "game": str(selected.id),
-        "venue": selected.venue,
+        "venue": venue,
         "sections": section_data,
+        "geometry": geometry,
+        "geometry_mode": "provider" if has_provider_geometry else "schematic",
         "selected_section": selected_section,
         "graph_url": url_for("nfl.nfl_graph"),
     }
@@ -680,7 +982,10 @@ def nfl_map():
         "nfl_map.html",
         error=None,
         team=team,
-        venue=selected.venue,
+        venue=venue,
+        city=selected.city or "",
+        country=selected.country or "",
+        neutral_site=selected.neutral_site is True,
         game=str(selected.id),
         gameLabel=format_nfl_title(selected),
         section_count=len(section_data),
@@ -689,6 +994,9 @@ def nfl_map():
         ),
         latest_capture_label=format_nfl_capture_label(latest_capture),
         source_url=selected.source_url,
+        has_provider_geometry=has_provider_geometry,
+        map_geometry_source=(geometry or {}).get("source", ""),
+        map_geometry_sections=geometry_section_count(geometry),
         map_data=map_data,
     )
 
@@ -700,8 +1008,8 @@ def nfl_graph():
     section = request.args.get("section") or ""
     display_mode = "percentage" if request.args.get("display") == "percentage" else "money"
     selected = find_nfl_game(selection, event_id)
-    team = nfl_home_team(selected.title) if selected else selection
-    venue = selected.venue if selected else ""
+    team = nfl_event_home_team(selected) if selected else selection
+    venue = nfl_display_venue(selected) if selected else ""
     label = format_nfl_title(selected) if selected else "Unknown NFL game"
 
     builder = NFLGraphBuilder()
