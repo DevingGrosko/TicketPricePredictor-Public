@@ -1,0 +1,66 @@
+name: Inline NFL runtime helpers
+
+on:
+  push:
+    branches:
+      - hotfix/pythonanywhere-nfl-metadata-fallback
+    paths:
+      - ".github/workflows/inline-nfl-runtime-hotfix.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: hotfix/pythonanywhere-nfl-metadata-fallback
+          fetch-depth: 0
+      - name: Inline the shared helpers into the deployed Flask blueprint
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          blueprint = Path("Flask_App/nfl_blueprint.py")
+          source = blueprint.read_text(encoding="utf-8")
+          metadata = Path("nfl_metadata.py").read_text(encoding="utf-8")
+          helper_body = metadata[metadata.index('EASTERN = ZoneInfo("America/New_York")'):]
+
+          source = source.replace(
+              "from dataclasses import asdict\n",
+              "from collections import defaultdict\nfrom dataclasses import asdict\n",
+              1,
+          )
+          source = source.replace("import json\n", "import json\nimport math\n", 1)
+          source = source.replace(
+              "from typing import Any\n",
+              "from typing import Any, Iterable\nfrom xml.etree import ElementTree\nfrom zoneinfo import ZoneInfo\n",
+              1,
+          )
+          old = '''from nfl_metadata import (
+              EASTERN,
+              canonical_venue_name,
+              eastern_iso,
+              eastern_label,
+              geometry_is_usable,
+              geometry_section_count,
+              sanitize_map_geometry,
+          )
+          '''
+          if source.count(old) != 1:
+              raise SystemExit(f"Expected one shared-helper import, found {source.count(old)}")
+          source = source.replace(
+              old,
+              "# Inlined for the restricted PythonAnywhere deployment.\n" + helper_body + "\n",
+          )
+          blueprint.write_text(source, encoding="utf-8")
+          PY
+      - name: Commit the deployment-safe blueprint
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Flask_App/nfl_blueprint.py
+          git commit -m "Inline NFL runtime helpers for PythonAnywhere"
+          git push origin HEAD:hotfix/pythonanywhere-nfl-metadata-fallback
