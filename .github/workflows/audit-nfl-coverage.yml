@@ -1,0 +1,197 @@
+name: Audit production NFL schedule coverage
+
+on:
+  push:
+    branches:
+      - audit/nfl-venue-integrity-2026-08-30
+    paths:
+      - ".github/workflows/audit-nfl-coverage.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compare the public game list with the exact 30-day schedule
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timedelta, timezone
+          import html
+          import json
+          from pathlib import Path
+          import re
+          from urllib.request import Request, urlopen
+          from zoneinfo import ZoneInfo
+
+          from nfl_collector import hourly_capture_slot, nfl_capture_interval_hours, nfl_capture_is_due
+
+          BASE_URL = 'https://bunnyjeff.pythonanywhere.com'
+          EASTERN = ZoneInfo('America/New_York')
+          now = datetime.now(timezone.utc)
+          capture_slot = hourly_capture_slot(now)
+
+          def fetch_json_or_text(url):
+              request = Request(
+                  url,
+                  headers={
+                      'Accept': 'text/html,application/json',
+                      'User-Agent': 'TicketSignal-NFL-coverage-audit/1.0',
+                  },
+              )
+              with urlopen(request, timeout=30) as response:
+                  return response.read().decode('utf-8')
+
+          home_html = fetch_json_or_text(f'{BASE_URL}/nfl')
+          match = re.search(
+              r'const\s+nflGamesData\s*=\s*(\{.*?\});\s*'
+              r'const\s+nflGameSectionsData',
+              home_html,
+              flags=re.DOTALL,
+          )
+          if not match:
+              raise SystemExit('Could not locate nflGamesData on the live NFL page.')
+          games_data = json.loads(html.unescape(match.group(1)))
+
+          tracked = []
+          for home_team, games in games_data.items():
+              for game in games:
+                  label = ' '.join(str(game.get('label') or '').split())
+                  parsed = re.match(
+                      r'^(?P<title>.+?)\s+—\s+'
+                      r'(?P<date>[A-Z][a-z]{2}\s+\d{1,2},\s+\d{4})\s+·\s+'
+                      r'(?P<time>\d{1,2}:\d{2}\s+[AP]M)$',
+                      label,
+                  )
+                  if not parsed:
+                      raise SystemExit(f'Unexpected game label: {label!r}')
+                  event_date = datetime.strptime(
+                      f"{parsed.group('date')} {parsed.group('time')}",
+                      '%b %d, %Y %I:%M %p',
+                  ).replace(tzinfo=EASTERN).astimezone(timezone.utc)
+                  tracked.append(
+                      {
+                          'game_id': str(game.get('value') or ''),
+                          'home_team': home_team,
+                          'title': parsed.group('title'),
+                          'event_date': event_date,
+                      }
+                  )
+
+          end = now + timedelta(hours=720, days=1)
+          dates = f'{now.astimezone(EASTERN):%Y%m%d}-{end.astimezone(EASTERN):%Y%m%d}'
+          schedule_url = (
+              'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard'
+              f'?dates={dates}&limit=1000'
+          )
+          payload = json.loads(fetch_json_or_text(schedule_url))
+
+          scheduled = []
+          for event in payload.get('events') or []:
+              event_date = datetime.fromisoformat(
+                  str(event.get('date') or '').replace('Z', '+00:00')
+              ).astimezone(timezone.utc)
+              hours_until = (event_date - now).total_seconds() / 3600
+              if not 0 < hours_until <= 720:
+                  continue
+              competitions = event.get('competitions') or []
+              competition = competitions[0] if competitions else {}
+              sides = {}
+              for competitor in competition.get('competitors') or []:
+                  team = competitor.get('team') or {}
+                  name = ' '.join(str(team.get('displayName') or '').split())
+                  side = str(competitor.get('homeAway') or '').lower()
+                  if side in {'away', 'home'} and name:
+                      sides[side] = name
+              if not sides.get('away') or not sides.get('home'):
+                  continue
+              venue_data = competition.get('venue') or {}
+              scheduled.append(
+                  {
+                      'schedule_id': str(event.get('id') or competition.get('id') or ''),
+                      'away_team': sides['away'],
+                      'home_team': sides['home'],
+                      'event_date': event_date,
+                      'venue': ' '.join(str(venue_data.get('fullName') or '').split()),
+                  }
+              )
+
+          def tracked_match(game):
+              for row in tracked:
+                  title = row['title'].casefold()
+                  if game['away_team'].casefold() not in title:
+                      continue
+                  if game['home_team'].casefold() not in title:
+                      continue
+                  if abs((row['event_date'] - game['event_date']).total_seconds()) <= 18 * 3600:
+                      return row
+              return None
+
+          missing = []
+          matched_tracked_ids = set()
+          for game in scheduled:
+              matched = tracked_match(game)
+              if matched:
+                  matched_tracked_ids.add(matched['game_id'])
+                  continue
+              interval = nfl_capture_interval_hours(game['event_date'], capture_slot)
+              next_due = None
+              if interval is not None:
+                  for offset in range(0, interval + 1):
+                      slot = capture_slot + timedelta(hours=offset)
+                      if nfl_capture_is_due(game['event_date'], slot, game['schedule_id']):
+                          next_due = slot
+                          break
+              missing.append(
+                  {
+                      **game,
+                      'event_date': game['event_date'].isoformat(),
+                      'cadence_hours': interval,
+                      'due_in_current_slot': nfl_capture_is_due(
+                          game['event_date'], capture_slot, game['schedule_id']
+                      ),
+                      'next_due_slot': next_due.isoformat() if next_due else None,
+                  }
+              )
+
+          extra = [
+              {
+                  **row,
+                  'event_date': row['event_date'].isoformat(),
+              }
+              for row in tracked
+              if row['game_id'] not in matched_tracked_ids
+              and row['event_date'] > now
+          ]
+
+          report = {
+              'generated_at': now.isoformat(),
+              'capture_slot': capture_slot.isoformat(),
+              'schedule_source': schedule_url,
+              'scheduled_in_exact_30_day_window': len(scheduled),
+              'tracked_public_games': len(tracked),
+              'matched_current_games': len(scheduled) - len(missing),
+              'missing_count': len(missing),
+              'missing': sorted(missing, key=lambda row: row['event_date']),
+              'extra_future_count': len(extra),
+              'extra_future': sorted(extra, key=lambda row: row['event_date']),
+              'tracked_home_team_count': len({row['home_team'] for row in tracked}),
+              'tracked_home_teams': sorted({row['home_team'] for row in tracked}),
+          }
+          Path('nfl_coverage_audit.json').write_text(
+              json.dumps(report, indent=2) + '\n', encoding='utf-8'
+          )
+          print(json.dumps(report, indent=2))
+          PY
+
+      - name: Upload coverage audit
+        uses: actions/upload-artifact@v7
+        with:
+          name: nfl-coverage-audit-${{ github.run_id }}
+          path: nfl_coverage_audit.json
+          if-no-files-found: error
+          retention-days: 14
