@@ -9,6 +9,7 @@ the final week before being uploaded to the NFL-only API and database.
 from __future__ import annotations
 
 import argparse
+import base64
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
@@ -31,11 +32,21 @@ from collector import (
     SectionSnapshot,
     VividBrowser,
     as_utc,
+    event_metadata_is_still_rendering,
     post_snapshot_with_retry,
     queue_snapshot,
     replay_pending_snapshots,
     snapshot_to_payload,
     validated_vivid_url,
+)
+from nfl_metadata import (
+    choose_best_geometry,
+    eastern_iso,
+    extract_map_geometry_from_json,
+    extract_map_geometry_from_svg,
+    geometry_is_usable,
+    geometry_section_count,
+    sanitize_map_geometry,
 )
 
 
@@ -53,6 +64,8 @@ DISCOVERY_HORIZON_DAYS = 30
 SMOKE_HORIZON_DAYS = 45
 MIN_USABLE_SECTIONS = 10
 NFL_FEED_URL = "https://www.vividseats.com/nfl/"
+MAP_GEOMETRY_SETTLE_SECONDS = 2.5
+MAX_MAP_RESPONSE_BYTES = 8_000_000
 
 NFL_TEAM_NAMES = frozenset(
     {
@@ -140,6 +153,11 @@ class DiscoveredNFLGame:
     url: str
     title: str
     date_hint: date | None
+
+
+@dataclass(frozen=True)
+class NFLEventSnapshot(EventSnapshot):
+    map_geometry: dict[str, Any] | None = None
 
 
 def is_nfl_game_title(title: str) -> bool:
@@ -359,15 +377,417 @@ class NFLSnapshotParser:
                 f"NFL capture rejected: only {len(sections)} usable sections; "
                 f"minimum is {MIN_USABLE_SECTIONS}."
             )
-        return EventSnapshot(
+
+        section_names = [row.section for row in sections]
+        map_geometry = choose_best_geometry(
+            (
+                payload.get("_map_geometry"),
+                extract_map_geometry_from_json(
+                    payload,
+                    section_names,
+                    source="vivid-listings-json",
+                ),
+            ),
+            section_names,
+        )
+        return NFLEventSnapshot(
             source_id=source_id,
             title=title,
             venue=venue,
             sections=sections,
+            map_geometry=map_geometry,
         )
 
 
 class VividNFLBrowser(VividBrowser):
+    """Capture listings plus sanitized provider section polygons."""
+
+    def __init__(self, headless: bool = False, timeout: int = 25):
+        super().__init__(headless=headless, timeout=timeout)
+        # The generic collector blocks SVGs to save bandwidth. NFL maps need
+        # their public SVG response, so replace that list without the SVG rule.
+        self.driver.execute_cdp_cmd(
+            "Network.setBlockedURLs",
+            {
+                "urls": [
+                    "*.jpg",
+                    "*.jpeg",
+                    "*.png",
+                    "*.gif",
+                    "*.webp",
+                    "*.woff",
+                    "*.woff2",
+                    "*.ttf",
+                    "*doubleclick.net*",
+                    "*google-analytics.com*",
+                    "*googletagmanager.com*",
+                ]
+            },
+        )
+
+    @staticmethod
+    def _looks_like_map_response(url: str, mime_type: str) -> bool:
+        normalized_url = str(url or "").casefold()
+        normalized_mime = str(mime_type or "").casefold()
+        if "svg" in normalized_mime:
+            return True
+        return any(
+            marker in normalized_url
+            for marker in (
+                "seatmap",
+                "seat-map",
+                "seating-map",
+                "venue-map",
+                "mapdata",
+                "map-data",
+                "/map/",
+                "map.svg",
+            )
+        )
+
+    def _response_text(self, request_id: str) -> str:
+        try:
+            result = self.driver.execute_cdp_cmd(
+                "Network.getResponseBody", {"requestId": request_id}
+            )
+            body = str(result.get("body") or "")
+            if result.get("base64Encoded"):
+                body = base64.b64decode(body).decode("utf-8", errors="replace")
+            if len(body.encode("utf-8", errors="ignore")) > MAX_MAP_RESPONSE_BYTES:
+                return ""
+            return body
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _geometry_from_response(
+        body: str,
+        mime_type: str,
+        response_url: str,
+        known_sections: list[str],
+    ) -> dict[str, Any] | None:
+        stripped = body.lstrip()
+        if not stripped:
+            return None
+        if "svg" in mime_type.casefold() or stripped.startswith("<svg"):
+            return extract_map_geometry_from_svg(
+                body,
+                known_sections,
+                source="vivid-network-svg",
+                source_url=response_url,
+            )
+        if stripped.startswith(("{", "[")):
+            try:
+                payload = json.loads(body)
+            except json.JSONDecodeError:
+                return None
+            return extract_map_geometry_from_json(
+                payload,
+                known_sections,
+                source="vivid-network-json",
+                source_url=response_url,
+            )
+        return None
+
+    def _open_map_view(self) -> bool:
+        try:
+            elements = self.driver.find_elements(
+                "xpath",
+                "//button | //*[@role='tab'] | //a[@role='button']",
+            )
+        except Exception:
+            return False
+        for element in elements[:200]:
+            try:
+                label = " ".join(
+                    (
+                        element.text
+                        or element.get_attribute("aria-label")
+                        or element.get_attribute("title")
+                        or ""
+                    ).split()
+                ).casefold()
+                if not label or "map" not in label or "open in maps" in label:
+                    continue
+                if not element.is_displayed() or not element.is_enabled():
+                    continue
+                self.driver.execute_script(
+                    "arguments[0].scrollIntoView({block: 'center'});", element
+                )
+                element.click()
+                return True
+            except Exception:
+                continue
+        return False
+
+    def _dom_map_geometry(
+        self,
+        known_sections: list[str],
+        source_url: str,
+    ) -> dict[str, Any] | None:
+        script = r"""
+const known = arguments[0] || [];
+const sourceUrl = arguments[1] || '';
+function clean(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+function normalize(value) {
+  return clean(value).toLowerCase()
+    .replace(/\b(section|sections|sec|seating|seat|area|zone|block)\b/g, ' ')
+    .replace(/[^a-z0-9]+/g, ' ').trim();
+}
+function number(value) {
+  const matches = clean(value).match(/\d+/g);
+  return matches ? Number(matches[matches.length - 1]) : null;
+}
+const exact = new Map();
+const byNumber = new Map();
+known.forEach((name) => {
+  const key = normalize(name);
+  if (!exact.has(key)) exact.set(key, []);
+  exact.get(key).push(name);
+  const n = number(name);
+  if (n !== null) {
+    if (!byNumber.has(n)) byNumber.set(n, []);
+    byNumber.get(n).push(name);
+  }
+});
+function match(hints) {
+  for (let index = 0; index < hints.length; index += 1) {
+    const hint = hints[index];
+    const key = normalize(hint);
+    const exactMatches = exact.get(key) || [];
+    if (exactMatches.length === 1) return exactMatches[0];
+    const n = number(hint);
+    const numeric = n === null ? [] : (byNumber.get(n) || []);
+    if (numeric.length === 1) return numeric[0];
+  }
+  return null;
+}
+function viewBox(svg) {
+  const base = svg.viewBox && svg.viewBox.baseVal;
+  if (base && base.width > 0 && base.height > 0) {
+    return [base.x, base.y, base.width, base.height];
+  }
+  const width = Number(svg.getAttribute('width')) || svg.clientWidth;
+  const height = Number(svg.getAttribute('height')) || svg.clientHeight;
+  return width > 0 && height > 0 ? [0, 0, width, height] : null;
+}
+function pathFor(element) {
+  const tag = element.tagName.toLowerCase();
+  if (tag === 'path') return clean(element.getAttribute('d'));
+  if (tag === 'polygon' || tag === 'polyline') {
+    const points = clean(element.getAttribute('points'));
+    if (!points) return '';
+    const pairs = points.split(/\s+/).map((pair) => pair.split(','));
+    if (pairs.length < 3) return '';
+    return `M ${pairs.map((pair) => `${pair[0]} ${pair[1]}`).join(' L ')} Z`;
+  }
+  if (tag === 'rect') {
+    const x = Number(element.getAttribute('x') || 0);
+    const y = Number(element.getAttribute('y') || 0);
+    const width = Number(element.getAttribute('width'));
+    const height = Number(element.getAttribute('height'));
+    if (!(width > 0 && height > 0)) return '';
+    return `M ${x} ${y} H ${x + width} V ${y + height} H ${x} Z`;
+  }
+  return '';
+}
+function relativeTransform(svg, element) {
+  try {
+    const rootMatrix = svg.getCTM();
+    const elementMatrix = element.getCTM();
+    if (!rootMatrix || !elementMatrix) return '';
+    const matrix = rootMatrix.inverse().multiply(elementMatrix);
+    const values = [matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f];
+    if (!values.every(Number.isFinite)) return '';
+    const identity = Math.abs(matrix.a - 1) < 1e-8
+      && Math.abs(matrix.b) < 1e-8
+      && Math.abs(matrix.c) < 1e-8
+      && Math.abs(matrix.d - 1) < 1e-8
+      && Math.abs(matrix.e) < 1e-8
+      && Math.abs(matrix.f) < 1e-8;
+    return identity ? '' : `matrix(${values.join(' ')})`;
+  } catch (error) {
+    return '';
+  }
+}
+let best = null;
+document.querySelectorAll('svg').forEach((root) => {
+  const box = viewBox(root);
+  if (!box) return;
+  const rows = [];
+  root.querySelectorAll('path, polygon, polyline, rect').forEach((element) => {
+    const hints = [];
+    let node = element;
+    while (node && node !== root) {
+      ['aria-label', 'data-section', 'data-section-name', 'data-name',
+       'data-testid', 'name', 'title', 'id', 'class'].forEach((attribute) => {
+        const value = node.getAttribute && node.getAttribute(attribute);
+        if (value) hints.push(value);
+      });
+      try {
+        node.querySelectorAll(':scope > title, :scope > text').forEach((label) => {
+          if (label.textContent) hints.push(label.textContent);
+        });
+      } catch (error) {
+        // Older SVG DOM implementations may not support :scope.
+      }
+      if (node === root) break;
+      node = node.parentElement;
+    }
+    const section = match(hints);
+    const path = pathFor(element);
+    if (!section || !path) return;
+    rows.push({
+      name: section,
+      shapes: [{path, transform: relativeTransform(root, element)}],
+    });
+  });
+  const unique = new Set(rows.map((row) => row.name)).size;
+  if (!best || unique > best.unique) {
+    best = {
+      unique,
+      source: 'vivid-dom-svg',
+      source_url: sourceUrl,
+      view_box: box,
+      sections: rows,
+    };
+  }
+});
+return best;
+"""
+        try:
+            raw = self.driver.execute_script(script, known_sections, source_url)
+        except Exception:
+            return None
+        return sanitize_map_geometry(raw, known_sections)
+
+    def capture(self, url: str) -> tuple[dict[str, Any], datetime]:
+        from selenium.common.exceptions import TimeoutException
+
+        self.driver.get_log("performance")
+        try:
+            self.driver.get(url)
+        except TimeoutException:
+            self.driver.execute_script("window.stop();")
+
+        deadline = time.monotonic() + self.timeout
+        listing_ids: set[str] = set()
+        map_requests: dict[str, tuple[str, str]] = {}
+        map_bodies: list[tuple[str, str, str]] = []
+        event_date: datetime | None = None
+        captured_payload: dict[str, Any] | None = None
+        listings_ready_at: float | None = None
+        map_view_opened = False
+
+        while time.monotonic() < deadline:
+            if event_date is None:
+                try:
+                    event_date = self._event_datetime(url)
+                except Exception as exc:
+                    if not event_metadata_is_still_rendering(exc):
+                        raise
+
+            for entry in self.driver.get_log("performance"):
+                try:
+                    message = json.loads(entry["message"])["message"]
+                    method = message["method"]
+                    params = message["params"]
+                except (KeyError, TypeError, json.JSONDecodeError):
+                    continue
+
+                if method == "Network.responseReceived":
+                    response = params.get("response") or {}
+                    response_url = str(response.get("url") or "")
+                    mime_type = str(response.get("mimeType") or "")
+                    request_id = str(params.get("requestId") or "")
+                    if "listings" in response_url.casefold():
+                        listing_ids.add(request_id)
+                    if self._looks_like_map_response(response_url, mime_type):
+                        map_requests[request_id] = (response_url, mime_type)
+                    continue
+
+                if method != "Network.loadingFinished":
+                    continue
+                request_id = str(params.get("requestId") or "")
+                if request_id in listing_ids:
+                    payload = self._response_json(request_id)
+                    if payload and payload.get("tickets") and payload.get("global"):
+                        captured_payload = payload
+                        listings_ready_at = listings_ready_at or time.monotonic()
+                if request_id in map_requests:
+                    response_url, mime_type = map_requests.pop(request_id)
+                    body = self._response_text(request_id)
+                    if body:
+                        map_bodies.append((body, mime_type, response_url))
+
+            if captured_payload is not None and event_date is not None:
+                known_sections = sorted(
+                    {
+                        " ".join(str(ticket.get("l") or "").split())
+                        for ticket in captured_payload.get("tickets") or []
+                        if isinstance(ticket, dict) and str(ticket.get("l") or "").strip()
+                    },
+                    key=str.casefold,
+                )
+                candidates: list[Any] = [
+                    extract_map_geometry_from_json(
+                        captured_payload,
+                        known_sections,
+                        source="vivid-listings-json",
+                        source_url=url,
+                    )
+                ]
+                for body, mime_type, response_url in map_bodies:
+                    candidates.append(
+                        self._geometry_from_response(
+                            body,
+                            mime_type,
+                            response_url,
+                            known_sections,
+                        )
+                    )
+                candidates.append(self._dom_map_geometry(known_sections, url))
+                geometry = choose_best_geometry(candidates, known_sections)
+                if geometry_is_usable(geometry, known_sections):
+                    captured_payload["_map_geometry"] = geometry
+                    captured_payload["_map_geometry_diagnostics"] = {
+                        "status": "captured",
+                        "source": geometry.get("source"),
+                        "mapped_sections": geometry_section_count(geometry),
+                        "coverage_ratio": geometry.get("coverage_ratio"),
+                        "network_map_responses": len(map_bodies),
+                    }
+                    return captured_payload, event_date
+
+                elapsed = time.monotonic() - (listings_ready_at or time.monotonic())
+                if not map_view_opened and elapsed >= 0.5:
+                    map_view_opened = self._open_map_view()
+                if elapsed >= MAP_GEOMETRY_SETTLE_SECONDS:
+                    if geometry is not None:
+                        captured_payload["_map_geometry"] = geometry
+                    captured_payload["_map_geometry_diagnostics"] = {
+                        "status": "partial" if geometry is not None else "unavailable",
+                        "source": geometry.get("source") if geometry else None,
+                        "mapped_sections": geometry_section_count(geometry),
+                        "coverage_ratio": geometry.get("coverage_ratio") if geometry else 0,
+                        "network_map_responses": len(map_bodies),
+                        "map_view_opened": map_view_opened,
+                    }
+                    return captured_payload, event_date
+
+            time.sleep(0.15)
+
+        if captured_payload is not None and event_date is not None:
+            return captured_payload, event_date
+        if captured_payload is not None:
+            raise ValueError(
+                f"Listings loaded, but the event date and time did not appear "
+                f"within {self.timeout} seconds."
+            )
+        raise TimeoutError(f"No Vivid listings response appeared within {self.timeout} seconds.")
+
     def discover_games(self, feed_url: str = NFL_FEED_URL) -> list[DiscoveredNFLGame]:
         from selenium.common.exceptions import TimeoutException
 
@@ -548,9 +968,20 @@ def nfl_snapshot_to_payload(
     event_date: datetime,
     captured_at: datetime,
     snapshot: EventSnapshot,
+    *,
+    schedule: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = snapshot_to_payload(url, event_date, captured_at, snapshot)
     payload["event_type"] = "nfl"
+    section_names = [row.section for row in snapshot.sections]
+    geometry = sanitize_map_geometry(
+        getattr(snapshot, "map_geometry", None),
+        section_names,
+    )
+    if geometry is not None:
+        payload["map_geometry"] = geometry
+    if schedule:
+        payload["schedule"] = schedule
     return payload
 
 
@@ -644,8 +1075,9 @@ def run_smoke_capture(
             result = {
                 "status": "success",
                 "event_type": "nfl",
-                "captured_at": captured_at.isoformat(),
-                "event_date": event_date.isoformat(),
+                "timezone": "America/New_York",
+                "captured_at": eastern_iso(captured_at),
+                "event_date": eastern_iso(event_date),
                 "source_url": game.url,
                 "source_id": snapshot.source_id,
                 "title": snapshot.title,
@@ -653,13 +1085,26 @@ def run_smoke_capture(
                 "section_count": len(snapshot.sections),
                 "lowest_section_price": min(row.price for row in snapshot.sections),
                 "highest_section_price": max(row.price for row in snapshot.sections),
+                "map_geometry_source": (
+                    snapshot.map_geometry.get("source")
+                    if isinstance(snapshot, NFLEventSnapshot) and snapshot.map_geometry
+                    else None
+                ),
+                "map_geometry_sections": geometry_section_count(
+                    getattr(snapshot, "map_geometry", None)
+                ),
+                "map_geometry": getattr(snapshot, "map_geometry", None),
+                "map_geometry_diagnostics": raw_payload.get(
+                    "_map_geometry_diagnostics"
+                ),
                 "sections": [asdict(row) for row in snapshot.sections],
             }
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
             print(
                 f"NFL SMOKE TEST PASSED: {len(snapshot.sections)} sections for "
-                f"{snapshot.title} at {snapshot.venue}.",
+                f"{snapshot.title} at {snapshot.venue}; "
+                f"{result['map_geometry_sections']} provider polygons captured.",
                 flush=True,
             )
             return 0
@@ -680,7 +1125,8 @@ def run_smoke_capture(
             {
                 "status": "failure",
                 "event_type": "nfl",
-                "captured_at": datetime.now(timezone.utc).isoformat(),
+                "timezone": "America/New_York",
+                "captured_at": eastern_iso(datetime.now(timezone.utc)),
                 "candidate_count": len(candidates),
                 "errors": errors,
             },
@@ -776,6 +1222,9 @@ def run_remote_collector(
                             "title": snapshot.title,
                             "venue": snapshot.venue,
                             "sections": len(snapshot.sections),
+                            "map_geometry_sections": geometry_section_count(
+                                getattr(snapshot, "map_geometry", None)
+                            ),
                             "result": response["status"],
                         }
                     )
@@ -813,10 +1262,11 @@ def run_remote_collector(
         "status": status,
         "event_type": "nfl",
         "storage": "separate NFL database",
+        "timezone": "America/New_York",
         "cadence": "adaptive: 6h from days 15-30, 3h from days 8-14, hourly in final 7 days",
         "capture_window_hours": NFL_CAPTURE_WINDOW_HOURS,
-        "started_at": started_at.isoformat(),
-        "capture_slot": capture_slot.isoformat(),
+        "started_at": eastern_iso(started_at),
+        "capture_slot": eastern_iso(capture_slot),
         "feed": NFL_FEED_URL,
         "discovered": len(discovered),
         "undated": undated,

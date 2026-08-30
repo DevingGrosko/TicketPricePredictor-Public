@@ -1,0 +1,40 @@
+.nfl-stadium-map-stage.has-provider-geometry {
+  background:
+    radial-gradient(circle at 50% 48%, rgba(31, 127, 77, .11), transparent 42%),
+    linear-gradient(180deg, rgba(5, 18, 35, .98), rgba(1, 10, 24, .99));
+}
+
+.nfl-stadium-map-svg.is-provider-map {
+  padding: 18px;
+}
+
+.nfl-stadium-map-svg.is-provider-map .nfl-stadium-section path {
+  stroke-width: 1.25;
+  vector-effect: non-scaling-stroke;
+}
+
+.nfl-stadium-map-svg.is-provider-map .nfl-stadium-section:hover path,
+.nfl-stadium-map-svg.is-provider-map .nfl-stadium-section:focus-visible path,
+.nfl-stadium-map-svg.is-provider-map .nfl-stadium-section.is-match path {
+  stroke-width: 3;
+}
+
+.nfl-stadium-map-svg.is-provider-map .nfl-stadium-section.is-selected path {
+  stroke-width: 4;
+}
+
+.nfl-map-disclaimer--verified {
+  color: #b7d8c4;
+}
+
+.nfl-map-disclaimer--verified > span {
+  display: inline-grid;
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border: 1px solid rgba(183, 216, 196, .5);
+  border-radius: 50%;
+  color: #d8f4e2;
+  font-size: .68rem;
+}

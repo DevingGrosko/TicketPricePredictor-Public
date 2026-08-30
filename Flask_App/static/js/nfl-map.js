@@ -12,7 +12,7 @@
   }
 
   const SVG_NS = 'http://www.w3.org/2000/svg';
-  const BASE_VIEW = { x: 0, y: 0, width: 1000, height: 700 };
+  const SCHEMATIC_VIEW = { x: 0, y: 0, width: 1000, height: 700 };
   const stage = document.querySelector('[data-map-stage]');
   const tooltip = document.querySelector('[data-map-tooltip]');
   const levelContainer = document.querySelector('[data-map-levels]');
@@ -40,7 +40,9 @@
   function createSvgElement(name, attributes = {}) {
     const element = document.createElementNS(SVG_NS, name);
     Object.entries(attributes).forEach(([key, value]) => {
-      element.setAttribute(key, String(value));
+      if (value !== '' && value !== null && value !== undefined) {
+        element.setAttribute(key, String(value));
+      }
     });
     return element;
   }
@@ -104,13 +106,41 @@
     .map((level) => ({ ...level, sections: level.sections.sort(compareSections) }))
     .sort((a, b) => a.order - b.order || a.label.localeCompare(b.label));
 
+  function parseProviderGeometry() {
+    const raw = mapData.geometry;
+    if (!raw || mapData.geometry_mode !== 'provider') return null;
+    const box = Array.isArray(raw.view_box) ? raw.view_box.map(Number) : [];
+    if (box.length !== 4 || !box.every(Number.isFinite) || box[2] <= 0 || box[3] <= 0) {
+      return null;
+    }
+    const geometryBySection = new Map();
+    const knownNames = new Set(sections.map((section) => section.name));
+    (Array.isArray(raw.sections) ? raw.sections : []).forEach((row) => {
+      const name = String(row && row.name || '').trim();
+      if (!knownNames.has(name) || !Array.isArray(row.shapes)) return;
+      const shapes = row.shapes.map((shape) => ({
+        path: String(shape && shape.path || '').trim(),
+        transform: String(shape && shape.transform || '').trim(),
+      })).filter((shape) => shape.path);
+      if (shapes.length) geometryBySection.set(name, shapes);
+    });
+    const required = Math.max(4, Math.min(12, Math.ceil(sections.length * .6)));
+    if (geometryBySection.size < required) return null;
+    return {
+      view: { x: box[0], y: box[1], width: box[2], height: box[3] },
+      sections: geometryBySection,
+    };
+  }
+
+  const providerGeometry = parseProviderGeometry();
   const sectionElements = new Map();
+  let baseView = providerGeometry ? { ...providerGeometry.view } : { ...SCHEMATIC_VIEW };
   let selectedSection = null;
   let activeLevel = 'all';
   let zoom = 1;
-  let centerX = 500;
-  let centerY = 350;
-  let currentView = { ...BASE_VIEW };
+  let centerX = baseView.x + baseView.width / 2;
+  let centerY = baseView.y + baseView.height / 2;
+  let currentView = { ...baseView };
   let dragState = null;
 
   function ellipsePoint(cx, cy, rx, ry, angle) {
@@ -153,6 +183,37 @@
   function formatListings(section) {
     if (section.listing_count === null) return 'Not recorded';
     return `${section.listing_count.toLocaleString('en-US')} listing${section.listing_count === 1 ? '' : 's'}`;
+  }
+
+  function bindSection(group, section, level) {
+    group.addEventListener('pointerenter', (event) => showTooltip(event, section, level));
+    group.addEventListener('pointermove', (event) => positionTooltip(event));
+    group.addEventListener('pointerleave', hideTooltip);
+    group.addEventListener('click', () => selectSection(section, level));
+    group.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        selectSection(section, level);
+      }
+    });
+    sectionElements.set(section.name, { element: group, section, level });
+  }
+
+  function sectionGroup(section, level, levelIndex) {
+    return createSvgElement('g', {
+      class: `nfl-stadium-section level-${Math.min(levelIndex, 7)}`,
+      tabindex: 0,
+      role: 'button',
+      'data-section': section.name,
+      'data-level': level.key,
+      'aria-label': `${section.name}, ${formatPrice(section)}, ${formatListings(section)}`,
+    });
+  }
+
+  function addSectionTitle(group, section) {
+    const title = createSvgElement('title');
+    title.textContent = `${section.name} — ${formatPrice(section)}`;
+    group.appendChild(title);
   }
 
   function drawField() {
@@ -230,10 +291,9 @@
     svg.appendChild(fieldGroup);
   }
 
-  function renderMap() {
-    svg.replaceChildren();
-    sectionElements.clear();
-
+  function renderSchematicMap() {
+    baseView = { ...SCHEMATIC_VIEW };
+    svg.classList.remove('is-provider-map');
     const cx = 500;
     const cy = 350;
     const ringCount = Math.max(levels.length, 1);
@@ -256,15 +316,8 @@
       level.sections.forEach((section, index) => {
         const start = -Math.PI / 2 + index * slot + gap / 2;
         const end = -Math.PI / 2 + (index + 1) * slot - gap / 2;
-        const group = createSvgElement('g', {
-          class: `nfl-stadium-section level-${Math.min(levelIndex, 7)}`,
-          tabindex: 0,
-          role: 'button',
-          'data-section': section.name,
-          'data-level': level.key,
-          'aria-label': `${section.name}, ${formatPrice(section)}, ${formatListings(section)}`,
-        });
-        const path = createSvgElement('path', {
+        const group = sectionGroup(section, level, levelIndex);
+        group.appendChild(createSvgElement('path', {
           d: annularSegmentPath(
             cx,
             cy,
@@ -275,8 +328,7 @@
             start,
             end,
           ),
-        });
-        group.appendChild(path);
+        }));
 
         const middle = (start + end) / 2;
         const labelPoint = ellipsePoint(
@@ -292,28 +344,51 @@
         });
         text.textContent = shortSectionLabel(section);
         group.appendChild(text);
-
-        const title = createSvgElement('title');
-        title.textContent = `${section.name} — ${formatPrice(section)}`;
-        group.appendChild(title);
-
-        group.addEventListener('pointerenter', (event) => showTooltip(event, section, level));
-        group.addEventListener('pointermove', (event) => positionTooltip(event));
-        group.addEventListener('pointerleave', hideTooltip);
-        group.addEventListener('click', () => selectSection(section, level));
-        group.addEventListener('keydown', (event) => {
-          if (event.key === 'Enter' || event.key === ' ') {
-            event.preventDefault();
-            selectSection(section, level);
-          }
-        });
-
-        sectionElements.set(section.name, { element: group, section, level });
+        addSectionTitle(group, section);
+        bindSection(group, section, level);
         svg.appendChild(group);
       });
     });
-
     drawField();
+  }
+
+  function renderProviderMap() {
+    if (!providerGeometry) return false;
+    baseView = { ...providerGeometry.view };
+    svg.classList.add('is-provider-map');
+    let rendered = 0;
+    levels.forEach((level, levelIndex) => {
+      level.sections.forEach((section) => {
+        const shapes = providerGeometry.sections.get(section.name);
+        if (!shapes) return;
+        const group = sectionGroup(section, level, levelIndex);
+        shapes.forEach((shape) => {
+          group.appendChild(createSvgElement('path', {
+            d: shape.path,
+            transform: shape.transform,
+            'vector-effect': 'non-scaling-stroke',
+          }));
+        });
+        addSectionTitle(group, section);
+        bindSection(group, section, level);
+        svg.appendChild(group);
+        rendered += 1;
+      });
+    });
+    return rendered > 0;
+  }
+
+  function renderMap() {
+    svg.replaceChildren();
+    sectionElements.clear();
+    if (!renderProviderMap()) {
+      svg.replaceChildren();
+      sectionElements.clear();
+      renderSchematicMap();
+    }
+    centerX = baseView.x + baseView.width / 2;
+    centerY = baseView.y + baseView.height / 2;
+    currentView = { ...baseView };
     applyLevelFilter();
   }
 
@@ -416,14 +491,15 @@
     if (!query) return;
 
     const exactNumber = /^\d+$/.test(query) ? Number(query) : null;
-    const matches = [];
-    sectionElements.forEach((entry) => {
-      const normalizedName = normalize(entry.section.name);
-      const matchesNumber = exactNumber !== null && sectionNumber(entry.section.name) === exactNumber;
-      if (matchesNumber || normalizedName.includes(query)) {
-        entry.element.classList.add('is-match');
-        matches.push(entry);
-      }
+    const matches = sections.filter((section) => {
+      const normalizedName = normalize(section.name);
+      return (exactNumber !== null && sectionNumber(section.name) === exactNumber)
+        || normalizedName.includes(query);
+    });
+
+    matches.forEach((section) => {
+      const entry = sectionElements.get(section.name);
+      if (entry) entry.element.classList.add('is-match');
     });
 
     if (matches.length) {
@@ -434,8 +510,10 @@
         });
       }
       applyLevelFilter();
-      selectSection(matches[0].section, matches[0].level);
-      matches[0].element.focus({ preventScroll: true });
+      const section = matches[0];
+      const entry = sectionElements.get(section.name);
+      selectSection(section, entry ? entry.level : sectionLevel(section));
+      if (entry) entry.element.focus({ preventScroll: true });
     }
   }
 
@@ -444,10 +522,18 @@
   }
 
   function applyViewBox() {
-    const width = BASE_VIEW.width / zoom;
-    const height = BASE_VIEW.height / zoom;
-    centerX = clamp(centerX, width / 2, BASE_VIEW.width - width / 2);
-    centerY = clamp(centerY, height / 2, BASE_VIEW.height - height / 2);
+    const width = baseView.width / zoom;
+    const height = baseView.height / zoom;
+    centerX = clamp(
+      centerX,
+      baseView.x + width / 2,
+      baseView.x + baseView.width - width / 2,
+    );
+    centerY = clamp(
+      centerY,
+      baseView.y + height / 2,
+      baseView.y + baseView.height - height / 2,
+    );
     currentView = {
       x: centerX - width / 2,
       y: centerY - height / 2,
@@ -461,7 +547,7 @@
   }
 
   function setZoom(nextZoom, anchorEvent = null) {
-    const bounded = clamp(nextZoom, 1, 3.2);
+    const bounded = clamp(nextZoom, 1, 4.2);
     if (bounded === zoom) return;
 
     if (anchorEvent && stage) {
@@ -470,8 +556,8 @@
       const relativeY = clamp((anchorEvent.clientY - bounds.top) / bounds.height, 0, 1);
       const anchorX = currentView.x + relativeX * currentView.width;
       const anchorY = currentView.y + relativeY * currentView.height;
-      const nextWidth = BASE_VIEW.width / bounded;
-      const nextHeight = BASE_VIEW.height / bounded;
+      const nextWidth = baseView.width / bounded;
+      const nextHeight = baseView.height / bounded;
       centerX = anchorX - (relativeX - .5) * nextWidth;
       centerY = anchorY - (relativeY - .5) * nextHeight;
     }
@@ -482,8 +568,8 @@
 
   function resetView() {
     zoom = 1;
-    centerX = 500;
-    centerY = 350;
+    centerX = baseView.x + baseView.width / 2;
+    centerY = baseView.y + baseView.height / 2;
     applyViewBox();
   }
 
@@ -543,11 +629,12 @@
 
   renderMap();
   renderLevelFilters();
-  applyViewBox();
+  resetView();
 
   const requestedSection = String(mapData.selected_section || '').trim();
-  if (requestedSection && sectionElements.has(requestedSection)) {
+  if (requestedSection) {
+    const section = sections.find((candidate) => candidate.name === requestedSection);
     const entry = sectionElements.get(requestedSection);
-    selectSection(entry.section, entry.level);
+    if (section) selectSection(section, entry ? entry.level : sectionLevel(section));
   }
 })();
