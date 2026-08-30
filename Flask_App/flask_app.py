@@ -47,15 +47,9 @@ app.config["SECRET_KEY"] = os.environ.get(
     "development-only-secret-key",
 )
 
-from Flask_App.nfl_blueprint import nfl_blueprint, nfl_home
+from Flask_App.nfl_blueprint import nfl_blueprint
 
 app.register_blueprint(nfl_blueprint)
-
-
-@app.get("/")
-def landing():
-    """Serve the NFL tracker as the site's default homepage."""
-    return nfl_home()
 
 MAX_SNAPSHOT_REPLAY_AGE = timedelta(days=7)
 MAX_SNAPSHOT_CLOCK_SKEW = timedelta(minutes=5)
@@ -272,6 +266,7 @@ def find_event(place, identifier):
 
 
 @app.route("/baseball", methods=["GET", "POST"])
+@app.route("/", methods=["GET", "POST"])
 def home():
     SessionLocal = CreateModel().getSession()
     with SessionLocal() as session:

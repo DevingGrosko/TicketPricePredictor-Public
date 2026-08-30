@@ -7,6 +7,7 @@ from nfl_schedule_collector import (
     ScheduledNFLGame,
     candidates_for_schedule_game,
     matchup_key_from_title,
+    ordered_matchup_from_title,
     parse_schedule_payload,
     schedule_cadence_summary,
     schedule_games_due,
@@ -169,12 +170,42 @@ class NFLVividResolutionTests(unittest.TestCase):
         )
 
     def test_matchup_detection_ignores_promotional_prefixes(self):
+        title = "Deals Available NFL Week 1 - Buffalo Bills at Houston Texans"
+        self.assertEqual(matchup_key_from_title(title), self.game.matchup_key)
         self.assertEqual(
-            matchup_key_from_title(
-                "Deals Available NFL Week 1 - Buffalo Bills at Houston Texans"
-            ),
-            self.game.matchup_key,
+            ordered_matchup_from_title(title),
+            ("Buffalo Bills", "Houston Texans"),
         )
+
+    def test_reverse_home_away_matchup_is_rejected(self):
+        scheduled = ScheduledNFLGame(
+            schedule_id="rams-home",
+            event_date=datetime(2026, 9, 17, 0, 15, tzinfo=timezone.utc),
+            away_team="San Francisco 49ers",
+            home_team="Los Angeles Rams",
+            venue="SoFi Stadium",
+            name="San Francisco 49ers at Los Angeles Rams",
+        )
+        reverse = DiscoveredNFLGame(
+            url=(
+                "https://www.vividseats.com/san-francisco-49ers-tickets-"
+                "santa-clara-levis-stadium/production/6495873"
+            ),
+            title="Los Angeles Rams at San Francisco 49ers",
+            date_hint=datetime(2026, 12, 13).date(),
+        )
+        correct = DiscoveredNFLGame(
+            url=(
+                "https://www.vividseats.com/los-angeles-rams-tickets-"
+                "inglewood-sofi-stadium/production/7000001"
+            ),
+            title="San Francisco 49ers at Los Angeles Rams",
+            date_hint=datetime(2026, 9, 16).date(),
+        )
+
+        candidates = candidates_for_schedule_game(scheduled, [reverse, correct])
+        self.assertEqual([row.url for row in candidates], [correct.url])
+        self.assertEqual(candidates_for_schedule_game(scheduled, [reverse]), ())
 
     def test_candidate_matching_does_not_trust_vivid_slug_date(self):
         rows = [
@@ -220,6 +251,13 @@ class NFLVividResolutionTests(unittest.TestCase):
                 self.game,
                 self.game.event_date,
                 "Dallas Cowboys at New York Giants",
+            )
+
+        with self.assertRaisesRegex(ValueError, "away/home order"):
+            validate_captured_match(
+                self.game,
+                self.game.event_date,
+                "Houston Texans at Buffalo Bills",
             )
 
         with self.assertRaisesRegex(ValueError, "differs"):
