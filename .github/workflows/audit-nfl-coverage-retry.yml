@@ -1,0 +1,50 @@
+name: Retry production NFL schedule coverage audit
+
+on:
+  push:
+    branches:
+      - audit/nfl-venue-integrity-2026-08-30
+    paths:
+      - ".github/workflows/audit-nfl-coverage-retry.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install the collector's import dependency
+        run: python -m pip install "SQLAlchemy>=2,<3"
+
+      - name: Execute the coverage audit script
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from textwrap import dedent
+
+          workflow = Path('.github/workflows/audit-nfl-coverage.yml').read_text(
+              encoding='utf-8'
+          )
+          marker = "          python - <<'PY'\n"
+          if marker not in workflow:
+              raise SystemExit('Could not locate the coverage-audit Python block.')
+          code = workflow.split(marker, 1)[1].split("\n          PY", 1)[0]
+          exec(compile(dedent(code), 'audit_nfl_coverage.py', 'exec'))
+          PY
+
+      - name: Upload coverage audit
+        uses: actions/upload-artifact@v7
+        with:
+          name: nfl-coverage-audit-${{ github.run_id }}
+          path: nfl_coverage_audit.json
+          if-no-files-found: error
+          retention-days: 14
