@@ -109,6 +109,42 @@ class ScheduleResolution:
 JsonFetcher = Callable[[str, int], dict[str, Any]]
 
 
+_US_COUNTRY_MARKERS = frozenset(
+    {
+        "us",
+        "usa",
+        "united states",
+        "united states of america",
+    }
+)
+
+
+def is_expected_vivid_provider_gap(game: ScheduledNFLGame) -> bool:
+    """Return whether an unresolved game is outside Vivid's normal US coverage.
+
+    We still attempt to resolve and capture every game. This classification is
+    used only after Vivid returns no candidate, so non-US games remain visible
+    in the health report without turning an otherwise successful hourly run red.
+    """
+    country = " ".join(str(game.country or "").split()).casefold().replace(".", "")
+    return bool(country) and country not in _US_COUNTRY_MARKERS
+
+
+def _schedule_collection_exit_code(
+    expected: int,
+    captured: int,
+    expected_provider_gap_count: int,
+    feed_errors: list[str],
+    actionable_search_errors: list[str],
+) -> int:
+    actionable_expected = max(0, expected - expected_provider_gap_count)
+    if captured < actionable_expected:
+        return 1
+    if feed_errors or actionable_search_errors:
+        return 1
+    return 0
+
+
 def _parse_datetime(raw: str) -> datetime:
     value = datetime.fromisoformat(str(raw).strip().replace("Z", "+00:00"))
     if value.tzinfo is None:
@@ -673,9 +709,59 @@ def run_schedule_collector(
     pending_count = len(list(pending_dir.glob("*.json")))
     expected = len(due_schedule)
     coverage = 100.0 if expected == 0 else round(captured / expected * 100, 2)
+
+    expected_gap_names = {
+        resolution.game.name
+        for resolution in resolutions
+        if is_expected_vivid_provider_gap(resolution.game)
+    }
+    expected_gap_search_errors = [
+        error
+        for error in search_errors
+        if any(error.startswith(f"{name}:") for name in expected_gap_names)
+    ]
+    actionable_search_errors = [
+        error for error in search_errors if error not in expected_gap_search_errors
+    ]
+
+    # Split unresolved games only after all feed/search attempts have finished.
+    expected_provider_gaps: list[str] = []
+    actionable_unresolved: list[str] = []
+    unresolved_by_matchup = {
+        (
+            resolution.game.away_team,
+            resolution.game.home_team,
+            eastern_iso(resolution.game.event_date),
+        ): resolution.game
+        for resolution in resolutions
+        if not resolution.candidates
+    }
+    for message in unresolved:
+        matched_game = next(
+            (
+                game
+                for (away, home, event_date), game in unresolved_by_matchup.items()
+                if message.startswith(f"{away} at {home} ({event_date})")
+            ),
+            None,
+        )
+        if matched_game is not None and is_expected_vivid_provider_gap(matched_game):
+            expected_provider_gaps.append(message)
+        else:
+            actionable_unresolved.append(message)
+    unresolved = actionable_unresolved
+
+    provider_supported_expected = max(0, expected - len(expected_provider_gaps))
+    provider_supported_coverage = (
+        100.0
+        if provider_supported_expected == 0
+        else round(captured / provider_supported_expected * 100, 2)
+    )
     all_errors = feed_errors + search_errors + capture_errors + queue_errors
-    if unresolved or capture_errors or feed_errors or search_errors:
+    if unresolved or capture_errors or feed_errors or actionable_search_errors:
         status = "degraded"
+    elif expected_provider_gaps or expected_gap_search_errors:
+        status = "known-provider-gap"
     elif pending_count:
         status = "queued"
     else:
@@ -706,7 +792,11 @@ def run_schedule_collector(
         "recovered_from_search": recovered_from_search,
         "unresolved_count": len(unresolved),
         "unresolved": unresolved,
+        "known_provider_gap_count": len(expected_provider_gaps),
+        "known_provider_gaps": expected_provider_gaps,
         "coverage_percent": coverage,
+        "provider_supported_due": provider_supported_expected,
+        "provider_supported_coverage_percent": provider_supported_coverage,
         "captured": captured,
         "uploaded": uploaded,
         "queued": queued,
@@ -715,22 +805,30 @@ def run_schedule_collector(
         "failed": len(capture_errors),
         "uploads": uploads,
         "errors": all_errors,
+        "actionable_search_errors": actionable_search_errors,
+        "known_provider_gap_search_errors": expected_gap_search_errors,
     }
     _write_health(health_output, report)
     print(
         "NFL schedule-backed collection finished: "
-        f"{captured}/{expected} due games captured ({coverage:.2f}% coverage); "
+        f"{captured}/{expected} due games captured ({coverage:.2f}% total; "
+        f"{provider_supported_coverage:.2f}% of provider-supported games); "
         f"{len(schedule)} games remain inside the 30-day window, "
         f"{recovered_from_search} recovered through search, "
-        f"{len(unresolved)} unresolved, {queued} queued, {replayed} replayed.",
+        f"{len(expected_provider_gaps)} known provider gaps, "
+        f"{len(unresolved)} actionable unresolved, {queued} queued, "
+        f"{replayed} replayed.",
         flush=True,
     )
 
-    if expected > 0 and captured < expected:
-        return 1
-    if feed_errors or search_errors:
-        return 1
-    return 0
+    return _schedule_collection_exit_code(
+        expected,
+        captured,
+        len(expected_provider_gaps),
+        feed_errors,
+        actionable_search_errors,
+    )
+
 
 
 def run_schedule_smoke(
