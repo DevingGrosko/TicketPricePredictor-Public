@@ -13,11 +13,15 @@ from collector import EventSnapshot, SectionSnapshot
 from Flask_App.nfl_blueprint import (
     CreateNFLModel,
     NFLEvent,
+    NFLIteration,
+    NFLTicket,
+    _SCHEMA_READY,
     format_nfl_capture_label,
     nfl_archive,
     nfl_blueprint,
     nfl_home,
     nfl_map,
+    normalize_nfl_schedule_metadata,
     store_nfl_snapshot,
 )
 from nfl_metadata import (
@@ -152,6 +156,74 @@ class NFLMetadataEnhancementTests(unittest.TestCase):
         self.assertEqual(game.city, "Minneapolis")
         self.assertEqual(game.country, "USA")
         self.assertTrue(game.neutral_site)
+
+    def test_international_schedule_metadata_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "outside the U.S.-venue"):
+            normalize_nfl_schedule_metadata(
+                {
+                    "away_team": "San Francisco 49ers",
+                    "home_team": "Los Angeles Rams",
+                    "canonical_venue": "Melbourne Cricket Ground",
+                    "city": "Melbourne",
+                    "country": "Australia",
+                    "neutral_site": True,
+                },
+                title="San Francisco 49ers at Los Angeles Rams",
+                provider_venue="Melbourne Cricket Ground",
+            )
+
+    def test_existing_international_rows_are_removed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "nfl.db"
+            model = CreateNFLModel(db_path)
+            try:
+                with model.getSession()() as session:
+                    domestic = NFLEvent(
+                        source_id="domestic",
+                        title="Dallas Cowboys at New York Giants",
+                        event_date=datetime(2026, 9, 10, 20),
+                        sections=["Section 1"],
+                        source_url="https://www.vividseats.com/game/production/9100001",
+                        venue="MetLife Stadium",
+                        country="USA",
+                    )
+                    international = NFLEvent(
+                        source_id="international",
+                        title="San Francisco 49ers at Los Angeles Rams",
+                        event_date=datetime(2026, 9, 10, 20),
+                        sections=["Section 1"],
+                        source_url="https://www.vividseats.com/game/production/9100002",
+                        venue="Melbourne Cricket Ground",
+                        country="Australia",
+                    )
+                    iteration = NFLIteration(
+                        event=international,
+                        captured_at=datetime(2026, 9, 1, 12),
+                    )
+                    iteration.tickets.append(
+                        NFLTicket(
+                            section="Section 1",
+                            price=100,
+                            listing_count=1,
+                        )
+                    )
+                    session.add_all([domestic, international, iteration])
+                    session.commit()
+            finally:
+                model.engine.dispose()
+
+            _SCHEMA_READY.discard(str(db_path.resolve()))
+            model = CreateNFLModel(db_path)
+            try:
+                with model.getSession()() as session:
+                    self.assertEqual(
+                        [event.source_id for event in session.query(NFLEvent).all()],
+                        ["domestic"],
+                    )
+                    self.assertEqual(session.query(NFLIteration).count(), 0)
+                    self.assertEqual(session.query(NFLTicket).count(), 0)
+            finally:
+                model.engine.dispose()
 
     def test_existing_database_is_migrated_and_backfilled(self):
         with tempfile.TemporaryDirectory() as directory:
