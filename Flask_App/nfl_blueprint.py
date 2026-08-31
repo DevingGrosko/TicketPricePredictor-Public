@@ -816,6 +816,24 @@ def _ensure_nfl_schema(engine: Any, db_path: Path) -> None:
                 "ON nfl_event (canonical_venue)"
             )
 
+            international_predicate = (
+                "country IS NOT NULL AND TRIM(country) <> '' AND "
+                "LOWER(REPLACE(TRIM(country), '.', '')) NOT IN "
+                "('us', 'usa', 'united states', 'united states of america')"
+            )
+            connection.exec_driver_sql(
+                "DELETE FROM nfl_tickets WHERE iteration_id IN ("
+                "SELECT id FROM nfl_iterations WHERE event_id IN ("
+                f"SELECT id FROM nfl_event WHERE {international_predicate}))"
+            )
+            connection.exec_driver_sql(
+                "DELETE FROM nfl_iterations WHERE event_id IN ("
+                f"SELECT id FROM nfl_event WHERE {international_predicate})"
+            )
+            connection.exec_driver_sql(
+                f"DELETE FROM nfl_event WHERE {international_predicate}"
+            )
+
             rows = connection.execute(
                 text(
                     "SELECT id, title, venue, provider_venue, canonical_venue, "
@@ -924,6 +942,16 @@ def _clean_metadata_text(value: Any, maximum: int = 250) -> str:
     return " ".join(str(value or "").split())[:maximum]
 
 
+_US_COUNTRY_MARKERS = frozenset(
+    {"us", "usa", "united states", "united states of america"}
+)
+
+
+def _country_is_explicitly_non_us(value: Any) -> bool:
+    country = _clean_metadata_text(value).casefold().replace(".", "")
+    return bool(country) and country not in _US_COUNTRY_MARKERS
+
+
 def normalize_nfl_schedule_metadata(
     raw: Any,
     *,
@@ -953,13 +981,19 @@ def normalize_nfl_schedule_metadata(
     canonical_venue = canonical_venue_name(
         raw.get("canonical_venue") or provider_venue
     )
+    city = _clean_metadata_text(raw.get("city"))
+    country = _clean_metadata_text(raw.get("country"))
+    if _country_is_explicitly_non_us(country):
+        raise ValueError(
+            "International NFL games are outside the U.S.-venue collection scope."
+        )
     return {
         "schedule_id": schedule_id or None,
         "away_team": away_team,
         "home_team": home_team,
         "canonical_venue": canonical_venue,
-        "city": _clean_metadata_text(raw.get("city")),
-        "country": _clean_metadata_text(raw.get("country")),
+        "city": city,
+        "country": country,
         "neutral_site": neutral_site,
         "provider_venue": _clean_metadata_text(provider_venue),
     }
@@ -1458,11 +1492,15 @@ def _nfl_home_context() -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     try:
         with model.getSession()() as session:
-            all_games = (
-                session.query(NFLEvent)
-                .order_by(NFLEvent.event_date)
-                .all()
-            )
+            all_games = [
+                game
+                for game in (
+                    session.query(NFLEvent)
+                    .order_by(NFLEvent.event_date)
+                    .all()
+                )
+                if not _country_is_explicitly_non_us(game.country)
+            ]
             upcoming_games = [
                 game
                 for game in all_games

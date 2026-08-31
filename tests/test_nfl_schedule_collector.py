@@ -4,9 +4,8 @@ import unittest
 from nfl_collector import DiscoveredNFLGame
 from nfl_schedule_collector import (
     EVENT_TIME_TOLERANCE_HOURS,
-    _schedule_collection_exit_code,
-    is_expected_vivid_provider_gap,
     ScheduledNFLGame,
+    is_us_venue_country,
     candidates_for_schedule_game,
     matchup_key_from_title,
     ordered_matchup_from_title,
@@ -27,6 +26,7 @@ class NFLScheduleParsingTests(unittest.TestCase):
         home: str,
         *,
         completed: bool = False,
+        country: str = "USA",
     ):
         return {
             "id": event_id,
@@ -35,7 +35,10 @@ class NFLScheduleParsingTests(unittest.TestCase):
             "competitions": [
                 {
                     "id": event_id,
-                    "venue": {"fullName": "Test Stadium"},
+                    "venue": {
+                        "fullName": "Test Stadium",
+                        "address": {"country": country},
+                    },
                     "status": {"type": {"completed": completed}},
                     "competitors": [
                         {
@@ -84,6 +87,13 @@ class NFLScheduleParsingTests(unittest.TestCase):
                     now + timedelta(hours=721),
                     "Miami Dolphins",
                     "New York Jets",
+                ),
+                self._event(
+                    "8",
+                    now + timedelta(hours=100),
+                    "San Francisco 49ers",
+                    "Los Angeles Rams",
+                    country="Australia",
                 ),
                 self._event(
                     "4",
@@ -159,51 +169,12 @@ class NFLScheduleParsingTests(unittest.TestCase):
         self.assertEqual(summary["in_window"]["6h"], 12)
         self.assertEqual(sum(summary["due_now"].values()), len(due))
 
-    def test_non_us_games_are_expected_vivid_provider_gaps(self):
-        foreign_game = ScheduledNFLGame(
-            schedule_id="international-australia",
-            event_date=datetime(2026, 9, 10, 0, 35, tzinfo=timezone.utc),
-            away_team="San Francisco 49ers",
-            home_team="Los Angeles Rams",
-            venue="Melbourne Cricket Ground",
-            name="San Francisco 49ers at Los Angeles Rams",
-            city="Melbourne",
-            country="Australia",
-            neutral_site=True,
-        )
-        domestic_game = ScheduledNFLGame(
-            schedule_id="domestic",
-            event_date=datetime(2026, 9, 13, 17, tzinfo=timezone.utc),
-            away_team="Buffalo Bills",
-            home_team="Houston Texans",
-            venue="Reliant Stadium",
-            name="Buffalo Bills at Houston Texans",
-            city="Houston",
-            country="USA",
-        )
-
-        self.assertTrue(is_expected_vivid_provider_gap(foreign_game))
-        self.assertFalse(is_expected_vivid_provider_gap(domestic_game))
-
-    def test_expected_provider_gap_does_not_fail_successful_domestic_collection(self):
-        self.assertEqual(
-            _schedule_collection_exit_code(15, 14, 1, [], []),
-            0,
-        )
-        self.assertEqual(
-            _schedule_collection_exit_code(12, 11, 0, [], []),
-            1,
-        )
-        self.assertEqual(
-            _schedule_collection_exit_code(
-                15,
-                14,
-                1,
-                [],
-                ["Domestic game: Vivid search failed"],
-            ),
-            1,
-        )
+    def test_explicit_non_us_venues_are_out_of_scope(self):
+        self.assertTrue(is_us_venue_country("USA"))
+        self.assertTrue(is_us_venue_country("United States"))
+        self.assertTrue(is_us_venue_country(""))
+        self.assertFalse(is_us_venue_country("Australia"))
+        self.assertFalse(is_us_venue_country("Brazil"))
 
 
 class NFLVividResolutionTests(unittest.TestCase):
