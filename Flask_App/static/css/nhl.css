@@ -434,3 +434,241 @@ body.nhl-theme {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* === NHL DISTINCT PALETTE START === */
+body.nhl-theme {
+  --nhl-graphite: #050c0e;
+  --nhl-charcoal: #07171a;
+  --nhl-teal-deep: #0b3a3e;
+  --nhl-teal: #24c7c9;
+  --nhl-ice: #87f2ef;
+  --nhl-amber: #f5ad42;
+  --nhl-amber-bright: #ffd06b;
+  --nfl-navy: #0b3438;
+  --nfl-navy-deep: #030b0d;
+  --nfl-navy-mid: #0a292d;
+  --nfl-blue: #24c7c9;
+  --nfl-red: #f5ad42;
+  --nfl-red-bright: #ffd06b;
+  --nfl-white: #f4ffff;
+  --nfl-silver: #cde7e8;
+  --nfl-muted: #8dafb2;
+  --bg: #03090b;
+  --bg-soft: #071619;
+  --surface: rgba(8, 31, 34, .88);
+  --surface-solid: #0a2326;
+  --surface-light: #10343a;
+  --line: rgba(201, 244, 244, .12);
+  --line-strong: rgba(201, 244, 244, .25);
+  --text: var(--nfl-white);
+  --muted: var(--nfl-muted);
+  --purple: var(--nhl-amber);
+  --purple-light: var(--nhl-amber-bright);
+  --cyan: var(--nhl-ice);
+  background:
+    radial-gradient(circle at 84% 10%, rgba(36, 199, 201, .22), transparent 31rem),
+    radial-gradient(circle at 10% 58%, rgba(245, 173, 66, .10), transparent 27rem),
+    linear-gradient(180deg, #02080a 0%, #071a1d 48%, #02080a 100%);
+}
+
+.nhl-theme .site-glow--one {
+  background: var(--nhl-teal);
+  opacity: .17;
+}
+
+.nhl-theme .site-glow--two {
+  background: var(--nhl-amber);
+  opacity: .09;
+}
+
+.nhl-theme .site-header::after {
+  background: linear-gradient(
+    90deg,
+    var(--nhl-amber) 0 11%,
+    #f4ffff 11% 16%,
+    var(--nhl-teal) 16% 100%
+  );
+}
+
+.nhl-theme .brand > span:last-child > span,
+.nhl-theme .nfl-hero h1 em,
+.nhl-theme .nfl-section-kicker,
+.nhl-theme .nfl-text-link span,
+.nhl-theme .nfl-window-badge strong {
+  color: var(--nhl-ice);
+}
+
+.nhl-theme .nfl-hero h1 em {
+  text-shadow: 0 10px 34px rgba(36, 199, 201, .24);
+}
+
+.nhl-theme .brand-mark,
+.nhl-theme .nfl-mini-shield.nhl-mini-mark {
+  background:
+    radial-gradient(circle at 34% 28%, rgba(255, 255, 255, .20), transparent 26%),
+    linear-gradient(155deg, #123a3d, #03090b 72%);
+  border-color: rgba(135, 242, 239, .50);
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 255, 255, .04),
+    0 9px 24px rgba(0, 0, 0, .34);
+}
+
+.nhl-theme .nfl-mini-shield.nhl-mini-mark i {
+  background: var(--nhl-amber);
+  box-shadow: 0 0 10px rgba(245, 173, 66, .34);
+}
+
+.nhl-theme .site-nav a.is-active::after {
+  background: var(--nhl-teal);
+  box-shadow: 0 0 15px rgba(36, 199, 201, .58);
+}
+
+.nhl-theme .nfl-live-tag,
+.nhl-theme .nfl-status {
+  border-color: rgba(135, 242, 239, .25);
+  background: rgba(36, 199, 201, .08);
+}
+
+.nhl-theme .nfl-live-tag i,
+.nhl-theme .nfl-status i {
+  background: var(--nhl-ice);
+  box-shadow: 0 0 13px rgba(135, 242, 239, .78);
+}
+
+.nhl-theme .nfl-button--primary {
+  color: #031214;
+  background: linear-gradient(135deg, #16aeb2, #75e9e5);
+  box-shadow:
+    0 16px 40px rgba(36, 199, 201, .24),
+    inset 0 1px rgba(255, 255, 255, .32);
+}
+
+.nhl-theme .nfl-button--primary:hover:not(:disabled) {
+  box-shadow:
+    0 20px 48px rgba(36, 199, 201, .34),
+    inset 0 1px rgba(255, 255, 255, .38);
+}
+
+.nhl-theme .nhl-scoreboard {
+  background:
+    linear-gradient(160deg, rgba(12, 57, 61, .98), rgba(3, 13, 15, .99)),
+    linear-gradient(90deg, rgba(36, 199, 201, .08), transparent);
+  border-color: rgba(135, 242, 239, .22);
+}
+
+.nhl-theme .nhl-scoreboard::before {
+  background: linear-gradient(
+    90deg,
+    var(--nhl-teal) 0 45%,
+    #f4ffff 45% 52%,
+    var(--nhl-amber) 52% 100%
+  );
+}
+
+.nhl-theme .nhl-scoreboard::after {
+  background: rgba(36, 199, 201, .24);
+}
+
+.nhl-theme .nhl-rink {
+  border-color: rgba(135, 242, 239, .18);
+  background: rgba(1, 10, 12, .42);
+}
+
+.nhl-theme .nhl-rink__ice > span,
+.nhl-theme .nhl-rink__ice > b {
+  background: rgba(5, 24, 27, .86);
+}
+
+.nhl-theme .nfl-data-bar > div::before {
+  background: linear-gradient(180deg, var(--nhl-teal), transparent);
+}
+
+.nhl-theme .nfl-playbook.nhl-playbook,
+.nhl-theme .nfl-selection-form,
+.nhl-theme .nfl-matchup-banner.nhl-matchup-banner,
+.nhl-theme .nfl-insight-card.nhl-insight-card {
+  border-color: rgba(135, 242, 239, .17);
+  background:
+    linear-gradient(150deg, rgba(10, 47, 51, .94), rgba(3, 15, 17, .97)),
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 52px,
+      rgba(255, 255, 255, .022) 52px 53px
+    );
+}
+
+.nhl-theme .nhl-puck-mark span,
+.nhl-theme .nhl-puck-icon {
+  border-color: rgba(135, 242, 239, .28);
+  box-shadow: 0 9px 17px rgba(0, 0, 0, .42);
+}
+
+.nhl-theme .nfl-field-control label > span,
+.nhl-theme .nfl-form__count {
+  color: #2c1a02;
+  background: rgba(245, 173, 66, .92);
+  border-color: rgba(255, 208, 107, .35);
+}
+
+.nhl-theme .nfl-map-launch,
+.nhl-theme .nfl-view-toggle,
+.nhl-theme .nfl-map-provider-link {
+  color: #a8fbf7;
+  border-color: rgba(36, 199, 201, .32);
+  background: rgba(36, 199, 201, .055);
+}
+
+.nhl-theme .nfl-map-launch:hover,
+.nhl-theme .nfl-view-toggle:hover,
+.nhl-theme .nfl-map-provider-link:hover {
+  border-color: rgba(135, 242, 239, .58);
+  background: rgba(36, 199, 201, .11);
+}
+
+.nhl-theme .nfl-interactive-chart .interactive-chart__line {
+  stroke: var(--nhl-teal);
+}
+
+.nhl-theme .nfl-interactive-chart .interactive-chart__area {
+  fill: rgba(36, 199, 201, .10);
+}
+
+.nhl-theme .nfl-interactive-chart .interactive-chart__point {
+  fill: var(--nhl-amber);
+  stroke: #fff7e8;
+}
+
+.nhl-theme .nfl-chart-guide__line,
+.nhl-theme .nfl-chart-guide__dot {
+  background: var(--nhl-teal);
+}
+
+.nhl-theme .nfl-chart-guide__kickoff {
+  border-color: var(--nhl-amber);
+}
+
+.nhl-theme .nhl-compaction-note {
+  border-color: rgba(36, 199, 201, .22);
+  background: rgba(36, 199, 201, .07);
+}
+
+.nhl-theme .nfl-stadium-map-stage {
+  background:
+    radial-gradient(circle at 50% 45%, rgba(36, 199, 201, .13), transparent 38%),
+    linear-gradient(180deg, rgba(5, 27, 30, .98), rgba(2, 10, 12, .99));
+}
+
+.nhl-theme .nfl-map-bowl-shadow {
+  fill: rgba(36, 199, 201, .18);
+}
+
+.nhl-theme .nfl-stadium-section.is-selected path {
+  fill: var(--nhl-amber);
+  stroke: #fffaf0;
+}
+
+.nhl-theme .nfl-stadium-section:hover path,
+.nhl-theme .nfl-stadium-section:focus path {
+  stroke: var(--nhl-ice);
+}
+/* === NHL DISTINCT PALETTE END === */
