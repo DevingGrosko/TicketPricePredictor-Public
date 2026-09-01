@@ -5,7 +5,6 @@ on:
     branches:
       - feature/nhl-ticket-tracking
     paths:
-      - ".github/nhl_feature.tar.b64"
       - ".github/workflows/integrate-nhl-feature.yml"
 
 permissions:
@@ -28,7 +27,7 @@ jobs:
       - name: Materialize NHL source files
         run: |
           mkdir -p /tmp/nhl-feature
-          base64 --decode .github/nhl_feature.tar.b64 > /tmp/nhl-feature.tar.gz
+          cat .github/nhl_payload/part-* | base64 --decode > /tmp/nhl-feature.tar.gz
           tar -xzf /tmp/nhl-feature.tar.gz -C /tmp/nhl-feature
 
           cp /tmp/nhl-feature/nhl_collector.py nhl_collector.py
