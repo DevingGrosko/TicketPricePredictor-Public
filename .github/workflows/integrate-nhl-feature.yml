@@ -40,9 +40,9 @@ jobs:
             .github/nhl_payload/part-03d \
             .github/nhl_payload/part-04 \
             > /tmp/nhl-feature.b64
-          echo "7950ae928b3abf24ea313a39f42f2eff1720b5bc446da88f9b45930d5fd7f934  /tmp/nhl-feature.b64" | sha256sum -c -
+          echo "8176b918a37c1f5f7b3b6493acb2ac78b96e995e91493c3ba0837635a8f42966  /tmp/nhl-feature.b64" | sha256sum -c -
           base64 --decode /tmp/nhl-feature.b64 > /tmp/nhl-feature.tar.gz
-          echo "1a8b95fa1971d963202748b4c524bc464ed2c39aebf0608a52c30b6b169292f9  /tmp/nhl-feature.tar.gz" | sha256sum -c -
+          echo "ad0e6da704dd248d40319b7d5d9ab937fab72c93633c746477c9f756f7623da4  /tmp/nhl-feature.tar.gz" | sha256sum -c -
           tar -xzf /tmp/nhl-feature.tar.gz -C /tmp/nhl-feature
 
           cp /tmp/nhl-feature/nhl_collector.py nhl_collector.py
