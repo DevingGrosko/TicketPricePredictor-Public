@@ -207,7 +207,7 @@ class FlaskProductionStartupTests(unittest.TestCase):
                     f"/nhl/map?team=Toronto%20Maple%20Leafs&game={nhl_event_id}"
                 )
                 assert nhl_map.status_code == 200
-                assert b"Interactive arena explorer" in nhl_map.data
+                assert b"Interactive section explorer" in nhl_map.data
                 assert b"Scotiabank Arena" in nhl_map.data
                 """
             )
