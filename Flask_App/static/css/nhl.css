@@ -422,3 +422,15 @@ body.nhl-theme {
   letter-spacing: .18em;
   text-anchor: middle;
 }
+
+.nhl-theme .nhl-scoreboard .nfl-scoreboard__footer {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 720px) {
+  .nhl-theme .nhl-scoreboard .nfl-scoreboard__footer {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

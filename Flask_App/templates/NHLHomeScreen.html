@@ -17,7 +17,7 @@
         <span>NHL market tracker</span>
         <span class="nfl-live-tag"><i></i> Live + historical</span>
       </div>
-      <h1>Follow the market.<br><em>From seven days to puck drop.</em></h1>
+      <h1>Follow the market.<br><em>From one month to puck drop.</em></h1>
       <p class="nfl-hero__lede">Track the lowest observed section price for U.S. and Canadian NHL games. Upcoming and completed games remain in one history, and all times are displayed in Eastern Time.</p>
       <div class="nfl-hero__actions">
         <a class="button nfl-button nfl-button--primary" href="#explore-nhl">Explore NHL games <span aria-hidden="true">&#8595;</span></a>
@@ -36,14 +36,14 @@
       <div class="nfl-scoreboard__topline">
         <div>
           <span>Market window</span>
-          <strong>Seven-day price movement</strong>
+          <strong>30-day price movement</strong>
         </div>
         <span class="nfl-status"><i></i> Schedule backed</span>
       </div>
 
       <div class="nfl-clock">
         <span>Tracking window</span>
-        <strong>168:00</strong>
+        <strong>720:00</strong>
         <small>Hours to puck drop</small>
       </div>
 
@@ -58,22 +58,24 @@
           <i class="nhl-rink__circle nhl-rink__circle--two"></i>
           <i class="nhl-rink__circle nhl-rink__circle--three"></i>
           <i class="nhl-rink__circle nhl-rink__circle--four"></i>
-          <span>7 DAYS</span>
+          <span>30 DAYS</span>
           <b>PUCK DROP</b>
         </div>
       </div>
 
       <div class="nfl-scoreboard__footer">
+        <div><span>Days 15–30</span><strong>Daily</strong></div>
+        <div><span>Days 8–14</span><strong>Every 12h</strong></div>
         <div><span>Days 4–7</span><strong>Every 6h</strong></div>
-        <div><span>Final 72h</span><strong>Every hour</strong></div>
+        <div><span>Final 72h</span><strong>Hourly</strong></div>
       </div>
     </div>
   </section>
 
   <section class="nfl-data-bar" id="how-nhl-works" aria-label="NHL tracker methodology">
-    <div><span>01</span><strong>Seven-day window</strong><small>Collection begins up to 168 hours before puck drop.</small></div>
-    <div><span>02</span><strong>Focused cadence</strong><small>Every six hours, then hourly throughout the final 72 hours.</small></div>
-    <div><span>03</span><strong>Conservative compaction</strong><small>After 14 days, final-day hourly detail stays; older hours are sampled at 3h and 6h intervals.</small></div>
+    <div><span>01</span><strong>One-month window</strong><small>Collection begins up to 720 hours before puck drop.</small></div>
+    <div><span>02</span><strong>Tiered cadence</strong><small>Daily, then every 12h, every 6h, and hourly in the final 72 hours.</small></div>
+    <div><span>03</span><strong>Conservative compaction</strong><small>After 14 days, the final day stays hourly while older history is sampled at 3h, 6h, and daily intervals.</small></div>
   </section>
 
   <section class="nfl-explore" id="explore-nhl">
@@ -92,8 +94,8 @@
         <h3>One market history for every tracked game.</h3>
         <p>The tracker uses the official NHL schedule to decide which games are due, then records Vivid section prices and available provider map geometry.</p>
         <div class="nfl-feature-list">
-          <div><span>168h</span><p><strong>Full seven-day window</strong><small>Early market through the final countdown.</small></p></div>
-          <div><span>6→1h</span><p><strong>Adaptive snapshots</strong><small>Hourly detail during the final 72 hours.</small></p></div>
+          <div><span>720h</span><p><strong>Full one-month window</strong><small>Long-range market movement through the final countdown.</small></p></div>
+          <div><span>24→1h</span><p><strong>Adaptive snapshots</strong><small>Daily, 12-hour, 6-hour, then hourly observations.</small></p></div>
           <div><span>14D</span><p><strong>Review before compaction</strong><small>Raw snapshots remain untouched for two weeks after the game.</small></p></div>
         </div>
         {% if compacted_count %}
@@ -107,7 +109,7 @@
           <span class="nfl-form__count">3 picks</span>
         </div>
         {% if not games_dict %}
-          <p class="nfl-form-note"><span aria-hidden="true">&#9432;</span> NHL collection will populate this page when games enter the seven-day window.</p>
+          <p class="nfl-form-note"><span aria-hidden="true">&#9432;</span> NHL collection will populate this page when games enter the 30-day window.</p>
         {% endif %}
         <div class="field nfl-field-control">
           <label for="nhl-team"><span>1</span> Home team</label>

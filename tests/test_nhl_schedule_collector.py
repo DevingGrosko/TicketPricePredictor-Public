@@ -75,9 +75,15 @@ class NHLScheduleCollectorTests(unittest.TestCase):
                         ),
                         self._game(
                             4,
-                            now + timedelta(hours=169),
+                            now + timedelta(hours=500),
                             "DAL",
                             "STL",
+                        ),
+                        self._game(
+                            5,
+                            now + timedelta(hours=721),
+                            "COL",
+                            "MIN",
                         ),
                     ],
                 }
@@ -85,47 +91,52 @@ class NHLScheduleCollectorTests(unittest.TestCase):
         }
 
         games = parse_schedule_payload(payload, now)
-        self.assertEqual([game.schedule_id for game in games], ["1", "2"])
+        self.assertEqual(
+            [game.schedule_id for game in games],
+            ["1", "2", "4"],
+        )
         self.assertEqual(games[0].country, "Canada")
         self.assertEqual(games[1].country, "USA")
         self.assertTrue(venue_timezone_is_supported("America/Toronto"))
         self.assertFalse(venue_timezone_is_supported("Europe/Helsinki"))
 
-    def test_official_schedule_pagination_is_deduplicated(self):
+    def test_official_schedule_pagination_covers_the_full_month(self):
         now = datetime(2026, 9, 20, 12, tzinfo=timezone.utc)
         calls = []
+        page_starts = [
+            "2026-09-20",
+            "2026-09-27",
+            "2026-10-04",
+            "2026-10-11",
+            "2026-10-18",
+        ]
+        lead_hours = [24, 180, 348, 516, 684]
 
         def fetcher(url, timeout):
             calls.append(url)
-            if url.endswith("2026-09-20"):
-                return {
-                    "nextStartDate": "2026-09-27",
-                    "gameWeek": [
-                        {
-                            "date": "2026-09-21",
-                            "games": [
-                                self._game(
-                                    1,
-                                    now + timedelta(hours=24),
-                                    "BOS",
-                                    "TOR",
-                                    venue_timezone="America/Toronto",
-                                )
-                            ],
-                        }
-                    ],
-                }
+            current = url.rsplit("/", 1)[-1]
+            index = page_starts.index(current)
+            next_start = (
+                page_starts[index + 1]
+                if index + 1 < len(page_starts)
+                else "2026-10-25"
+            )
             return {
-                "nextStartDate": "2026-10-04",
+                "nextStartDate": next_start,
                 "gameWeek": [
                     {
-                        "date": "2026-09-27",
+                        "date": current,
                         "games": [
                             self._game(
-                                2,
-                                now + timedelta(hours=160),
-                                "NYR",
-                                "BOS",
+                                index + 1,
+                                now + timedelta(hours=lead_hours[index]),
+                                "BOS" if index % 2 == 0 else "NYR",
+                                "TOR" if index % 2 == 0 else "BOS",
+                                venue_timezone=(
+                                    "America/Toronto"
+                                    if index % 2 == 0
+                                    else "America/New_York"
+                                ),
                             )
                         ],
                     }
@@ -134,45 +145,48 @@ class NHLScheduleCollectorTests(unittest.TestCase):
 
         games, sources = fetch_schedule_games(
             now,
-            horizon_hours=168,
+            horizon_hours=720,
             fetcher=fetcher,
         )
-        self.assertEqual([game.schedule_id for game in games], ["1", "2"])
-        self.assertEqual(len(sources), 2)
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(
+            [game.schedule_id for game in games],
+            ["1", "2", "3", "4", "5"],
+        )
+        self.assertEqual(len(sources), 5)
+        self.assertEqual(len(calls), 5)
 
     def test_due_filter_and_summary_apply_agreed_cadence(self):
         slot = datetime(2026, 9, 20, 12, tzinfo=timezone.utc)
-        games = [
-            ScheduledNHLGame(
-                schedule_id="hourly",
-                event_date=slot + timedelta(hours=48),
-                away_team="Boston Bruins",
-                home_team="Toronto Maple Leafs",
-                venue="Scotiabank Arena",
-                name="Boston Bruins at Toronto Maple Leafs",
-                venue_timezone="America/Toronto",
-                country="Canada",
-            )
-        ] + [
-            ScheduledNHLGame(
-                schedule_id=f"early-{index}",
-                event_date=slot + timedelta(hours=120),
-                away_team="New York Rangers",
-                home_team="Boston Bruins",
-                venue="TD Garden",
-                name="New York Rangers at Boston Bruins",
-                venue_timezone="America/New_York",
-                country="USA",
-            )
-            for index in range(12)
-        ]
+        tier_specs = (
+            ("hourly", 48, 1),
+            ("six-hour", 120, 12),
+            ("twelve-hour", 240, 12),
+            ("daily", 500, 24),
+        )
+        games = []
+        for prefix, lead, count in tier_specs:
+            for index in range(count):
+                games.append(
+                    ScheduledNHLGame(
+                        schedule_id=f"{prefix}-{index}",
+                        event_date=slot + timedelta(hours=lead),
+                        away_team="New York Rangers",
+                        home_team="Boston Bruins",
+                        venue="TD Garden",
+                        name="New York Rangers at Boston Bruins",
+                        venue_timezone="America/New_York",
+                        country="USA",
+                    )
+                )
+
         due = schedule_games_due(games, slot)
-        self.assertIn("hourly", {game.schedule_id for game in due})
+        self.assertIn("hourly-0", {game.schedule_id for game in due})
         self.assertLess(len(due), len(games))
         summary = schedule_cadence_summary(games, slot)
-        self.assertEqual(summary["in_window"]["1h"], 1)
-        self.assertEqual(summary["in_window"]["6h"], 12)
+        self.assertEqual(
+            summary["in_window"],
+            {"1h": 1, "6h": 12, "12h": 12, "24h": 24},
+        )
         self.assertEqual(sum(summary["due_now"].values()), len(due))
 
     def test_vivid_candidates_require_away_home_order_and_prefer_local_date(self):

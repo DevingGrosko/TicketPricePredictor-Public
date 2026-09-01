@@ -32,10 +32,11 @@ from nhl_collector import (
     DEFAULT_PENDING_DIR,
     DEFAULT_SMOKE_OUTPUT,
     NHL_CAPTURE_WINDOW_HOURS,
-    NHL_EARLY_CADENCE_HOURS,
+    NHL_DAILY_CADENCE_HOURS,
     NHL_FINAL_CADENCE_HOURS,
-    NHL_HOURLY_WINDOW_HOURS,
+    NHL_SIX_HOUR_CADENCE_HOURS,
     NHL_TEAM_NAMES,
+    NHL_TWELVE_HOUR_CADENCE_HOURS,
     DiscoveredNHLGame,
     NHLSnapshotParser,
     VividNFLBrowser,
@@ -56,7 +57,7 @@ NHL_SCHEDULE_URL = "https://api-web.nhle.com/v1/schedule/{date}"
 DEFAULT_SCHEDULE_HEALTH_OUTPUT = Path("nhl_schedule_health.json")
 SCHEDULE_REQUEST_TIMEOUT_SECONDS = 20
 SCHEDULE_REQUEST_ATTEMPTS = 3
-MAX_SCHEDULE_PAGES = 3
+MAX_SCHEDULE_PAGES = 8
 VIVID_SEARCH_SETTLE_SECONDS = 2.0
 VIVID_SEARCH_MAX_SECONDS = 18
 EVENT_TIME_TOLERANCE_HOURS = 18
@@ -391,18 +392,18 @@ def schedule_cadence_summary(
     schedule: list[ScheduledNHLGame],
     capture_slot: datetime,
 ) -> dict[str, dict[str, int]]:
-    in_window = {"1h": 0, "6h": 0}
-    due = {"1h": 0, "6h": 0}
+    labels = ("1h", "6h", "12h", "24h")
+    in_window = {label: 0 for label in labels}
+    due = {label: 0 for label in labels}
     for game in schedule:
         interval = nhl_capture_interval_hours(game.event_date, capture_slot)
         if interval is None:
             continue
         label = f"{interval}h"
-        in_window[label] += 1
+        in_window[label] = in_window.get(label, 0) + 1
         if nhl_capture_is_due(game.event_date, capture_slot, game.schedule_id):
-            due[label] += 1
+            due[label] = due.get(label, 0) + 1
     return {"in_window": in_window, "due_now": due}
-
 
 def _dedupe_candidates(
     rows: Iterable[DiscoveredNHLGame],
@@ -640,7 +641,7 @@ def run_schedule_collector(
         resolutions, search_errors = [], []
         print(
             f"No NHL games are due in this cadence slot; "
-            f"{len(schedule)} remain inside the seven-day window.",
+            f"{len(schedule)} remain inside the 30-day window.",
             flush=True,
         )
 
@@ -678,7 +679,7 @@ def run_schedule_collector(
                 datetime.now(timezone.utc),
             ):
                 raise ValueError(
-                    "Resolved Vivid event is outside the exact seven-day window."
+                    "Resolved Vivid event is outside the exact 30-day window."
                 )
 
             payload = nhl_snapshot_to_payload(
@@ -774,7 +775,9 @@ def run_schedule_collector(
         "capture_slot": eastern_iso(capture_slot),
         "capture_window_hours": NHL_CAPTURE_WINDOW_HOURS,
         "cadence_policy": {
-            "days_4_to_7_hours": NHL_EARLY_CADENCE_HOURS,
+            "days_15_to_30_hours": NHL_DAILY_CADENCE_HOURS,
+            "days_8_to_14_hours": NHL_TWELVE_HOUR_CADENCE_HOURS,
+            "days_4_to_7_hours": NHL_SIX_HOUR_CADENCE_HOURS,
             "final_72_hours": NHL_FINAL_CADENCE_HOURS,
             "staggering": "deterministic per NHL game ID",
         },
@@ -800,7 +803,7 @@ def run_schedule_collector(
     print(
         "NHL schedule-backed collection finished: "
         f"{captured}/{expected} due games captured ({coverage:.2f}% coverage); "
-        f"{len(schedule)} games remain inside the seven-day window, "
+        f"{len(schedule)} games remain inside the 30-day window, "
         f"{len(unresolved)} unresolved, {queued} queued, {replayed} replayed.",
         flush=True,
     )

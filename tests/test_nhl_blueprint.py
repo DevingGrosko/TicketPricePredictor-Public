@@ -15,6 +15,7 @@ from Flask_App.nhl_blueprint import (
     NHLEvent,
     NHLIteration,
     NHLTicket,
+    NHL_CAPTURE_WINDOW_HOURS,
     _SCHEMA_READY,
     compact_completed_nhl_games,
     nhl_blueprint,
@@ -180,7 +181,12 @@ class NHLBlueprintTests(unittest.TestCase):
                     )
                     session.add(event)
                     session.flush()
-                    lead_hours = list(range(1, 73)) + list(range(78, 169, 6))
+                    lead_hours = (
+                        list(range(1, 73))
+                        + list(range(78, 169, 6))
+                        + list(range(180, 337, 12))
+                        + list(range(360, 721, 24))
+                    )
                     for lead in lead_hours:
                         captured = event_time.astimezone(timezone.utc) - timedelta(hours=lead)
                         iteration = NHLIteration(
@@ -196,11 +202,19 @@ class NHLBlueprintTests(unittest.TestCase):
                         )
                         session.add(iteration)
                     session.commit()
-                    iterations = sorted(event.iterations, key=lambda item: item.captured_at)
-                    self.assertEqual(len(iterations), 88)
+                    iterations = sorted(
+                        event.iterations,
+                        key=lambda item: item.captured_at,
+                    )
+                    self.assertEqual(len(iterations), 118)
                     self.assertEqual(
-                        len(select_nhl_compaction_iteration_ids(event.event_date, iterations)),
-                        56,
+                        len(
+                            select_nhl_compaction_iteration_ids(
+                                event.event_date,
+                                iterations,
+                            )
+                        ),
+                        79,
                     )
             finally:
                 model.engine.dispose()
@@ -209,10 +223,11 @@ class NHLBlueprintTests(unittest.TestCase):
                 now=event_time.astimezone(timezone.utc) + timedelta(days=15),
                 db_path=db_path,
             )
+            self.assertEqual(NHL_CAPTURE_WINDOW_HOURS, 720)
             self.assertEqual(report["games_compacted"], 1)
-            self.assertEqual(report["iterations_before"], 88)
-            self.assertEqual(report["iterations_retained"], 56)
-            self.assertEqual(report["iterations_deleted"], 32)
+            self.assertEqual(report["iterations_before"], 118)
+            self.assertEqual(report["iterations_retained"], 79)
+            self.assertEqual(report["iterations_deleted"], 39)
 
             _SCHEMA_READY.discard(str(db_path.resolve()))
             model = CreateNHLModel(db_path)
@@ -220,10 +235,10 @@ class NHLBlueprintTests(unittest.TestCase):
                 with model.getSession()() as session:
                     event = session.query(NHLEvent).one()
                     self.assertIsNotNone(event.compacted_at)
-                    self.assertEqual(event.original_iteration_count, 88)
-                    self.assertEqual(event.retained_iteration_count, 56)
-                    self.assertEqual(session.query(NHLIteration).count(), 56)
-                    self.assertEqual(session.query(NHLTicket).count(), 56)
+                    self.assertEqual(event.original_iteration_count, 118)
+                    self.assertEqual(event.retained_iteration_count, 79)
+                    self.assertEqual(session.query(NHLIteration).count(), 79)
+                    self.assertEqual(session.query(NHLTicket).count(), 79)
             finally:
                 model.engine.dispose()
                 _SCHEMA_READY.discard(str(db_path.resolve()))

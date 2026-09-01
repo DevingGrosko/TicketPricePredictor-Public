@@ -55,13 +55,15 @@ DEFAULT_NHL_AUDIT_DIR = PROJECT_DIR / "nhl_audit"
 DEFAULT_NHL_BACKUP_DIR = PROJECT_DIR / "nhl_backups"
 NHL_BACKUP_RETENTION_DAYS = 7
 NHL_AUDIT_RETENTION_DAYS = 30
-NHL_CAPTURE_WINDOW_HOURS = 7 * 24
+NHL_CAPTURE_WINDOW_HOURS = 30 * 24
 MAX_SNAPSHOT_REPLAY_AGE = timedelta(days=7)
 MAX_SNAPSHOT_CLOCK_SKEW = timedelta(minutes=5)
 NHL_COMPACTION_DELAY = timedelta(days=14)
 NHL_COMPACTION_FINAL_HOURLY_HOURS = 24
 NHL_COMPACTION_MIDDLE_INTERVAL_HOURS = 3
-NHL_COMPACTION_EARLY_INTERVAL_HOURS = 6
+NHL_COMPACTION_WEEK_INTERVAL_HOURS = 6
+NHL_COMPACTION_DAILY_BOUNDARY_HOURS = 7 * 24
+NHL_COMPACTION_LONG_RANGE_INTERVAL_HOURS = 24
 NHL_URL_PATTERN = re.compile(r"/production/(\d+)(?:[/?#]|$)", flags=re.IGNORECASE)
 
 NHL_TEAM_NAMES = frozenset(
@@ -728,13 +730,15 @@ def _compaction_target(hours_before: float) -> tuple[int, int] | None:
     if hours_before <= 72:
         interval = NHL_COMPACTION_MIDDLE_INTERVAL_HOURS
         boundary = NHL_COMPACTION_FINAL_HOURLY_HOURS
-    else:
-        interval = NHL_COMPACTION_EARLY_INTERVAL_HOURS
+    elif hours_before <= NHL_COMPACTION_DAILY_BOUNDARY_HOURS:
+        interval = NHL_COMPACTION_WEEK_INTERVAL_HOURS
         boundary = 72
+    else:
+        interval = NHL_COMPACTION_LONG_RANGE_INTERVAL_HOURS
+        boundary = NHL_COMPACTION_DAILY_BOUNDARY_HOURS
     bucket = max(1, math.ceil((hours_before - boundary) / interval))
     target = boundary + bucket * interval
     return interval, target
-
 
 def select_nhl_compaction_iteration_ids(
     event_date: datetime,
@@ -780,7 +784,8 @@ def compact_completed_nhl_games(
     The retained shape is intentionally conservative:
     * all hourly observations in the final 24 hours;
     * one representative observation every 3 hours from 24 to 72 hours;
-    * one representative observation every 6 hours earlier in the week.
+    * one representative observation every 6 hours from 72 to 168 hours;
+    * one representative daily observation from 7 to 30 days.
     """
 
     now = now or datetime.now(timezone.utc)
@@ -879,7 +884,7 @@ def ingest_nhl_snapshot():
         if event_date_utc - captured_at_utc > timedelta(
             hours=NHL_CAPTURE_WINDOW_HOURS
         ):
-            raise ValueError("The NHL game is outside the seven-day capture window.")
+            raise ValueError("The NHL game is outside the 30-day capture window.")
 
         create_nhl_daily_backup(now=now)
         try:
