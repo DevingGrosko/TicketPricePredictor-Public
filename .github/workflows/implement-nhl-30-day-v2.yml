@@ -1,0 +1,706 @@
+name: Implement NHL 30-day cadence v2
+
+on:
+  push:
+    branches:
+      - feature/nhl-30-day-tiered-cadence
+    paths:
+      - ".github/workflows/implement-nhl-30-day-v2.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/nhl-30-day-tiered-cadence
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Extend NHL collection and retention to 30 days
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          def replace_once(path: str, old: str, new: str, label: str) -> None:
+              file = Path(path)
+              source = file.read_text(encoding="utf-8")
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(
+                      f"Expected exactly one {label} in {path}, found {count}"
+                  )
+              file.write_text(source.replace(old, new, 1), encoding="utf-8")
+
+          def regex_once(path: str, pattern: str, replacement: str, label: str) -> None:
+              file = Path(path)
+              source = file.read_text(encoding="utf-8")
+              updated, count = re.subn(pattern, replacement, source, count=1, flags=re.S)
+              if count != 1:
+                  raise SystemExit(
+                      f"Expected exactly one {label} in {path}, found {count}"
+                  )
+              file.write_text(updated, encoding="utf-8")
+
+          replace_once(
+              "nhl_collector.py",
+              '''"""Collect Vivid Seats NHL section prices and provider map geometry.
+
+          NHL games are sampled during the final seven days before puck drop. Games more
+          than 72 hours away are sampled every six hours; the final 72 hours are sampled
+          once per hour. Collection stops at the scheduled start time.
+          """''',
+              '''"""Collect Vivid Seats NHL section prices and provider map geometry.
+
+          NHL games are sampled during the final 30 days before puck drop. Collection is
+          daily from 30 to 14 days, every 12 hours from 14 to 7 days, every 6 hours from
+          7 days to 72 hours, and hourly throughout the final 72 hours. Collection stops
+          at the scheduled start time.
+          """''',
+              "collector module description",
+          )
+          replace_once(
+              "nhl_collector.py",
+              '''NHL_CAPTURE_WINDOW_HOURS = 7 * 24
+          NHL_HOURLY_WINDOW_HOURS = 72
+          NHL_EARLY_CADENCE_HOURS = 6
+          NHL_FINAL_CADENCE_HOURS = 1
+          DISCOVERY_HORIZON_DAYS = 7''',
+              '''NHL_CAPTURE_WINDOW_HOURS = 30 * 24
+          NHL_HOURLY_WINDOW_HOURS = 72
+          NHL_SIX_HOUR_WINDOW_HOURS = 7 * 24
+          NHL_TWELVE_HOUR_WINDOW_HOURS = 14 * 24
+          NHL_FINAL_CADENCE_HOURS = 1
+          NHL_SIX_HOUR_CADENCE_HOURS = 6
+          NHL_TWELVE_HOUR_CADENCE_HOURS = 12
+          NHL_DAILY_CADENCE_HOURS = 24
+          DISCOVERY_HORIZON_DAYS = 30''',
+              "collector cadence constants",
+          )
+          regex_once(
+              "nhl_collector.py",
+              r'''def nhl_capture_interval_hours\(event_date: datetime, now: datetime\) -> int \| None:.*?(?=\n\ndef nhl_capture_phase)''',
+              '''def nhl_capture_interval_hours(event_date: datetime, now: datetime) -> int | None:
+              hours_until = (
+                  as_utc(event_date) - now.astimezone(timezone.utc)
+              ).total_seconds() / 3600
+              if not 0 < hours_until <= NHL_CAPTURE_WINDOW_HOURS:
+                  return None
+              if hours_until <= NHL_HOURLY_WINDOW_HOURS:
+                  return NHL_FINAL_CADENCE_HOURS
+              if hours_until <= NHL_SIX_HOUR_WINDOW_HOURS:
+                  return NHL_SIX_HOUR_CADENCE_HOURS
+              if hours_until <= NHL_TWELVE_HOUR_WINDOW_HOURS:
+                  return NHL_TWELVE_HOUR_CADENCE_HOURS
+              return NHL_DAILY_CADENCE_HOURS
+
+
+          def nhl_capture_tier(event_date: datetime, now: datetime) -> str | None:
+              interval = nhl_capture_interval_hours(event_date, now)
+              return {
+                  NHL_FINAL_CADENCE_HOURS: "final_72_hours_hourly",
+                  NHL_SIX_HOUR_CADENCE_HOURS: "days_4_to_7_every_6_hours",
+                  NHL_TWELVE_HOUR_CADENCE_HOURS: "days_8_to_14_every_12_hours",
+                  NHL_DAILY_CADENCE_HOURS: "days_15_to_30_daily",
+              }.get(interval)''',
+              "collector cadence functions",
+          )
+
+          replace_once(
+              "nhl_schedule_collector.py",
+              '''    NHL_CAPTURE_WINDOW_HOURS,
+              NHL_EARLY_CADENCE_HOURS,
+              NHL_FINAL_CADENCE_HOURS,
+              NHL_HOURLY_WINDOW_HOURS,
+              NHL_TEAM_NAMES,''',
+              '''    NHL_CAPTURE_WINDOW_HOURS,
+              NHL_DAILY_CADENCE_HOURS,
+              NHL_FINAL_CADENCE_HOURS,
+              NHL_SIX_HOUR_CADENCE_HOURS,
+              NHL_TEAM_NAMES,
+              NHL_TWELVE_HOUR_CADENCE_HOURS,''',
+              "schedule cadence imports",
+          )
+          replace_once(
+              "nhl_schedule_collector.py",
+              "MAX_SCHEDULE_PAGES = 3",
+              "MAX_SCHEDULE_PAGES = 8",
+              "schedule page cap",
+          )
+          regex_once(
+              "nhl_schedule_collector.py",
+              r'''def schedule_cadence_summary\(.*?(?=\n\ndef _dedupe_candidates)''',
+              '''def schedule_cadence_summary(
+              schedule: list[ScheduledNHLGame],
+              capture_slot: datetime,
+          ) -> dict[str, dict[str, int]]:
+              labels = ("1h", "6h", "12h", "24h")
+              in_window = {label: 0 for label in labels}
+              due = {label: 0 for label in labels}
+              for game in schedule:
+                  interval = nhl_capture_interval_hours(game.event_date, capture_slot)
+                  if interval is None:
+                      continue
+                  label = f"{interval}h"
+                  in_window[label] = in_window.get(label, 0) + 1
+                  if nhl_capture_is_due(game.event_date, capture_slot, game.schedule_id):
+                      due[label] = due.get(label, 0) + 1
+              return {"in_window": in_window, "due_now": due}''',
+              "schedule cadence summary",
+          )
+          replace_once(
+              "nhl_schedule_collector.py",
+              '''        "cadence_policy": {
+                      "days_4_to_7_hours": NHL_EARLY_CADENCE_HOURS,
+                      "final_72_hours": NHL_FINAL_CADENCE_HOURS,
+                      "staggering": "deterministic per NHL game ID",
+                  },''',
+              '''        "cadence_policy": {
+                      "days_15_to_30_hours": NHL_DAILY_CADENCE_HOURS,
+                      "days_8_to_14_hours": NHL_TWELVE_HOUR_CADENCE_HOURS,
+                      "days_4_to_7_hours": NHL_SIX_HOUR_CADENCE_HOURS,
+                      "final_72_hours": NHL_FINAL_CADENCE_HOURS,
+                      "staggering": "deterministic per NHL game ID",
+                  },''',
+              "schedule health cadence policy",
+          )
+          schedule_path = Path("nhl_schedule_collector.py")
+          schedule_source = schedule_path.read_text(encoding="utf-8")
+          schedule_source = schedule_source.replace("seven-day window", "30-day window")
+          schedule_path.write_text(schedule_source, encoding="utf-8")
+
+          replace_once(
+              "Flask_App/nhl_blueprint.py",
+              '''NHL_CAPTURE_WINDOW_HOURS = 7 * 24
+          MAX_SNAPSHOT_REPLAY_AGE = timedelta(days=7)
+          MAX_SNAPSHOT_CLOCK_SKEW = timedelta(minutes=5)
+          NHL_COMPACTION_DELAY = timedelta(days=14)
+          NHL_COMPACTION_FINAL_HOURLY_HOURS = 24
+          NHL_COMPACTION_MIDDLE_INTERVAL_HOURS = 3
+          NHL_COMPACTION_EARLY_INTERVAL_HOURS = 6''',
+              '''NHL_CAPTURE_WINDOW_HOURS = 30 * 24
+          MAX_SNAPSHOT_REPLAY_AGE = timedelta(days=7)
+          MAX_SNAPSHOT_CLOCK_SKEW = timedelta(minutes=5)
+          NHL_COMPACTION_DELAY = timedelta(days=14)
+          NHL_COMPACTION_FINAL_HOURLY_HOURS = 24
+          NHL_COMPACTION_MIDDLE_INTERVAL_HOURS = 3
+          NHL_COMPACTION_WEEK_INTERVAL_HOURS = 6
+          NHL_COMPACTION_DAILY_BOUNDARY_HOURS = 7 * 24
+          NHL_COMPACTION_LONG_RANGE_INTERVAL_HOURS = 24''',
+              "web capture and compaction constants",
+          )
+          regex_once(
+              "Flask_App/nhl_blueprint.py",
+              r'''def _compaction_target\(hours_before: float\) -> tuple\[int, int\] \| None:.*?(?=\n\ndef select_nhl_compaction_iteration_ids)''',
+              '''def _compaction_target(hours_before: float) -> tuple[int, int] | None:
+              if hours_before <= NHL_COMPACTION_FINAL_HOURLY_HOURS:
+                  return None
+              if hours_before <= 72:
+                  interval = NHL_COMPACTION_MIDDLE_INTERVAL_HOURS
+                  boundary = NHL_COMPACTION_FINAL_HOURLY_HOURS
+              elif hours_before <= NHL_COMPACTION_DAILY_BOUNDARY_HOURS:
+                  interval = NHL_COMPACTION_WEEK_INTERVAL_HOURS
+                  boundary = 72
+              else:
+                  interval = NHL_COMPACTION_LONG_RANGE_INTERVAL_HOURS
+                  boundary = NHL_COMPACTION_DAILY_BOUNDARY_HOURS
+              bucket = max(1, math.ceil((hours_before - boundary) / interval))
+              target = boundary + bucket * interval
+              return interval, target''',
+              "compaction bucket selection",
+          )
+          replace_once(
+              "Flask_App/nhl_blueprint.py",
+              '''    The retained shape is intentionally conservative:
+              * all hourly observations in the final 24 hours;
+              * one representative observation every 3 hours from 24 to 72 hours;
+              * one representative observation every 6 hours earlier in the week.
+              """''',
+              '''    The retained shape is intentionally conservative:
+              * all hourly observations in the final 24 hours;
+              * one representative observation every 3 hours from 24 to 72 hours;
+              * one representative observation every 6 hours from 72 to 168 hours;
+              * one representative daily observation from 7 to 30 days.
+              """''',
+              "compaction policy documentation",
+          )
+          blueprint_path = Path("Flask_App/nhl_blueprint.py")
+          blueprint_source = blueprint_path.read_text(encoding="utf-8")
+          blueprint_source = blueprint_source.replace(
+              "The NHL game is outside the seven-day capture window.",
+              "The NHL game is outside the 30-day capture window.",
+          )
+          blueprint_path.write_text(blueprint_source, encoding="utf-8")
+
+          home_path = Path("Flask_App/templates/NHLHomeScreen.html")
+          home = home_path.read_text(encoding="utf-8")
+          replacements = {
+              "From seven days to puck drop.": "From one month to puck drop.",
+              "Seven-day price movement": "30-day price movement",
+              "<strong>168:00</strong>": "<strong>720:00</strong>",
+              "<span>7 DAYS</span>": "<span>30 DAYS</span>",
+              "<div><span>Days 4–7</span><strong>Every 6h</strong></div>\n        <div><span>Final 72h</span><strong>Every hour</strong></div>": "<div><span>Days 15–30</span><strong>Daily</strong></div>\n        <div><span>Days 8–14</span><strong>Every 12h</strong></div>\n        <div><span>Days 4–7</span><strong>Every 6h</strong></div>\n        <div><span>Final 72h</span><strong>Hourly</strong></div>",
+              "<strong>Seven-day window</strong><small>Collection begins up to 168 hours before puck drop.</small>": "<strong>One-month window</strong><small>Collection begins up to 720 hours before puck drop.</small>",
+              "<strong>Focused cadence</strong><small>Every six hours, then hourly throughout the final 72 hours.</small>": "<strong>Tiered cadence</strong><small>Daily, then every 12h, every 6h, and hourly in the final 72 hours.</small>",
+              "After 14 days, final-day hourly detail stays; older hours are sampled at 3h and 6h intervals.": "After 14 days, the final day stays hourly while older history is sampled at 3h, 6h, and daily intervals.",
+              "<div><span>168h</span><p><strong>Full seven-day window</strong><small>Early market through the final countdown.</small></p></div>": "<div><span>720h</span><p><strong>Full one-month window</strong><small>Long-range market movement through the final countdown.</small></p></div>",
+              "<div><span>6→1h</span><p><strong>Adaptive snapshots</strong><small>Hourly detail during the final 72 hours.</small></p></div>": "<div><span>24→1h</span><p><strong>Adaptive snapshots</strong><small>Daily, 12-hour, 6-hour, then hourly observations.</small></p></div>",
+              "NHL collection will populate this page when games enter the seven-day window.": "NHL collection will populate this page when games enter the 30-day window.",
+          }
+          for old, new in replacements.items():
+              count = home.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected one NHL homepage phrase {old!r}, found {count}")
+              home = home.replace(old, new, 1)
+          home_path.write_text(home, encoding="utf-8")
+
+          graph_path = Path("Flask_App/templates/nhl_graph.html")
+          graph = graph_path.read_text(encoding="utf-8")
+          graph_replacements = {
+              "<strong>7D</strong>": "<strong>30D</strong>",
+              "<small>6h → hourly</small>": "<small>24h → 12h → 6h → 1h</small>",
+              "<div><dt>168h</dt><dd>Maximum lookback</dd></div>": "<div><dt>720h</dt><dd>Maximum lookback</dd></div>",
+              "<div><dt>6h/1h</dt><dd>Collection interval</dd></div>": "<div><dt>24/12/6/1h</dt><dd>Collection intervals</dd></div>",
+              "Final-day hourly observations remain intact; earlier history is retained at representative 3-hour and 6-hour intervals.": "The final day remains hourly; earlier history is retained at representative 3-hour, 6-hour, and daily intervals.",
+          }
+          for old, new in graph_replacements.items():
+              count = graph.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected one NHL graph phrase {old!r}, found {count}")
+              graph = graph.replace(old, new, 1)
+          graph_path.write_text(graph, encoding="utf-8")
+
+          css_path = Path("Flask_App/static/css/nhl.css")
+          css_source = css_path.read_text(encoding="utf-8")
+          css_addition = '''
+
+          .nhl-theme .nhl-scoreboard .nfl-scoreboard__footer {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 12px;
+          }
+
+          @media (max-width: 720px) {
+            .nhl-theme .nhl-scoreboard .nfl-scoreboard__footer {
+              grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+          }
+          '''.strip()
+          if ".nhl-scoreboard .nfl-scoreboard__footer" not in css_source:
+              css_path.write_text(
+                  css_source.rstrip() + "\n\n" + css_addition + "\n",
+                  encoding="utf-8",
+              )
+
+          replace_once(
+              "tests/test_nhl_collector.py",
+              '''    nhl_capture_interval_hours,
+              nhl_capture_is_due,
+              nhl_snapshot_to_payload,''',
+              '''    nhl_capture_interval_hours,
+              nhl_capture_is_due,
+              nhl_capture_tier,
+              nhl_snapshot_to_payload,''',
+              "collector test imports",
+          )
+          regex_once(
+              "tests/test_nhl_collector.py",
+              r'''    def test_cadence_is_six_hours_then_hourly_for_final_72_hours\(self\):.*?(?=\n    def test_payload_marks_nhl_currency_and_schedule)''',
+              '''    def test_cadence_tiers_cover_the_full_thirty_day_window(self):
+              slot = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
+              expected = {
+                  720: (24, "days_15_to_30_daily"),
+                  336: (12, "days_8_to_14_every_12_hours"),
+                  168: (6, "days_4_to_7_every_6_hours"),
+                  72: (1, "final_72_hours_hourly"),
+              }
+              for lead_hours, (interval, tier) in expected.items():
+                  event_date = slot + timedelta(hours=lead_hours)
+                  with self.subTest(lead_hours=lead_hours):
+                      self.assertEqual(
+                          nhl_capture_interval_hours(event_date, slot),
+                          interval,
+                      )
+                      self.assertEqual(nhl_capture_tier(event_date, slot), tier)
+
+              self.assertTrue(
+                  nhl_capture_is_due(
+                      slot + timedelta(hours=48),
+                      slot,
+                      "hourly-game",
+                  )
+              )
+              self.assertIsNone(
+                  nhl_capture_interval_hours(slot + timedelta(hours=721), slot)
+              )
+          ''',
+              "collector cadence test",
+          )
+
+          schedule_scope_test = '''    def test_schedule_includes_us_and_canada_but_excludes_global_series(self):
+              now = datetime(2026, 9, 20, 12, tzinfo=timezone.utc)
+              payload = {
+                  "gameWeek": [
+                      {
+                          "date": "2026-09-21",
+                          "games": [
+                              self._game(
+                                  1,
+                                  now + timedelta(hours=24),
+                                  "BOS",
+                                  "TOR",
+                                  venue="Scotiabank Arena",
+                                  venue_timezone="America/Toronto",
+                              ),
+                              self._game(
+                                  2,
+                                  now + timedelta(hours=48),
+                                  "NYR",
+                                  "BOS",
+                                  venue="TD Garden",
+                                  venue_timezone="America/New_York",
+                              ),
+                              self._game(
+                                  3,
+                                  now + timedelta(hours=72),
+                                  "CAR",
+                                  "SEA",
+                                  venue="Helsinki Ice Hall",
+                                  venue_timezone="Europe/Helsinki",
+                                  neutral=True,
+                              ),
+                              self._game(
+                                  4,
+                                  now + timedelta(hours=500),
+                                  "DAL",
+                                  "STL",
+                              ),
+                              self._game(
+                                  5,
+                                  now + timedelta(hours=721),
+                                  "COL",
+                                  "MIN",
+                              ),
+                          ],
+                      }
+                  ]
+              }
+
+              games = parse_schedule_payload(payload, now)
+              self.assertEqual(
+                  [game.schedule_id for game in games],
+                  ["1", "2", "4"],
+              )
+              self.assertEqual(games[0].country, "Canada")
+              self.assertEqual(games[1].country, "USA")
+              self.assertTrue(venue_timezone_is_supported("America/Toronto"))
+              self.assertFalse(venue_timezone_is_supported("Europe/Helsinki"))
+          '''
+          regex_once(
+              "tests/test_nhl_schedule_collector.py",
+              r'''    def test_schedule_includes_us_and_canada_but_excludes_global_series\(self\):.*?(?=\n    def test_official_schedule_pagination_is_deduplicated)''',
+              schedule_scope_test,
+              "schedule scope test",
+          )
+          pagination_test = '''    def test_official_schedule_pagination_covers_the_full_month(self):
+              now = datetime(2026, 9, 20, 12, tzinfo=timezone.utc)
+              calls = []
+              page_starts = [
+                  "2026-09-20",
+                  "2026-09-27",
+                  "2026-10-04",
+                  "2026-10-11",
+                  "2026-10-18",
+              ]
+              lead_hours = [24, 180, 348, 516, 684]
+
+              def fetcher(url, timeout):
+                  calls.append(url)
+                  current = url.rsplit("/", 1)[-1]
+                  index = page_starts.index(current)
+                  next_start = (
+                      page_starts[index + 1]
+                      if index + 1 < len(page_starts)
+                      else "2026-10-25"
+                  )
+                  return {
+                      "nextStartDate": next_start,
+                      "gameWeek": [
+                          {
+                              "date": current,
+                              "games": [
+                                  self._game(
+                                      index + 1,
+                                      now + timedelta(hours=lead_hours[index]),
+                                      "BOS" if index % 2 == 0 else "NYR",
+                                      "TOR" if index % 2 == 0 else "BOS",
+                                      venue_timezone=(
+                                          "America/Toronto"
+                                          if index % 2 == 0
+                                          else "America/New_York"
+                                      ),
+                                  )
+                              ],
+                          }
+                      ],
+                  }
+
+              games, sources = fetch_schedule_games(
+                  now,
+                  horizon_hours=720,
+                  fetcher=fetcher,
+              )
+              self.assertEqual(
+                  [game.schedule_id for game in games],
+                  ["1", "2", "3", "4", "5"],
+              )
+              self.assertEqual(len(sources), 5)
+              self.assertEqual(len(calls), 5)
+          '''
+          regex_once(
+              "tests/test_nhl_schedule_collector.py",
+              r'''    def test_official_schedule_pagination_is_deduplicated\(self\):.*?(?=\n    def test_due_filter_and_summary_apply_agreed_cadence)''',
+              pagination_test,
+              "schedule pagination test",
+          )
+          due_test = '''    def test_due_filter_and_summary_apply_agreed_cadence(self):
+              slot = datetime(2026, 9, 20, 12, tzinfo=timezone.utc)
+              tier_specs = (
+                  ("hourly", 48, 1),
+                  ("six-hour", 120, 12),
+                  ("twelve-hour", 240, 12),
+                  ("daily", 500, 24),
+              )
+              games = []
+              for prefix, lead, count in tier_specs:
+                  for index in range(count):
+                      games.append(
+                          ScheduledNHLGame(
+                              schedule_id=f"{prefix}-{index}",
+                              event_date=slot + timedelta(hours=lead),
+                              away_team="New York Rangers",
+                              home_team="Boston Bruins",
+                              venue="TD Garden",
+                              name="New York Rangers at Boston Bruins",
+                              venue_timezone="America/New_York",
+                              country="USA",
+                          )
+                      )
+
+              due = schedule_games_due(games, slot)
+              self.assertIn("hourly-0", {game.schedule_id for game in due})
+              self.assertLess(len(due), len(games))
+              summary = schedule_cadence_summary(games, slot)
+              self.assertEqual(
+                  summary["in_window"],
+                  {"1h": 1, "6h": 12, "12h": 12, "24h": 24},
+              )
+              self.assertEqual(sum(summary["due_now"].values()), len(due))
+          '''
+          regex_once(
+              "tests/test_nhl_schedule_collector.py",
+              r'''    def test_due_filter_and_summary_apply_agreed_cadence\(self\):.*?(?=\n    def test_vivid_candidates_require_away_home_order_and_prefer_local_date)''',
+              due_test,
+              "schedule cadence test",
+          )
+
+          replace_once(
+              "tests/test_nhl_blueprint.py",
+              '''    NHLIteration,
+              NHLTicket,
+              _SCHEMA_READY,''',
+              '''    NHLIteration,
+              NHLTicket,
+              NHL_CAPTURE_WINDOW_HOURS,
+              _SCHEMA_READY,''',
+              "blueprint test imports",
+          )
+          compaction_test = '''    def test_compaction_keeps_final_day_hourly_and_representative_earlier_points(self):
+              with tempfile.TemporaryDirectory() as directory:
+                  db_path = Path(directory) / "NHL-collection.db"
+                  _SCHEMA_READY.discard(str(db_path.resolve()))
+                  model = CreateNHLModel(db_path)
+                  event_time = datetime(2026, 10, 20, 19, tzinfo=EASTERN)
+                  try:
+                      with model.getSession()() as session:
+                          event = NHLEvent(
+                              source_id="compaction-game",
+                              title="Boston Bruins at Toronto Maple Leafs",
+                              event_date=event_datetime_for_storage(event_time),
+                              sections=["Section 100"],
+                              source_url="https://www.vividseats.com/game/production/9300003",
+                              venue="Scotiabank Arena",
+                              away_team="Boston Bruins",
+                              home_team="Toronto Maple Leafs",
+                              canonical_venue="Scotiabank Arena",
+                              venue_timezone="America/Toronto",
+                              country="Canada",
+                              game_type=2,
+                              season=20262027,
+                              currency="USD",
+                          )
+                          session.add(event)
+                          session.flush()
+                          lead_hours = (
+                              list(range(1, 73))
+                              + list(range(78, 169, 6))
+                              + list(range(180, 337, 12))
+                              + list(range(360, 721, 24))
+                          )
+                          for lead in lead_hours:
+                              captured = event_time.astimezone(timezone.utc) - timedelta(hours=lead)
+                              iteration = NHLIteration(
+                                  event=event,
+                                  captured_at=captured_datetime_for_storage(captured),
+                              )
+                              iteration.tickets.append(
+                                  NHLTicket(
+                                      section="Section 100",
+                                      price=100 + lead,
+                                      listing_count=1,
+                                  )
+                              )
+                              session.add(iteration)
+                          session.commit()
+                          iterations = sorted(
+                              event.iterations,
+                              key=lambda item: item.captured_at,
+                          )
+                          self.assertEqual(len(iterations), 118)
+                          self.assertEqual(
+                              len(
+                                  select_nhl_compaction_iteration_ids(
+                                      event.event_date,
+                                      iterations,
+                                  )
+                              ),
+                              79,
+                          )
+                  finally:
+                      model.engine.dispose()
+
+                  report = compact_completed_nhl_games(
+                      now=event_time.astimezone(timezone.utc) + timedelta(days=15),
+                      db_path=db_path,
+                  )
+                  self.assertEqual(NHL_CAPTURE_WINDOW_HOURS, 720)
+                  self.assertEqual(report["games_compacted"], 1)
+                  self.assertEqual(report["iterations_before"], 118)
+                  self.assertEqual(report["iterations_retained"], 79)
+                  self.assertEqual(report["iterations_deleted"], 39)
+
+                  _SCHEMA_READY.discard(str(db_path.resolve()))
+                  model = CreateNHLModel(db_path)
+                  try:
+                      with model.getSession()() as session:
+                          event = session.query(NHLEvent).one()
+                          self.assertIsNotNone(event.compacted_at)
+                          self.assertEqual(event.original_iteration_count, 118)
+                          self.assertEqual(event.retained_iteration_count, 79)
+                          self.assertEqual(session.query(NHLIteration).count(), 79)
+                          self.assertEqual(session.query(NHLTicket).count(), 79)
+                  finally:
+                      model.engine.dispose()
+                      _SCHEMA_READY.discard(str(db_path.resolve()))
+          '''
+          regex_once(
+              "tests/test_nhl_blueprint.py",
+              r'''    def test_compaction_keeps_final_day_hourly_and_representative_earlier_points\(self\):.*?(?=\n\nif __name__)''',
+              compaction_test,
+              "blueprint compaction test",
+          )
+
+          empty_test = '''    def test_empty_schedule_is_a_healthy_collection_cycle(self):
+              with tempfile.TemporaryDirectory() as directory:
+                  root = Path(directory)
+                  health = root / "nhl-health.json"
+                  pending = root / "pending"
+
+                  with patch(
+                      "nhl_schedule_collector.replay_pending_snapshots",
+                      return_value=(0, True, []),
+                  ), patch(
+                      "nhl_schedule_collector.fetch_schedule_games",
+                      return_value=([], ["official-nhl-schedule"]),
+                  ):
+                      code = run_schedule_collector(
+                          "https://example.test/api/nhl/snapshot",
+                          "test-token",
+                          True,
+                          1,
+                          health,
+                          pending,
+                      )
+
+                  self.assertEqual(code, 0)
+                  report = json.loads(health.read_text(encoding="utf-8"))
+                  self.assertEqual(report["status"], "healthy")
+                  self.assertEqual(report["scheduled_in_window"], 0)
+                  self.assertEqual(report["scheduled_due"], 0)
+                  self.assertEqual(report["capture_window_hours"], 720)
+                  self.assertEqual(
+                      report["cadence_policy"],
+                      {
+                          "days_15_to_30_hours": 24,
+                          "days_8_to_14_hours": 12,
+                          "days_4_to_7_hours": 6,
+                          "final_72_hours": 1,
+                          "staggering": "deterministic per NHL game ID",
+                      },
+                  )
+                  self.assertEqual(
+                      report["cadence_tiers"]["in_window"],
+                      {"1h": 0, "6h": 0, "12h": 0, "24h": 0},
+                  )
+          '''
+          regex_once(
+              "tests/test_nhl_empty_schedule.py",
+              r'''    def test_empty_schedule_is_a_healthy_collection_cycle\(self\):.*?(?=\n\nif __name__)''',
+              empty_test,
+              "empty schedule test",
+          )
+          PY
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate implementation
+        env:
+          DATABASE_PATH: ${{ runner.temp }}/ticket-price-validation/baseball.db
+          CONCERT_DATABASE_PATH: ${{ runner.temp }}/ticket-price-validation/concerts.db
+          NFL_DATABASE_PATH: ${{ runner.temp }}/ticket-price-validation/nfl.db
+          NHL_DATABASE_PATH: ${{ runner.temp }}/ticket-price-validation/nhl.db
+          FLASK_SECRET_KEY: deployment-validation-key
+          COLLECTOR_INGEST_TOKEN: deployment-validation-token
+        run: |
+          mkdir -p "$(dirname "$DATABASE_PATH")"
+          python -m py_compile \
+            nhl_collector.py \
+            nhl_schedule_collector.py \
+            Flask_App/nhl_blueprint.py \
+            tests/test_nhl_collector.py \
+            tests/test_nhl_schedule_collector.py \
+            tests/test_nhl_blueprint.py \
+            tests/test_nhl_empty_schedule.py
+          node --check Flask_App/static/js/nhl.js
+          node --check Flask_App/static/js/nhl-graph.js
+          node --check Flask_App/static/js/nhl-map.js
+          python -m unittest discover -s tests -v
+
+      - name: Commit the 30-day NHL cadence
+        run: |
+          rm .github/workflows/implement-nhl-30-day.yml
+          rm .github/workflows/implement-nhl-30-day-v2.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Extend NHL tracking to a 30-day tiered cadence"
+          git push origin HEAD:feature/nhl-30-day-tiered-cadence
