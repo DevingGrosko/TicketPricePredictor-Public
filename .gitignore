@@ -42,3 +42,12 @@ manual_provider_captures/
 *.png
 *.jpg
 *.jpeg
+
+# NHL collection data
+NHL-collection.db
+nhl_audit/
+nhl_backups/
+nhl_remote_health.json
+nhl_schedule_health.json
+nhl_smoke_result.json
+nhl_pending/

@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}NHL price trend — TicketSignal{% endblock %}
+{% block body_class %}nfl-theme nhl-theme{% endblock %}
+{% block head %}
+  <meta name="theme-color" content="#071a2b">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl.css') }}?v=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-responsive.css') }}?v=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-map.css') }}?v=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nhl.css') }}?v=1">
+{% endblock %}
+
+{% block content %}
+<div class="nfl-page nhl-page nfl-result-page">
+  <section class="result-page nfl-result">
+    <a class="nfl-back-link" href="{{ url_for('nhl.nhl_home') }}#explore-nhl"><span aria-hidden="true">&#8592;</span> Build another NHL chart</a>
+
+    <header class="nfl-matchup-banner nhl-matchup-banner">
+      <div class="nfl-matchup-banner__mark" aria-hidden="true">
+        <span class="nfl-mini-shield nhl-mini-mark"><i></i><strong>TS</strong></span>
+      </div>
+      <div class="nfl-matchup-banner__copy">
+        <span class="nfl-section-kicker">Single-game market report</span>
+        <h1>{{ gameLabel }}</h1>
+        <p><strong>{{ team }}</strong><span>&middot;</span>{{ venue }}<span>&middot;</span>{{ section }}<span>&middot;</span>{{ currency }}</p>
+      </div>
+      <div class="nfl-window-badge">
+        <span>Tracking window</span>
+        <strong>7D</strong>
+        <small>6h → hourly</small>
+      </div>
+    </header>
+
+    <div class="nfl-result-grid">
+      <article class="chart-card nfl-chart-card">
+        <div class="chart-card__top nfl-chart-card__top">
+          <div>
+            <span>Market timeline</span>
+            <strong>{% if displayType == 'money' %}Relative price movement{% else %}Lowest observed section price{% endif %}</strong>
+          </div>
+          <div class="nfl-chart-actions">
+            <a class="nfl-view-toggle" href="{{ url_for('nhl.nhl_map', team=team, section=section, game=game) }}">View arena map</a>
+            <a class="nfl-view-toggle" href="{{ url_for('nhl.nhl_graph', display=displayType, team=team, section=section, game=game) }}">Show {{ displayLabel }} view</a>
+          </div>
+        </div>
+
+        {% if error %}
+          <div class="empty-state nfl-empty-state">
+            <span>!</span>
+            <h2>No price history yet</h2>
+            <p>{{ error }}</p>
+            <a class="button nfl-button nfl-button--primary" href="{{ url_for('nhl.nhl_home') }}#explore-nhl">Try another selection</a>
+          </div>
+        {% else %}
+          <div class="interactive-chart nfl-interactive-chart" data-display-mode="{{ displayMode }}" data-currency="{{ currency }}" data-y-axis-label="{% if displayMode == 'money' %}Lowest observed section price ({{ currency }}){% else %}Relative price movement{% endif %}">
+            <script type="application/json" class="interactive-chart__data">{{ {"x": chartX, "y": chartY} | tojson }}</script>
+            <svg class="interactive-chart__svg" viewBox="0 0 900 520" role="img" aria-label="Interactive NHL ticket price trend for {{ team }}, {{ section }}"></svg>
+            <div class="interactive-chart__tooltip" role="status" hidden></div>
+            <p class="interactive-chart__hint"><span aria-hidden="true">&#9432;</span> Hover over the line to inspect each captured market observation.</p>
+          </div>
+          <noscript><img src="data:image/png;base64,{{ img }}" class="result-chart" alt="NHL ticket price trend for {{ team }}, {{ section }}"></noscript>
+        {% endif %}
+      </article>
+
+      <aside class="nfl-insight-card nhl-insight-card">
+        <div class="nfl-insight-card__header">
+          <span class="nhl-puck-icon" aria-hidden="true"></span>
+          <div><span class="nfl-section-kicker">Reading the market</span><h2>Time moves toward puck drop.</h2></div>
+        </div>
+        <p>Each point is the lowest observed listing price for this arena section at a scheduled capture time.</p>
+
+        <dl class="nfl-insight-stats">
+          <div><dt>168h</dt><dd>Maximum lookback</dd></div>
+          <div><dt>6h/1h</dt><dd>Collection interval</dd></div>
+        </dl>
+
+        <div class="nfl-chart-guide">
+          <div><i class="nfl-chart-guide__line"></i><span><strong>Trend line</strong><small>How the observed section price moved.</small></span></div>
+          <div><i class="nfl-chart-guide__dot"></i><span><strong>Captured point</strong><small>A scheduled market observation.</small></span></div>
+          <div><i class="nfl-chart-guide__kickoff"></i><span><strong>Puck-drop side</strong><small>Time moves toward zero on the right.</small></span></div>
+        </div>
+
+        <p class="nfl-disclaimer">Completed games are compacted only after 14 days. Final-day hourly observations remain intact; earlier history is retained at representative 3-hour and 6-hour intervals.</p>
+      </aside>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', filename='js/nhl-graph.js') }}?v=1"></script>{% endblock %}

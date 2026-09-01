@@ -1,0 +1,126 @@
+name: NHL collector smoke test
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "nhl_collector.py"
+      - "nhl_schedule_collector.py"
+      - "collector.py"
+      - "nfl_metadata.py"
+      - "Flask_App/nhl_blueprint.py"
+      - "Flask_App/static/js/nhl-map.js"
+      - "Flask_App/templates/nhl_map.html"
+      - "tests/test_nhl_collector.py"
+      - "tests/test_nhl_schedule_collector.py"
+      - "tests/test_nhl_blueprint.py"
+      - ".github/workflows/nhl-smoke-test.yml"
+  workflow_dispatch:
+    inputs:
+      event_url:
+        description: Optional Vivid Seats NHL event URL
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  capture-nhl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install collector dependencies
+        run: python -m pip install "selenium>=4.26.1,<5" "SQLAlchemy>=2,<3"
+
+      - name: Show browser versions
+        run: |
+          google-chrome --version || chromium --version || true
+          chromedriver --version || true
+
+      - name: Validate the official NHL schedule source
+        run: |
+          python nhl_schedule_collector.py schedule \
+            --horizon-hours 1080 \
+            > nhl_schedule_result.json
+
+      - name: Capture one NHL event without writing to production
+        env:
+          REQUESTED_EVENT_URL: ${{ inputs.event_url }}
+        run: |
+          python nhl_schedule_collector.py smoke "$REQUESTED_EVENT_URL" \
+            --headless \
+            --timeout 45 \
+            --output nhl_smoke_result.json
+
+      - name: Validate NHL section prices, currency, and optional geometry
+        run: |
+          python - <<'PY'
+          import json
+          import math
+          from pathlib import Path
+
+          payload = json.loads(
+              Path("nhl_smoke_result.json").read_text(encoding="utf-8")
+          )
+          if payload.get("status") != "success":
+              raise SystemExit(f"NHL smoke status was {payload.get('status')!r}")
+
+          section_count = int(payload.get("section_count") or 0)
+          if section_count < 8:
+              raise SystemExit(f"NHL smoke returned only {section_count} sections")
+
+          currency = str(payload.get("currency") or "").upper()
+          if len(currency) != 3 or not currency.isalpha():
+              raise SystemExit(f"Invalid NHL currency code: {currency!r}")
+
+          geometry = payload.get("map_geometry") or {}
+          if geometry:
+              mapped = int(geometry.get("mapped_section_count") or 0)
+              known = int(
+                  geometry.get("known_section_count")
+                  or section_count
+                  or 0
+              )
+              ratio = float(geometry.get("coverage_ratio") or 0)
+              shape_count = sum(
+                  len(row.get("shapes") or [])
+                  for row in geometry.get("sections") or []
+              )
+              required = max(4, min(12, math.ceil(known * 0.6)))
+              if mapped < required or ratio < 0.6 or shape_count < mapped:
+                  raise SystemExit(
+                      "Returned NHL geometry is incomplete: "
+                      f"{mapped}/{known} sections ({ratio:.1%}), "
+                      f"{shape_count} shapes"
+                  )
+              print(
+                  f"Verified {section_count} NHL sections in {currency} and "
+                  f"{mapped}/{known} provider-map sections ({ratio:.1%})."
+              )
+          else:
+              print(
+                  f"Verified {section_count} NHL sections in {currency}; "
+                  "the interface will use its rink fallback until provider "
+                  "geometry is available."
+              )
+          PY
+
+      - name: Upload diagnostic results
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nhl-smoke-result-${{ github.run_id }}
+          path: |
+            nhl_schedule_result.json
+            nhl_smoke_result.json
+          if-no-files-found: warn
+          retention-days: 14

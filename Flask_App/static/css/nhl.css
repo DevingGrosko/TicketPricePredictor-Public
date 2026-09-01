@@ -1,0 +1,424 @@
+body.nhl-theme {
+  --nfl-navy: #071a2b;
+  --nfl-navy-deep: #02070d;
+  --nfl-navy-mid: #0a2238;
+  --nfl-blue: #2e86ab;
+  --nfl-red: #c8102e;
+  --nfl-red-bright: #ef3655;
+  --nfl-white: #f6fbff;
+  --nfl-silver: #cfe2ee;
+  --nfl-muted: #91adbd;
+  --bg: #02080d;
+  --bg-soft: #071724;
+  --surface: rgba(7, 28, 43, .86);
+  --surface-solid: #0a2233;
+  --surface-light: #0e3148;
+  --line: rgba(219, 240, 250, .12);
+  --line-strong: rgba(219, 240, 250, .24);
+  --text: var(--nfl-white);
+  --muted: var(--nfl-muted);
+  --purple: var(--nfl-red);
+  --purple-light: #ff5a72;
+  --cyan: #77d5f7;
+  background:
+    radial-gradient(circle at 84% 10%, rgba(82, 185, 224, .22), transparent 31rem),
+    radial-gradient(circle at 9% 56%, rgba(200, 16, 46, .12), transparent 28rem),
+    linear-gradient(180deg, #02080d 0%, #061827 48%, #02080d 100%);
+}
+
+.nhl-theme .site-glow--one {
+  background: #5ac8ec;
+  opacity: .16;
+}
+
+.nhl-theme .site-glow--two {
+  background: #c8102e;
+  opacity: .1;
+}
+
+.nhl-theme .site-header::after {
+  background: linear-gradient(
+    90deg,
+    #c8102e 0 10%,
+    #f6fbff 10% 16%,
+    #66c7e8 16% 100%
+  );
+}
+
+.nhl-theme .brand > span:last-child > span {
+  color: #65c9eb;
+}
+
+.nhl-theme .brand-mark {
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 30%, rgba(255, 255, 255, .28), transparent 30%),
+    linear-gradient(155deg, #102c40, #02070d);
+  border-color: rgba(196, 231, 244, .45);
+}
+
+.nhl-theme .site-nav a.is-active::after {
+  background: #68c7e8;
+  box-shadow: 0 0 14px rgba(104, 199, 232, .55);
+}
+
+.nhl-theme .nfl-mini-shield.nhl-mini-mark {
+  border-radius: 50%;
+  border-color: rgba(223, 244, 252, .5);
+  background:
+    radial-gradient(circle at 35% 28%, rgba(255, 255, 255, .24), transparent 25%),
+    linear-gradient(155deg, #15364d, #03090f);
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 255, 255, .05),
+    0 8px 22px rgba(0, 0, 0, .3);
+}
+
+.nhl-theme .nfl-mini-shield.nhl-mini-mark::before,
+.nhl-theme .nfl-mini-shield.nhl-mini-mark::after {
+  display: none;
+}
+
+.nhl-theme .nfl-mini-shield.nhl-mini-mark i {
+  width: 17px;
+  height: 3px;
+  border-radius: 99px;
+  background: #c8102e;
+  transform: rotate(-16deg);
+}
+
+.nhl-theme .nfl-live-tag {
+  border-color: rgba(102, 199, 232, .25);
+  background: rgba(102, 199, 232, .08);
+}
+
+.nhl-theme .nfl-live-tag i,
+.nhl-theme .nfl-status i {
+  background: #79ddff;
+  box-shadow: 0 0 12px rgba(121, 221, 255, .75);
+}
+
+.nhl-theme .nfl-button--primary {
+  background: linear-gradient(135deg, #c8102e, #ef3655);
+  box-shadow: 0 16px 38px rgba(200, 16, 46, .24);
+}
+
+.nhl-theme .nfl-button--primary:hover {
+  box-shadow: 0 20px 46px rgba(200, 16, 46, .34);
+}
+
+.nhl-scoreboard {
+  overflow: hidden;
+}
+
+.nhl-theme .nhl-scoreboard {
+  background:
+    linear-gradient(160deg, rgba(15, 51, 73, .98), rgba(2, 10, 17, .98)),
+    linear-gradient(90deg, rgba(102, 199, 232, .08), transparent);
+  border-color: rgba(163, 222, 243, .2);
+}
+
+.nhl-theme .nhl-scoreboard::before {
+  background:
+    linear-gradient(90deg, transparent, rgba(255, 255, 255, .06), transparent),
+    repeating-linear-gradient(
+      0deg,
+      rgba(255, 255, 255, .025) 0 1px,
+      transparent 1px 6px
+    );
+}
+
+.nhl-rink {
+  margin: 30px 0 27px;
+  padding: 18px;
+  border: 1px solid rgba(178, 225, 242, .15);
+  border-radius: 26px;
+  background: rgba(0, 7, 12, .33);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .05);
+}
+
+.nhl-rink__ice {
+  position: relative;
+  height: 220px;
+  overflow: hidden;
+  border: 8px solid rgba(236, 249, 255, .88);
+  border-radius: 72px;
+  background:
+    linear-gradient(90deg, transparent 49.5%, rgba(200, 16, 46, .8) 49.5% 50.5%, transparent 50.5%),
+    radial-gradient(circle at 50% 50%, transparent 0 34px, rgba(200, 16, 46, .75) 35px 38px, transparent 39px),
+    linear-gradient(180deg, rgba(255, 255, 255, .94), rgba(218, 242, 251, .9));
+  box-shadow:
+    inset 0 0 30px rgba(72, 166, 204, .22),
+    0 16px 32px rgba(0, 0, 0, .2);
+}
+
+.nhl-rink__ice::before,
+.nhl-rink__ice::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  background: rgba(25, 118, 174, .75);
+}
+
+.nhl-rink__ice::before {
+  left: 32%;
+}
+
+.nhl-rink__ice::after {
+  right: 32%;
+}
+
+.nhl-rink__goal {
+  position: absolute;
+  top: 50%;
+  width: 30px;
+  height: 65px;
+  border: 4px solid #c8102e;
+  border-radius: 50%;
+  transform: translateY(-50%);
+  opacity: .82;
+}
+
+.nhl-rink__goal--left {
+  left: 6%;
+  border-left-color: transparent;
+}
+
+.nhl-rink__goal--right {
+  right: 6%;
+  border-right-color: transparent;
+}
+
+.nhl-rink__circle {
+  position: absolute;
+  width: 48px;
+  height: 48px;
+  border: 2px solid rgba(200, 16, 46, .62);
+  border-radius: 50%;
+}
+
+.nhl-rink__circle--one {
+  left: 18%;
+  top: 22%;
+}
+
+.nhl-rink__circle--two {
+  left: 18%;
+  bottom: 22%;
+}
+
+.nhl-rink__circle--three {
+  right: 18%;
+  top: 22%;
+}
+
+.nhl-rink__circle--four {
+  right: 18%;
+  bottom: 22%;
+}
+
+.nhl-rink__ice > span,
+.nhl-rink__ice > b {
+  position: absolute;
+  bottom: 13px;
+  z-index: 2;
+  padding: 5px 9px;
+  border-radius: 99px;
+  font-size: .68rem;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  background: rgba(7, 26, 43, .82);
+  color: #f6fbff;
+}
+
+.nhl-rink__ice > span {
+  left: 18px;
+}
+
+.nhl-rink__ice > b {
+  right: 18px;
+  font-weight: 700;
+}
+
+.nhl-theme .nfl-data-bar > div::before {
+  background: linear-gradient(180deg, #66c7e8, transparent);
+}
+
+.nhl-theme .nfl-section-kicker {
+  color: #75d7f7;
+}
+
+.nhl-theme .nfl-playbook.nhl-playbook {
+  background:
+    linear-gradient(145deg, rgba(16, 55, 78, .92), rgba(4, 15, 24, .94)),
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 52px,
+      rgba(255, 255, 255, .025) 52px 53px
+    );
+}
+
+.nhl-puck-mark {
+  border-radius: 50%;
+}
+
+.nhl-puck-mark span,
+.nhl-puck-icon {
+  display: inline-block;
+  width: 42px;
+  height: 16px;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 35% 20%, rgba(255, 255, 255, .28), transparent 30%),
+    #04080c;
+  border: 1px solid rgba(190, 226, 240, .25);
+  box-shadow: 0 9px 15px rgba(0, 0, 0, .35);
+  transform: rotate(-8deg);
+}
+
+.nhl-puck-icon {
+  flex: 0 0 auto;
+  width: 34px;
+  height: 13px;
+}
+
+.nhl-theme .nfl-selection-form {
+  border-color: rgba(150, 214, 237, .18);
+  background:
+    linear-gradient(160deg, rgba(11, 41, 59, .9), rgba(4, 15, 24, .94));
+}
+
+.nhl-theme .nfl-field-control label > span {
+  background: rgba(102, 199, 232, .14);
+  color: #84defb;
+}
+
+.nhl-theme .nfl-map-launch,
+.nhl-theme .nfl-view-toggle,
+.nhl-theme .nfl-map-provider-link {
+  border-color: rgba(102, 199, 232, .25);
+  color: #92e5ff;
+}
+
+.nhl-theme .nfl-window-badge strong {
+  color: #7cddfb;
+}
+
+.nhl-theme .nfl-matchup-banner.nhl-matchup-banner {
+  background:
+    linear-gradient(145deg, rgba(14, 49, 70, .96), rgba(3, 13, 21, .97));
+  border-color: rgba(144, 213, 238, .18);
+}
+
+.nhl-theme .nfl-insight-card.nhl-insight-card {
+  background:
+    linear-gradient(160deg, rgba(12, 43, 61, .94), rgba(3, 14, 22, .96));
+}
+
+.nhl-theme .nfl-interactive-chart .interactive-chart__line {
+  stroke: #6fd7fa;
+}
+
+.nhl-theme .nfl-interactive-chart .interactive-chart__point {
+  fill: #c8102e;
+}
+
+.nhl-theme .nfl-chart-guide__line,
+.nhl-theme .nfl-chart-guide__dot {
+  background: #6fd7fa;
+}
+
+.nhl-theme .nfl-chart-guide__kickoff {
+  border-color: #c8102e;
+}
+
+.nhl-compaction-note {
+  margin-top: 22px;
+  padding: 12px 14px;
+  border: 1px solid rgba(102, 199, 232, .18);
+  border-radius: 12px;
+  background: rgba(102, 199, 232, .06);
+  color: var(--nfl-silver);
+  font-size: .84rem;
+  line-height: 1.55;
+}
+
+/* The shared map renderer draws a generic rounded playing surface. NHL
+   fallback maps suppress football markings so that surface reads as an ice rink. */
+.nhl-theme .nfl-map-field-shell {
+  fill: #dff5fc;
+  stroke: rgba(83, 174, 209, .8);
+  stroke-width: 5;
+}
+
+.nhl-theme .nfl-map-field-line,
+.nhl-theme .nfl-map-field-endzone {
+  display: none;
+}
+
+.nhl-theme .nfl-map-bowl-shadow {
+  fill: rgba(68, 166, 204, .18);
+}
+
+.nhl-theme .nfl-stadium-map-stage {
+  background:
+    radial-gradient(circle at 50% 45%, rgba(94, 199, 235, .12), transparent 38%),
+    linear-gradient(180deg, rgba(5, 22, 34, .96), rgba(2, 10, 16, .98));
+}
+
+.nhl-theme .nfl-stadium-section.is-selected path {
+  fill: #c8102e;
+  stroke: #fff;
+}
+
+@media (max-width: 720px) {
+  .nhl-rink__ice {
+    height: 170px;
+    border-width: 6px;
+    border-radius: 54px;
+  }
+
+  .nhl-rink__circle {
+    width: 36px;
+    height: 36px;
+  }
+}
+
+.nhl-map-rink__ice {
+  fill: #e7f8ff;
+  stroke: rgba(112, 203, 235, .9);
+  stroke-width: 5;
+}
+
+.nhl-map-rink__center {
+  stroke: rgba(200, 16, 46, .85);
+  stroke-width: 5;
+}
+
+.nhl-map-rink__blue {
+  stroke: rgba(30, 119, 179, .82);
+  stroke-width: 5;
+}
+
+.nhl-map-rink__center-circle,
+.nhl-map-rink__faceoff {
+  fill: none;
+  stroke: rgba(200, 16, 46, .66);
+  stroke-width: 3;
+}
+
+.nhl-map-rink__goal {
+  fill: none;
+  stroke: #c8102e;
+  stroke-width: 5;
+  stroke-linecap: round;
+}
+
+.nhl-map-rink__label {
+  fill: rgba(7, 26, 43, .72);
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: .18em;
+  text-anchor: middle;
+}
