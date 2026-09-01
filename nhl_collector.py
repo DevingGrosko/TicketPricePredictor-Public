@@ -1,8 +1,9 @@
 """Collect Vivid Seats NHL section prices and provider map geometry.
 
-NHL games are sampled during the final seven days before puck drop. Games more
-than 72 hours away are sampled every six hours; the final 72 hours are sampled
-once per hour. Collection stops at the scheduled start time.
+NHL games are sampled during the final 30 days before puck drop. Collection is
+daily from 30 to 14 days, every 12 hours from 14 to 7 days, every 6 hours from
+7 days to 72 hours, and hourly throughout the final 72 hours. Collection stops
+at the scheduled start time.
 """
 
 from __future__ import annotations
@@ -44,11 +45,15 @@ PROJECT_DIR = Path(__file__).resolve().parent
 DEFAULT_HEALTH_OUTPUT = PROJECT_DIR / "nhl_remote_health.json"
 DEFAULT_PENDING_DIR = PROJECT_DIR / "nhl_pending"
 DEFAULT_SMOKE_OUTPUT = PROJECT_DIR / "nhl_smoke_result.json"
-NHL_CAPTURE_WINDOW_HOURS = 7 * 24
+NHL_CAPTURE_WINDOW_HOURS = 30 * 24
 NHL_HOURLY_WINDOW_HOURS = 72
-NHL_EARLY_CADENCE_HOURS = 6
+NHL_SIX_HOUR_WINDOW_HOURS = 7 * 24
+NHL_TWELVE_HOUR_WINDOW_HOURS = 14 * 24
 NHL_FINAL_CADENCE_HOURS = 1
-DISCOVERY_HORIZON_DAYS = 7
+NHL_SIX_HOUR_CADENCE_HOURS = 6
+NHL_TWELVE_HOUR_CADENCE_HOURS = 12
+NHL_DAILY_CADENCE_HOURS = 24
+DISCOVERY_HORIZON_DAYS = 30
 SMOKE_HORIZON_DAYS = 45
 MIN_USABLE_SECTIONS = 8
 NHL_FEED_URLS = (
@@ -504,16 +509,21 @@ def nhl_capture_interval_hours(event_date: datetime, now: datetime) -> int | Non
         return None
     if hours_until <= NHL_HOURLY_WINDOW_HOURS:
         return NHL_FINAL_CADENCE_HOURS
-    return NHL_EARLY_CADENCE_HOURS
+    if hours_until <= NHL_SIX_HOUR_WINDOW_HOURS:
+        return NHL_SIX_HOUR_CADENCE_HOURS
+    if hours_until <= NHL_TWELVE_HOUR_WINDOW_HOURS:
+        return NHL_TWELVE_HOUR_CADENCE_HOURS
+    return NHL_DAILY_CADENCE_HOURS
 
 
 def nhl_capture_tier(event_date: datetime, now: datetime) -> str | None:
     interval = nhl_capture_interval_hours(event_date, now)
     return {
         NHL_FINAL_CADENCE_HOURS: "final_72_hours_hourly",
-        NHL_EARLY_CADENCE_HOURS: "days_4_to_7_every_6_hours",
+        NHL_SIX_HOUR_CADENCE_HOURS: "days_4_to_7_every_6_hours",
+        NHL_TWELVE_HOUR_CADENCE_HOURS: "days_8_to_14_every_12_hours",
+        NHL_DAILY_CADENCE_HOURS: "days_15_to_30_daily",
     }.get(interval)
-
 
 def nhl_capture_phase(cadence_key: str, interval_hours: int) -> int:
     if interval_hours <= 1:

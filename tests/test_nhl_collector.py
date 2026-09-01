@@ -7,6 +7,7 @@ from nhl_collector import (
     is_nhl_game_title,
     nhl_capture_interval_hours,
     nhl_capture_is_due,
+    nhl_capture_tier,
     nhl_snapshot_to_payload,
     ordered_matchup_from_title,
 )
@@ -85,16 +86,23 @@ class NHLCollectorTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0].date_hint.isoformat(), "2026-09-29")
 
-    def test_cadence_is_six_hours_then_hourly_for_final_72_hours(self):
+    def test_cadence_tiers_cover_the_full_thirty_day_window(self):
         slot = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
-        self.assertEqual(
-            nhl_capture_interval_hours(slot + timedelta(hours=168), slot),
-            6,
-        )
-        self.assertEqual(
-            nhl_capture_interval_hours(slot + timedelta(hours=72), slot),
-            1,
-        )
+        expected = {
+            720: (24, "days_15_to_30_daily"),
+            336: (12, "days_8_to_14_every_12_hours"),
+            168: (6, "days_4_to_7_every_6_hours"),
+            72: (1, "final_72_hours_hourly"),
+        }
+        for lead_hours, (interval, tier) in expected.items():
+            event_date = slot + timedelta(hours=lead_hours)
+            with self.subTest(lead_hours=lead_hours):
+                self.assertEqual(
+                    nhl_capture_interval_hours(event_date, slot),
+                    interval,
+                )
+                self.assertEqual(nhl_capture_tier(event_date, slot), tier)
+
         self.assertTrue(
             nhl_capture_is_due(
                 slot + timedelta(hours=48),
@@ -103,7 +111,7 @@ class NHLCollectorTests(unittest.TestCase):
             )
         )
         self.assertIsNone(
-            nhl_capture_interval_hours(slot + timedelta(hours=169), slot)
+            nhl_capture_interval_hours(slot + timedelta(hours=721), slot)
         )
 
     def test_payload_marks_nhl_currency_and_schedule(self):
