@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}NHL arena map — TicketSignal{% endblock %}
+{% block body_class %}nfl-theme nhl-theme{% endblock %}
+{% block head %}
+  <meta name="theme-color" content="#071a2b">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl.css') }}?v=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-responsive.css') }}?v=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-map.css') }}?v=2">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-map-provider.css') }}?v=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nhl.css') }}?v=1">
+{% endblock %}
+
+{% block content %}
+<div class="nfl-page nhl-page nfl-map-page">
+  <section class="result-page nfl-map-view">
+    <a class="nfl-back-link" href="{{ url_for('nhl.nhl_home') }}#explore-nhl"><span aria-hidden="true">&#8592;</span> Choose another NHL game</a>
+
+    {% if error %}
+      <div class="empty-state nfl-empty-state nfl-map-error">
+        <span>!</span>
+        <h1>Arena map unavailable</h1>
+        <p>{{ error }}</p>
+        <a class="button nfl-button nfl-button--primary" href="{{ url_for('nhl.nhl_home') }}#explore-nhl">Return to NHL games</a>
+      </div>
+    {% else %}
+      <header class="nfl-matchup-banner nhl-matchup-banner nfl-map-banner">
+        <div class="nfl-matchup-banner__mark" aria-hidden="true">
+          <span class="nfl-mini-shield nhl-mini-mark"><i></i><strong>TS</strong></span>
+        </div>
+        <div class="nfl-matchup-banner__copy">
+          <span class="nfl-section-kicker">Interactive section explorer</span>
+          <h1>{{ gameLabel }}</h1>
+          <p><strong>{{ team }}</strong><span>&middot;</span>{{ venue }}{% if country %}<span>&middot;</span>{{ country }}{% endif %}{% if neutral_site %}<span>&middot;</span>Neutral site{% endif %}<span>&middot;</span>{{ section_count }} sections</p>
+        </div>
+        <div class="nfl-window-badge">
+          <span>Latest market read</span>
+          <strong>{{ priced_section_count }}</strong>
+          <small>sections priced</small>
+        </div>
+      </header>
+
+      <div class="nfl-stadium-map-layout">
+        <article class="nfl-stadium-map-card">
+          <div class="nfl-stadium-map-card__top">
+            <div>
+              <span>{% if has_provider_geometry %}Provider section geometry{% else %}Arena bowl schematic{% endif %}</span>
+              <strong>Click a section to inspect it</strong>
+            </div>
+            <div class="nfl-map-controls" aria-label="Map controls">
+              <button type="button" data-map-zoom-out aria-label="Zoom out">&#8722;</button>
+              <button type="button" data-map-reset>Reset</button>
+              <button type="button" data-map-zoom-in aria-label="Zoom in">+</button>
+            </div>
+          </div>
+
+          <div class="nfl-map-level-filter" data-map-levels aria-label="Filter arena levels"></div>
+
+          <div class="nfl-stadium-map-stage nhl-arena-map-stage{% if has_provider_geometry %} has-provider-geometry{% endif %}" data-map-stage>
+            <svg class="nfl-stadium-map-svg" data-stadium-map viewBox="0 0 1000 700" role="img" aria-label="Interactive {% if has_provider_geometry %}provider section map{% else %}arena schematic{% endif %} for {{ venue }}"></svg>
+            <div class="nfl-map-tooltip" data-map-tooltip role="status" hidden></div>
+          </div>
+
+          <div class="nfl-map-legend" aria-label="Map legend">
+            <span><i class="nfl-map-legend__swatch nfl-map-legend__swatch--inner"></i> Lower bowl</span>
+            <span><i class="nfl-map-legend__swatch nfl-map-legend__swatch--middle"></i> Club / middle</span>
+            <span><i class="nfl-map-legend__swatch nfl-map-legend__swatch--outer"></i> Upper bowl</span>
+            <span><i class="nfl-map-legend__swatch nfl-map-legend__swatch--selected"></i> Selected section</span>
+          </div>
+
+          {% if has_provider_geometry %}
+            <p class="nfl-map-disclaimer nfl-map-disclaimer--verified"><span aria-hidden="true">&#10003;</span> Section shapes were captured from this event’s provider map and matched to {{ map_geometry_sections }} collected section names.</p>
+          {% else %}
+            <p class="nfl-map-disclaimer"><span aria-hidden="true">&#9432;</span> Provider geometry was not complete enough for this event, so this is a navigational arena schematic generated from section names.</p>
+          {% endif %}
+        </article>
+
+        <aside class="nfl-map-sidebar">
+          <div class="nfl-map-search-card">
+            <label for="nhl-map-search">Find a section</label>
+            <div class="nfl-map-search-row">
+              <input id="nhl-map-search" type="search" placeholder="Try 112, club, upper…" autocomplete="off" data-map-search>
+              <button type="button" data-map-search-button>Find</button>
+            </div>
+            <p>Search by the full section name or any number shown in the ticket listings.</p>
+          </div>
+
+          <div class="nfl-map-section-card" data-section-panel>
+            <span class="nfl-section-kicker">Selected section</span>
+            <h2 data-section-name>Choose a section on the map</h2>
+            <p data-section-level>Hover or click an arena block to see its details.</p>
+
+            <dl class="nfl-map-section-stats">
+              <div><dt data-section-price>—</dt><dd>Latest price ({{ currency }})</dd></div>
+              <div><dt data-section-listings>—</dt><dd>Listings observed</dd></div>
+            </dl>
+
+            <a class="button nfl-button nfl-button--primary nfl-map-history-link" data-section-history aria-disabled="true">View price history <span aria-hidden="true">&#8594;</span></a>
+          </div>
+
+          <div class="nfl-map-source-card">
+            <span class="nfl-section-kicker">Exact event layout</span>
+            <h2>Open the live provider seating chart.</h2>
+            <p>The live provider page remains the source for current rows, tunnels, suites, and available inventory.</p>
+            <a class="nfl-map-provider-link" href="{{ source_url }}" target="_blank" rel="noreferrer">Open Vivid seating map <span aria-hidden="true">&#8599;</span></a>
+          </div>
+
+          <div class="nfl-map-capture-note">
+            <span>Latest stored snapshot · Eastern Time</span>
+            <strong>{{ latest_capture_label }}</strong>
+          </div>
+        </aside>
+      </div>
+
+      <script id="nhl-map-data" type="application/json">{{ map_data | tojson }}</script>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}{% if not error %}<script src="{{ url_for('static', filename='js/nhl-map.js') }}?v=1"></script>{% endif %}{% endblock %}

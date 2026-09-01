@@ -23,6 +23,10 @@ class PythonAnywhereNFLStartupTests(unittest.TestCase):
         self.assertIn("/nfl/archive", routes)
         self.assertIn("/nfl/map", routes)
         self.assertIn("/api/nfl/snapshot", routes)
+        self.assertIn("/nhl", routes)
+        self.assertIn("/nhl/map", routes)
+        self.assertIn("/nhl/graph", routes)
+        self.assertIn("/api/nhl/snapshot", routes)
 
 
 if __name__ == "__main__":
