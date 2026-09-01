@@ -1,0 +1,35 @@
+name: Diagnose NHL payload
+
+on:
+  push:
+    branches:
+      - feature/nhl-ticket-tracking
+    paths:
+      - ".github/workflows/diagnose-nhl-payload.yml"
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/nhl-ticket-tracking
+      - name: Report payload segment hashes
+        run: |
+          for file in \
+            .github/nhl_payload/part-00 \
+            .github/nhl_payload/part-01a \
+            .github/nhl_payload/part-01b \
+            .github/nhl_payload/part-01c \
+            .github/nhl_payload/part-01d \
+            .github/nhl_payload/part-02 \
+            .github/nhl_payload/part-03a \
+            .github/nhl_payload/part-03b \
+            .github/nhl_payload/part-03c \
+            .github/nhl_payload/part-03d \
+            .github/nhl_payload/part-04
+          do
+            wc -c "$file"
+            git hash-object "$file"
+            sha256sum "$file"
+          done
