@@ -27,7 +27,22 @@ jobs:
       - name: Materialize NHL source files
         run: |
           mkdir -p /tmp/nhl-feature
-          cat .github/nhl_payload/part-* | base64 --decode > /tmp/nhl-feature.tar.gz
+          cat \
+            .github/nhl_payload/part-00 \
+            .github/nhl_payload/part-01a \
+            .github/nhl_payload/part-01b \
+            .github/nhl_payload/part-01c \
+            .github/nhl_payload/part-01d \
+            .github/nhl_payload/part-02 \
+            .github/nhl_payload/part-03a \
+            .github/nhl_payload/part-03b \
+            .github/nhl_payload/part-03c \
+            .github/nhl_payload/part-03d \
+            .github/nhl_payload/part-04 \
+            > /tmp/nhl-feature.b64
+          echo "7950ae928b3abf24ea313a39f42f2eff1720b5bc446da88f9b45930d5fd7f934  /tmp/nhl-feature.b64" | sha256sum -c -
+          base64 --decode /tmp/nhl-feature.b64 > /tmp/nhl-feature.tar.gz
+          echo "1a8b95fa1971d963202748b4c524bc464ed2c39aebf0608a52c30b6b169292f9  /tmp/nhl-feature.tar.gz" | sha256sum -c -
           tar -xzf /tmp/nhl-feature.tar.gz -C /tmp/nhl-feature
 
           cp /tmp/nhl-feature/nhl_collector.py nhl_collector.py
