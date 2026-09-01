@@ -16,6 +16,7 @@ jobs:
           ref: feature/nhl-ticket-tracking
       - name: Report payload segment hashes
         run: |
+          echo "diagnostic generation 2"
           for file in \
             .github/nhl_payload/part-00 \
             .github/nhl_payload/part-01a \
