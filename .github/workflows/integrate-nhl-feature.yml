@@ -1,0 +1,151 @@
+name: Integrate NHL feature
+
+on:
+  push:
+    branches:
+      - feature/nhl-ticket-tracking
+    paths:
+      - ".github/nhl_feature.tar.b64"
+      - ".github/workflows/integrate-nhl-feature.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/nhl-ticket-tracking
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Materialize NHL source files
+        run: |
+          mkdir -p /tmp/nhl-feature
+          base64 --decode .github/nhl_feature.tar.b64 > /tmp/nhl-feature.tar.gz
+          tar -xzf /tmp/nhl-feature.tar.gz -C /tmp/nhl-feature
+
+          cp /tmp/nhl-feature/nhl_collector.py nhl_collector.py
+          cp /tmp/nhl-feature/nhl_schedule_collector.py nhl_schedule_collector.py
+          cp /tmp/nhl-feature/nhl_blueprint.py Flask_App/nhl_blueprint.py
+          cp /tmp/nhl-feature/NHLHomeScreen.html Flask_App/templates/NHLHomeScreen.html
+          cp /tmp/nhl-feature/nhl_graph.html Flask_App/templates/nhl_graph.html
+          cp /tmp/nhl-feature/nhl_map.html Flask_App/templates/nhl_map.html
+          cp /tmp/nhl-feature/nhl.css Flask_App/static/css/nhl.css
+          cp /tmp/nhl-feature/nhl.js Flask_App/static/js/nhl.js
+          cp /tmp/nhl-feature/nhl-graph.js Flask_App/static/js/nhl-graph.js
+          cp /tmp/nhl-feature/nhl-map.js Flask_App/static/js/nhl-map.js
+          cp /tmp/nhl-feature/test_nhl_collector.py tests/test_nhl_collector.py
+          cp /tmp/nhl-feature/test_nhl_schedule_collector.py tests/test_nhl_schedule_collector.py
+          cp /tmp/nhl-feature/test_nhl_blueprint.py tests/test_nhl_blueprint.py
+
+      - name: Register NHL web routes and navigation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str, label: str) -> None:
+              file = Path(path)
+              source = file.read_text(encoding="utf-8")
+              count = source.count(old)
+              if count != 1:
+                  raise SystemExit(f"Expected one {label} in {path}, found {count}")
+              file.write_text(source.replace(old, new, 1), encoding="utf-8")
+
+          replace_once(
+              "Flask_App/flask_app.py",
+              "from Flask_App.nfl_blueprint import nfl_blueprint\n\napp.register_blueprint(nfl_blueprint)\n",
+              "from Flask_App.nfl_blueprint import nfl_blueprint\n"
+              "from Flask_App.nhl_blueprint import nhl_blueprint\n\n"
+              "app.register_blueprint(nfl_blueprint)\n"
+              "app.register_blueprint(nhl_blueprint)\n",
+              "NFL blueprint registration block",
+          )
+
+          replace_once(
+              "Flask_App/templates/base.html",
+              "        <a href=\"{{ url_for('nfl.nfl_home') }}\"{% if request.endpoint and request.endpoint.startswith('nfl.') %} class=\"is-active\" aria-current=\"page\"{% endif %}>NFL</a>\n",
+              "        <a href=\"{{ url_for('nfl.nfl_home') }}\"{% if request.endpoint and request.endpoint.startswith('nfl.') %} class=\"is-active\" aria-current=\"page\"{% endif %}>NFL</a>\n"
+              "        <a href=\"{{ url_for('nhl.nhl_home') }}\"{% if request.endpoint and request.endpoint.startswith('nhl.') %} class=\"is-active\" aria-current=\"page\"{% endif %}>NHL</a>\n",
+              "NFL navigation link",
+          )
+          replace_once(
+              "Flask_App/templates/base.html",
+              "      <p>Baseball and NFL histories are collected and stored separately.</p>",
+              "      <p>Baseball, NFL, and NHL histories are collected and stored separately.</p>",
+              "footer league summary",
+          )
+
+          gitignore = Path(".gitignore")
+          source = gitignore.read_text(encoding="utf-8")
+          additions = """
+          # NHL collection data
+          NHL-collection.db
+          nhl_audit/
+          nhl_backups/
+          nhl_remote_health.json
+          nhl_schedule_health.json
+          nhl_smoke_result.json
+          nhl_pending/
+          """.strip()
+          if "# NHL collection data" not in source:
+              gitignore.write_text(source.rstrip() + "\n\n" + additions + "\n", encoding="utf-8")
+
+          startup = Path("tests/test_pythonanywhere_nfl_startup.py")
+          source = startup.read_text(encoding="utf-8")
+          old = '''        self.assertIn("/api/nfl/snapshot", routes)\n'''
+          new = '''        self.assertIn("/api/nfl/snapshot", routes)\n        self.assertIn("/nhl", routes)\n        self.assertIn("/nhl/map", routes)\n        self.assertIn("/nhl/graph", routes)\n        self.assertIn("/api/nhl/snapshot", routes)\n'''
+          if source.count(old) != 1:
+              raise SystemExit("Could not locate the startup route assertion block")
+          startup.write_text(source.replace(old, new, 1), encoding="utf-8")
+          PY
+
+      - name: Validate Python and browser assets
+        run: |
+          python -m py_compile \
+            nhl_collector.py \
+            nhl_schedule_collector.py \
+            Flask_App/nhl_blueprint.py \
+            tests/test_nhl_collector.py \
+            tests/test_nhl_schedule_collector.py \
+            tests/test_nhl_blueprint.py
+          node --check Flask_App/static/js/nhl.js
+          node --check Flask_App/static/js/nhl-graph.js
+          node --check Flask_App/static/js/nhl-map.js
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run complete test suite
+        run: python -m unittest discover -s tests -v
+
+      - name: Commit NHL implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            .gitignore \
+            nhl_collector.py \
+            nhl_schedule_collector.py \
+            Flask_App/flask_app.py \
+            Flask_App/nhl_blueprint.py \
+            Flask_App/templates/base.html \
+            Flask_App/templates/NHLHomeScreen.html \
+            Flask_App/templates/nhl_graph.html \
+            Flask_App/templates/nhl_map.html \
+            Flask_App/static/css/nhl.css \
+            Flask_App/static/js/nhl.js \
+            Flask_App/static/js/nhl-graph.js \
+            Flask_App/static/js/nhl-map.js \
+            tests/test_nhl_collector.py \
+            tests/test_nhl_schedule_collector.py \
+            tests/test_nhl_blueprint.py \
+            tests/test_pythonanywhere_nfl_startup.py
+          git commit -m "Add NHL ticket tracking and conservative compaction"
+          git push origin HEAD:feature/nhl-ticket-tracking
