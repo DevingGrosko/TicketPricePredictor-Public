@@ -51,27 +51,27 @@ jobs:
 
           workflow_path = Path(".github/workflows/deploy-pythonanywhere.yml")
           workflow = workflow_path.read_text()
-          compile_old = '''            Flask_App/nfl_blueprint.py \\
-            Flask_App/nhl_blueprint.py
-          '''
-          compile_new = '''            Flask_App/nfl_blueprint.py \\
-            Flask_App/nfl_stadium_blueprint.py \\
-            Flask_App/nhl_blueprint.py
-          '''
-          if compile_old not in workflow:
-              raise SystemExit("Could not find the Python compile validation block.")
-          workflow = workflow.replace(compile_old, compile_new, 1)
+          slash = chr(92)
+          compile_line = f"            Flask_App/nfl_blueprint.py {slash}\n"
+          if compile_line not in workflow:
+              raise SystemExit("Could not find the Python compile validation line.")
+          workflow = workflow.replace(
+              compile_line,
+              compile_line
+              + f"            Flask_App/nfl_stadium_blueprint.py {slash}\n",
+              1,
+          )
 
-          js_old = '''          node --check Flask_App/static/js/nfl-map.js
-          node --check Flask_App/static/js/nhl.js
-          '''
-          js_new = '''          node --check Flask_App/static/js/nfl-map.js
-          node --check Flask_App/static/js/nfl-stadium.js
-          node --check Flask_App/static/js/nhl.js
-          '''
-          if js_old not in workflow:
-              raise SystemExit("Could not find the JavaScript validation block.")
-          workflow_path.write_text(workflow.replace(js_old, js_new, 1))
+          js_line = "          node --check Flask_App/static/js/nfl-map.js\n"
+          if js_line not in workflow:
+              raise SystemExit("Could not find the JavaScript validation line.")
+          workflow = workflow.replace(
+              js_line,
+              js_line
+              + "          node --check Flask_App/static/js/nfl-stadium.js\n",
+              1,
+          )
+          workflow_path.write_text(workflow)
 
           Path(".github/workflows/register-nfl-stadium-blueprint.yml").unlink()
           PY
