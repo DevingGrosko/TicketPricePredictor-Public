@@ -63,21 +63,24 @@ jobs:
               raise SystemExit("Could not locate the map replacement block")
           text = text.replace(old, new, 1)
 
-          version_old = '''    replace_exact(
-              path,
-              f"js/{script_name}') }}?v=2",
-              f"js/{script_name}') }}?v=3",
+          version_pairs = (
+              (
+                  '''f"js/{script_name}') }}?v=2"''',
+                  '''"js/" + script_name + "') }}?v=2"''',
+              ),
+              (
+                  '''f"js/{script_name}') }}?v=3"''',
+                  '''"js/" + script_name + "') }}?v=3"''',
+              ),
           )
-          '''
-          version_new = '''    replace_exact(
-              path,
-              "js/" + script_name + "') }}?v=2",
-              "js/" + script_name + "') }}?v=3",
-          )
-          '''
-          if text.count(version_old) != 1:
-              raise SystemExit("Could not locate the map asset version block")
-          path.write_text(text.replace(version_old, version_new, 1))
+          for old_version, new_version in version_pairs:
+              if text.count(old_version) != 1:
+                  raise SystemExit(
+                      f"Could not locate map asset expression: {old_version}"
+                  )
+              text = text.replace(old_version, new_version, 1)
+
+          path.write_text(text)
           PY
           python .github/scripts/simplify_navigation.py
 
