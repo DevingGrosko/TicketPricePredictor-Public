@@ -15,13 +15,95 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - name: Capture authenticated production traceback
-        env:
-          COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
+      - name: Probe every live MLB stadium report
         run: |
-          status="$(curl -sS --max-time 120 -o /tmp/diagnostic.json -w '%{http_code}' \
-            -H "Authorization: Bearer $COLLECTOR_INGEST_TOKEN" \
-            'https://bunnyjeff.pythonanywhere.com/api/diagnostics/mlb-stadium?venue=Truist%20Park')"
-          echo "Diagnostic HTTP status: $status"
-          python -m json.tool /tmp/diagnostic.json || cat /tmp/diagnostic.json
-          test "$status" = "200" || test "$status" = "500"
+          python - <<'PY'
+          from concurrent.futures import ThreadPoolExecutor, as_completed
+          from html import unescape
+          from html.parser import HTMLParser
+          from time import monotonic
+          from urllib.error import HTTPError, URLError
+          from urllib.parse import urljoin
+          from urllib.request import Request, urlopen
+
+          BASE = "https://bunnyjeff.pythonanywhere.com"
+
+          class LinkParser(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.links = []
+
+              def handle_starttag(self, tag, attrs):
+                  if tag.lower() != "a":
+                      return
+                  href = dict(attrs).get("href")
+                  if href:
+                      self.links.append(unescape(href))
+
+          def fetch(url, timeout=180):
+              started = monotonic()
+              request = Request(
+                  url,
+                  headers={"User-Agent": "TicketSignal-live-verification/1.0"},
+              )
+              try:
+                  with urlopen(request, timeout=timeout) as response:
+                      body = response.read().decode("utf-8", "replace")
+                      return response.status, monotonic() - started, body
+              except HTTPError as exc:
+                  body = exc.read().decode("utf-8", "replace")
+                  return exc.code, monotonic() - started, body
+              except URLError as exc:
+                  return 0, monotonic() - started, str(exc)
+
+          status, elapsed, directory = fetch(f"{BASE}/baseball/stadium", 60)
+          print(f"DIRECTORY status={status} elapsed={elapsed:.2f}s")
+          if status != 200:
+              raise SystemExit("MLB stadium directory did not return 200")
+
+          parser = LinkParser()
+          parser.feed(directory)
+          links = []
+          for href in parser.links:
+              absolute = urljoin(BASE, href)
+              if "/baseball/stadium?venue=" in absolute and absolute not in links:
+                  links.append(absolute)
+
+          print(f"FOUND {len(links)} MLB stadium reports")
+          if not links:
+              raise SystemExit("No MLB stadium report links were discovered")
+
+          results = []
+          with ThreadPoolExecutor(max_workers=4) as executor:
+              futures = {executor.submit(fetch, url): url for url in links}
+              for future in as_completed(futures):
+                  url = futures[future]
+                  status, elapsed, body = future.result()
+                  healthy = status == 200 and "Section signals" in body
+                  print(
+                      f"REPORT status={status} healthy={healthy} "
+                      f"elapsed={elapsed:.2f}s url={url}"
+                  )
+                  results.append((healthy, status, url, body[:600]))
+
+          failures = [row for row in results if not row[0]]
+          if failures:
+              print("FAILURES")
+              for _healthy, status, url, body in failures:
+                  print(f"status={status} url={url}")
+                  print(body.replace("\n", " "))
+              raise SystemExit(f"{len(failures)} MLB stadium report(s) failed")
+
+          diagnostic_status, diagnostic_elapsed, _body = fetch(
+              f"{BASE}/api/diagnostics/mlb-stadium?venue=Truist%20Park",
+              30,
+          )
+          print(
+              f"REMOVED_DIAGNOSTIC status={diagnostic_status} "
+              f"elapsed={diagnostic_elapsed:.2f}s"
+          )
+          if diagnostic_status != 404:
+              raise SystemExit("Temporary diagnostic endpoint is still exposed")
+
+          print("All live MLB stadium reports returned valid pages.")
+          PY
