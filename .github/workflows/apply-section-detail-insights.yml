@@ -32,6 +32,15 @@ jobs:
 
       - name: Extract prepared implementation
         run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          part = Path('.github/section-detail-payload/part04')
+          content = part.read_text()
+          if content.count('HTTPRequest') != 1:
+              raise SystemExit('Expected exactly one transport-inserted marker in part04')
+          part.write_text(content.replace('HTTPRequest', '', 1))
+          PY
           wc -c .github/section-detail-payload/part*
           sha256sum .github/section-detail-payload/part*
           cat .github/section-detail-payload/part* > /tmp/section-detail.b64
