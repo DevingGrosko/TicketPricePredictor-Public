@@ -1,0 +1,29 @@
+name: Verify live Truist Park hotfix
+
+on:
+  push:
+    branches:
+      - diagnose/baseball-stadium-500
+    paths:
+      - ".github/workflows/verify-truist-hotfix.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify selected MLB stadium page
+        run: |
+          status="$(curl -sS --max-time 180 -o /tmp/truist.html -w '%{http_code}' \
+            'https://bunnyjeff.pythonanywhere.com/baseball/stadium?venue=Truist%20Park')"
+          echo "Truist Park status: $status"
+          grep -F "Section signals" /tmp/truist.html
+          test "$status" = "200"
+
+          diagnostic_status="$(curl -sS --max-time 30 -o /tmp/diagnostic.html -w '%{http_code}' \
+            'https://bunnyjeff.pythonanywhere.com/api/diagnostics/mlb-stadium?venue=Truist%20Park')"
+          echo "Removed diagnostic status: $diagnostic_status"
+          test "$diagnostic_status" = "404"
