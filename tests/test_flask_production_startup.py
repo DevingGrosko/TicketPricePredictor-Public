@@ -198,6 +198,13 @@ class FlaskProductionStartupTests(unittest.TestCase):
                 assert b"Interactive section explorer" in nfl_map.data
                 assert b"MetLife Stadium" in nfl_map.data
 
+                nfl_section = client.get(
+                    "/nfl/stadium/section?venue=MetLife%20Stadium&section=Section%200"
+                )
+                assert nfl_section.status_code == 200
+                assert b"Average price toward kickoff" in nfl_section.data
+                assert b"Section 0" in nfl_section.data
+
                 nhl_page = client.get("/nhl")
                 assert nhl_page.status_code == 200
                 assert b"NHL market tracker" in nhl_page.data
@@ -209,6 +216,13 @@ class FlaskProductionStartupTests(unittest.TestCase):
                 assert nhl_map.status_code == 200
                 assert b"Interactive section explorer" in nhl_map.data
                 assert b"Scotiabank Arena" in nhl_map.data
+
+                nhl_section = client.get(
+                    "/nhl/arena/section?venue=Scotiabank%20Arena&section=Section%20100"
+                )
+                assert nhl_section.status_code == 200
+                assert b"Average price toward puck drop" in nhl_section.data
+                assert b"Section 100" in nhl_section.data
                 """
             )
             result = subprocess.run(

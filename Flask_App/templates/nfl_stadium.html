@@ -122,7 +122,7 @@
                     <small>{{ section.game_count }} game{% if section.game_count != 1 %}s{% endif %}{% if section.is_low_price_sample %} · small sample{% endif %}</small>
                   </div>
                   <div class="nfl-rank-value"><strong>{{ section.average_price_label }}</strong><small>average typical price</small></div>
-                  {% if section.detail_url %}<a href="{{ section.detail_url }}" aria-label="Open details for {{ section.name }}">Inspect <span aria-hidden="true">&#8594;</span></a>{% endif %}
+                  {% if section.detail_url %}<a href="{{ section.detail_url }}" aria-label="Open details for {{ section.name }}">View section <span aria-hidden="true">&#8594;</span></a>{% endif %}
                 </li>
               {% else %}
                 <li class="nfl-ranking-empty">No section prices are available for this {{ venue_noun }} yet.</li>
@@ -144,7 +144,7 @@
                     <small>{{ section.drop_game_count }} qualifying game{% if section.drop_game_count != 1 %}s{% endif %} · fell in {{ section.drop_frequency }}%{% if section.is_low_drop_sample %} · small sample{% endif %}</small>
                   </div>
                   <div class="nfl-rank-value nfl-rank-value--drop"><strong>{{ section.average_percent_drop_label }}</strong><small>{{ section.average_dollar_drop_label }} average</small></div>
-                  {% if section.detail_url %}<a href="{{ section.detail_url }}" aria-label="Open details for {{ section.name }}">Inspect <span aria-hidden="true">&#8594;</span></a>{% endif %}
+                  {% if section.detail_url %}<a href="{{ section.detail_url }}" aria-label="Open details for {{ section.name }}">View section <span aria-hidden="true">&#8594;</span></a>{% endif %}
                 </li>
               {% else %}
                 <li class="nfl-ranking-empty">No completed games have enough section history to calculate a decline yet.</li>

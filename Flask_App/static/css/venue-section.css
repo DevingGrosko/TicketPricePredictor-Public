@@ -1,0 +1,683 @@
+.venue-section-page {
+  min-height: calc(100vh - 160px);
+}
+
+.venue-section-shell {
+  width: min(1240px, calc(100% - 40px));
+  margin: 0 auto;
+  padding: 42px 0 110px;
+}
+
+.venue-section-shell > .nfl-back-link {
+  margin-bottom: 28px;
+}
+
+.venue-section-error {
+  margin-top: 36px;
+}
+
+.venue-section-hero {
+  position: relative;
+  overflow: hidden;
+  padding: 38px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(420px, .85fr);
+  gap: 34px 54px;
+  border: 1px solid rgba(219, 230, 246, .14);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 92% 4%, rgba(36, 121, 198, .2), transparent 23rem),
+    linear-gradient(145deg, rgba(9, 32, 67, .96), rgba(3, 14, 33, .98));
+  box-shadow: 0 28px 80px rgba(0, 0, 0, .25);
+}
+
+.venue-section-hero::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  background: linear-gradient(90deg, var(--nfl-red), var(--nfl-blue));
+}
+
+.venue-section-hero__copy,
+.venue-section-metrics {
+  position: relative;
+  z-index: 1;
+}
+
+.venue-section-hero h1 {
+  margin: 9px 0 12px;
+  color: white;
+  font: 700 clamp(44px, 6vw, 72px)/.98 var(--font-display);
+  letter-spacing: -.055em;
+}
+
+.venue-section-hero__copy > p {
+  max-width: 650px;
+  margin: 0;
+  color: #9badc4;
+  font-size: 15px;
+  line-height: 1.65;
+}
+
+.venue-section-hero__actions {
+  margin-top: 24px;
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.venue-section-text-link {
+  color: #dbe7f6;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.venue-section-text-link span {
+  color: var(--nfl-red-bright);
+}
+
+.venue-section-metrics {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  align-self: stretch;
+}
+
+.venue-section-metrics > div {
+  min-height: 118px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  border: 1px solid rgba(219, 230, 246, .11);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .025);
+}
+
+.venue-section-metrics dt {
+  color: white;
+  font: 700 clamp(24px, 3vw, 34px)/1 var(--font-display);
+  letter-spacing: -.04em;
+}
+
+.venue-section-metrics .is-down dt {
+  color: #77d3a0;
+}
+
+.venue-section-metrics .is-up dt {
+  color: #ff858c;
+}
+
+.venue-section-metrics dd {
+  margin: 9px 0 0;
+  color: #7489a5;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: .06em;
+  line-height: 1.45;
+  text-transform: uppercase;
+}
+
+.venue-section-currency-note {
+  width: 100%;
+  margin: 18px 0 0;
+}
+
+.venue-section-insight-grid {
+  margin-top: 22px;
+  display: grid;
+  grid-template-columns: minmax(350px, .82fr) minmax(520px, 1.18fr);
+  gap: 22px;
+  align-items: stretch;
+}
+
+.venue-section-card {
+  min-width: 0;
+  padding: 25px;
+  border: 1px solid rgba(219, 230, 246, .13);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at 100% 0, rgba(18, 97, 166, .13), transparent 17rem),
+    linear-gradient(150deg, rgba(9, 32, 67, .91), rgba(3, 14, 33, .96));
+  box-shadow: 0 22px 58px rgba(0, 0, 0, .2);
+}
+
+.venue-section-card__header {
+  margin-bottom: 18px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.venue-section-card__header h2 {
+  margin: 6px 0 0;
+  color: white;
+  font: 700 clamp(24px, 3vw, 34px)/1.05 var(--font-display);
+  letter-spacing: -.04em;
+}
+
+.venue-section-badge {
+  flex: 0 0 auto;
+  padding: 7px 10px;
+  border: 1px solid rgba(219, 230, 246, .13);
+  border-radius: 999px;
+  color: #9fb2ca;
+  background: rgba(255, 255, 255, .035);
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.venue-section-map-stage {
+  position: relative;
+  min-height: 420px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid rgba(219, 230, 246, .1);
+  border-radius: 12px;
+  background:
+    radial-gradient(ellipse at center, rgba(17, 55, 96, .5), rgba(2, 11, 27, .86) 72%);
+}
+
+.venue-section-map-stage svg {
+  width: 100%;
+  height: auto;
+  max-height: 500px;
+  display: block;
+}
+
+.venue-location-section path {
+  fill: rgba(82, 137, 193, .28);
+  stroke: rgba(191, 216, 243, .48);
+  stroke-width: 1.4;
+  vector-effect: non-scaling-stroke;
+  transition: opacity .2s ease, fill .2s ease, stroke .2s ease;
+}
+
+.venue-location-section:not(.is-selected) {
+  opacity: .42;
+}
+
+.venue-location-section.is-selected {
+  opacity: 1;
+  filter: drop-shadow(0 0 13px rgba(255, 76, 88, .7));
+}
+
+.venue-location-section.is-selected path {
+  fill: var(--nfl-red-bright);
+  stroke: #fff;
+  stroke-width: 2.8;
+}
+
+.venue-location-section title {
+  pointer-events: none;
+}
+
+.venue-location-label {
+  fill: white;
+  font: 800 18px/1 var(--font-body);
+  text-anchor: middle;
+  dominant-baseline: middle;
+  paint-order: stroke;
+  stroke: rgba(3, 13, 30, .95);
+  stroke-width: 5px;
+  stroke-linejoin: round;
+}
+
+.venue-location-surface {
+  fill: rgba(12, 89, 62, .72);
+  stroke: rgba(225, 240, 250, .45);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.venue-location-surface-line {
+  fill: none;
+  stroke: rgba(238, 247, 255, .55);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.venue-location-surface-text {
+  fill: rgba(255, 255, 255, .78);
+  font: 800 22px/1 var(--font-display);
+  letter-spacing: .12em;
+  text-anchor: middle;
+  dominant-baseline: middle;
+}
+
+.venue-section-note {
+  margin: 15px 0 0;
+  color: #8296af;
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.venue-section-card__actions {
+  margin-top: 16px;
+  padding-top: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-top: 1px solid rgba(219, 230, 246, .09);
+}
+
+.venue-section-card__actions a {
+  color: #e4edf8;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.venue-section-card__actions a span {
+  color: var(--nfl-red-bright);
+}
+
+.venue-section-card__actions small {
+  max-width: 58%;
+  color: #667c98;
+  font-size: 9px;
+  line-height: 1.4;
+  text-align: right;
+}
+
+.venue-section-chart {
+  position: relative;
+  min-height: 420px;
+  overflow: hidden;
+  border: 1px solid rgba(219, 230, 246, .1);
+  border-radius: 12px;
+  background:
+    linear-gradient(180deg, rgba(12, 42, 78, .5), rgba(2, 11, 27, .86));
+}
+
+.venue-section-chart svg {
+  width: 100%;
+  height: auto;
+  min-height: 420px;
+  display: block;
+}
+
+.venue-chart-grid {
+  stroke: rgba(190, 214, 241, .11);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.venue-chart-axis-label,
+.venue-chart-point-label {
+  fill: #8094af;
+  font: 700 12px/1 var(--font-body);
+}
+
+.venue-chart-axis-label--x {
+  text-anchor: middle;
+}
+
+.venue-chart-axis-label--y {
+  text-anchor: end;
+  dominant-baseline: middle;
+}
+
+.venue-chart-area {
+  fill: url(#venue-chart-area-gradient);
+  opacity: .8;
+}
+
+.venue-chart-gradient-start {
+  stop-color: var(--nfl-red-bright);
+  stop-opacity: .28;
+}
+
+.venue-chart-gradient-end {
+  stop-color: var(--nfl-red-bright);
+  stop-opacity: 0;
+}
+
+.venue-chart-line {
+  fill: none;
+  stroke: var(--nfl-red-bright);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+  filter: drop-shadow(0 5px 10px rgba(255, 76, 88, .25));
+}
+
+.venue-chart-point {
+  fill: #fff;
+  stroke: var(--nfl-red-bright);
+  stroke-width: 4;
+  vector-effect: non-scaling-stroke;
+  cursor: default;
+}
+
+.venue-chart-point:focus {
+  outline: none;
+  filter: drop-shadow(0 0 9px rgba(255, 255, 255, .9));
+}
+
+.venue-chart-point-label {
+  fill: #dfe9f6;
+  font-weight: 800;
+  text-anchor: middle;
+}
+
+.venue-section-chart-tooltip {
+  position: absolute;
+  z-index: 4;
+  min-width: 170px;
+  padding: 10px 12px;
+  border: 1px solid rgba(219, 230, 246, .18);
+  border-radius: 9px;
+  color: #dce8f7;
+  background: rgba(2, 12, 29, .96);
+  box-shadow: 0 14px 36px rgba(0, 0, 0, .4);
+  pointer-events: none;
+}
+
+.venue-section-chart-tooltip strong,
+.venue-section-chart-tooltip span,
+.venue-section-chart-tooltip small {
+  display: block;
+}
+
+.venue-section-chart-tooltip strong {
+  color: white;
+  font: 700 18px/1.1 var(--font-display);
+}
+
+.venue-section-chart-tooltip span {
+  margin-top: 5px;
+  color: #aebfd3;
+  font-size: 10px;
+}
+
+.venue-section-chart-tooltip small {
+  margin-top: 4px;
+  color: #6f84a0;
+  font-size: 9px;
+}
+
+.venue-section-timeline-summary {
+  margin-top: 14px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  border: 1px solid rgba(219, 230, 246, .1);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .025);
+}
+
+.venue-section-timeline-summary span,
+.venue-section-timeline-summary small {
+  display: block;
+}
+
+.venue-section-timeline-summary span {
+  color: #dce8f7;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.venue-section-timeline-summary small {
+  margin-top: 4px;
+  color: #7186a2;
+  font-size: 9px;
+}
+
+.venue-section-timeline-summary strong {
+  color: #dce8f7;
+  font: 700 20px/1 var(--font-display);
+}
+
+.venue-section-timeline-summary.is-down strong {
+  color: #77d3a0;
+}
+
+.venue-section-timeline-summary.is-up strong {
+  color: #ff858c;
+}
+
+.venue-section-chart-empty {
+  min-height: 360px;
+  display: grid;
+  place-content: center;
+  padding: 30px;
+  text-align: center;
+  border: 1px dashed rgba(219, 230, 246, .15);
+  border-radius: 12px;
+}
+
+.venue-section-chart-empty strong {
+  color: white;
+  font: 700 23px/1.1 var(--font-display);
+}
+
+.venue-section-chart-empty p {
+  max-width: 430px;
+  margin: 10px auto 0;
+  color: #8296af;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.venue-section-games {
+  margin-top: 56px;
+}
+
+.venue-section-games__heading {
+  margin-bottom: 20px;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 40px;
+}
+
+.venue-section-games__heading h2 {
+  margin: 6px 0 0;
+  color: white;
+  font: 700 clamp(30px, 4vw, 45px)/1 var(--font-display);
+  letter-spacing: -.045em;
+}
+
+.venue-section-games__heading > p {
+  max-width: 420px;
+  margin: 0;
+  color: #7d91aa;
+  font-size: 12px;
+  line-height: 1.55;
+  text-align: right;
+}
+
+.venue-section-game-list {
+  display: grid;
+  gap: 10px;
+}
+
+.venue-section-game-row {
+  padding: 17px 18px;
+  display: grid;
+  grid-template-columns: auto minmax(270px, 1fr) minmax(235px, .55fr) auto;
+  align-items: center;
+  gap: 16px 24px;
+  border: 1px solid rgba(219, 230, 246, .11);
+  border-radius: 12px;
+  background: linear-gradient(145deg, rgba(8, 29, 61, .82), rgba(3, 14, 31, .92));
+}
+
+.venue-section-game-row__copy h3 {
+  margin: 0;
+  color: #e8f0fa;
+  font: 700 14px/1.25 var(--font-display);
+}
+
+.venue-section-game-row__copy p {
+  margin: 6px 0 0;
+  color: #6e839e;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.venue-section-game-row dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.venue-section-game-row dt {
+  color: #e8f0fa;
+  font: 700 18px/1 var(--font-display);
+}
+
+.venue-section-game-row dd {
+  margin: 5px 0 0;
+  color: #687e99;
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.venue-section-game-row__actions {
+  display: grid;
+  justify-items: end;
+  gap: 6px;
+}
+
+.venue-section-game-row__actions a {
+  color: #dce8f7;
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.venue-section-game-row__actions a span {
+  color: var(--nfl-red-bright);
+}
+
+.mlb-theme .venue-section-hero,
+.mlb-theme .venue-section-card,
+.mlb-theme .venue-section-game-row {
+  background:
+    radial-gradient(circle at 100% 0, rgba(214, 189, 122, .12), transparent 18rem),
+    linear-gradient(150deg, rgba(22, 58, 49, .95), rgba(7, 20, 16, .98));
+  border-color: rgba(238, 228, 198, .14);
+}
+
+.mlb-theme .venue-section-hero::before {
+  background: linear-gradient(90deg, #c33a32, #d6bd7a, #3a8068);
+}
+
+.mlb-theme .venue-section-chart,
+.mlb-theme .venue-section-map-stage {
+  background: linear-gradient(180deg, rgba(22, 61, 49, .6), rgba(6, 19, 15, .91));
+}
+
+.mlb-theme .venue-location-section.is-selected {
+  filter: drop-shadow(0 0 13px rgba(214, 189, 122, .7));
+}
+
+.mlb-theme .venue-location-section.is-selected path,
+.mlb-theme .venue-chart-line,
+.mlb-theme .venue-chart-point {
+  stroke: #e4c982;
+}
+
+.mlb-theme .venue-location-section.is-selected path {
+  fill: #c33a32;
+}
+
+.nhl-theme .venue-section-hero,
+.nhl-theme .venue-section-card,
+.nhl-theme .venue-section-game-row {
+  border-color: rgba(184, 236, 241, .13);
+}
+
+@media (max-width: 1040px) {
+  .venue-section-hero,
+  .venue-section-insight-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .venue-section-game-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .venue-section-game-row dl {
+    grid-column: 2 / 3;
+    grid-row: 2;
+  }
+
+  .venue-section-game-row__actions {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+  }
+}
+
+@media (max-width: 700px) {
+  .venue-section-shell {
+    width: min(100% - 24px, 1240px);
+    padding-top: 26px;
+  }
+
+  .venue-section-hero,
+  .venue-section-card {
+    padding: 22px;
+  }
+
+  .venue-section-hero h1 {
+    font-size: 44px;
+  }
+
+  .venue-section-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .venue-section-metrics > div {
+    min-height: 94px;
+  }
+
+  .venue-section-card__header,
+  .venue-section-games__heading,
+  .venue-section-card__actions,
+  .venue-section-timeline-summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .venue-section-card__actions small,
+  .venue-section-games__heading > p {
+    max-width: none;
+    text-align: left;
+  }
+
+  .venue-section-map-stage,
+  .venue-section-chart,
+  .venue-section-chart svg {
+    min-height: 330px;
+  }
+
+  .venue-section-game-row {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .venue-section-game-row dl,
+  .venue-section-game-row__actions {
+    grid-column: 1;
+    grid-row: auto;
+  }
+
+  .venue-section-game-row__actions {
+    justify-items: start;
+  }
+}

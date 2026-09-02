@@ -1,0 +1,160 @@
+{% extends "base.html" %}
+{% block title %}{% if error %}Section details{% else %}{{ selected_section }} · {{ selected_team_label }}{% endif %} — TicketSignal{% endblock %}
+{% block body_class %}nfl-theme{% if theme_class %} {{ theme_class }}{% endif %}{% endblock %}
+{% block head %}
+  <meta name="theme-color" content="{{ theme_color }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl.css') }}?v=2">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-responsive.css') }}?v=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-stadium.css') }}?v=3">
+  {% if sport_key == 'nhl' %}<link rel="stylesheet" href="{{ url_for('static', filename='css/nhl.css') }}?v=2">{% endif %}
+  {% if sport_key == 'mlb' %}<link rel="stylesheet" href="{{ url_for('static', filename='css/mlb.css') }}?v=1">{% endif %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/venue-section.css') }}?v=1">
+{% endblock %}
+
+{% block content %}
+<div class="nfl-page venue-section-page">
+  <main class="venue-section-shell">
+    <a class="nfl-back-link" href="{{ report_url or directory_url }}"><span aria-hidden="true">&#8592;</span> Back to team report</a>
+
+    {% if error %}
+      <section class="empty-state nfl-empty-state venue-section-error">
+        <span>!</span>
+        <h1>Section unavailable</h1>
+        <p>{{ error }}</p>
+        <a class="button nfl-button nfl-button--primary" href="{{ directory_url }}">Browse teams</a>
+      </section>
+    {% else %}
+      <header class="venue-section-hero">
+        <div class="venue-section-hero__copy">
+          <span class="nfl-section-kicker">{{ selected_team_label }} · {{ selected_venue }}</span>
+          <h1>{{ selected_section }}</h1>
+          <p>Based on {{ section_summary.game_count }} tracked home game{% if section_summary.game_count != 1 %}s{% endif %}.</p>
+          <div class="venue-section-hero__actions">
+            <a class="button nfl-button nfl-button--primary" href="#price-timeline">View price timeline <span aria-hidden="true">&#8595;</span></a>
+            {% if buying_window_url %}<a class="venue-section-text-link" href="{{ buying_window_url }}">Buying window <span aria-hidden="true">&#8594;</span></a>{% endif %}
+          </div>
+        </div>
+
+        <dl class="venue-section-metrics">
+          <div>
+            <dt>{{ section_summary.average_price_label }}</dt>
+            <dd>Average price</dd>
+          </div>
+          <div class="is-{{ section_summary.direction }}">
+            <dt>{{ section_summary.average_percent_drop_label }}</dt>
+            <dd>{% if section_summary.drop_game_count %}Average change · {{ section_summary.average_dollar_drop_label }}{% else %}More completed games needed{% endif %}</dd>
+          </div>
+          <div>
+            <dt>{{ section_summary.game_count }}</dt>
+            <dd>Games{% if section_summary.is_low_price_sample %} · small sample{% endif %}</dd>
+          </div>
+          <div>
+            <dt>{{ section_summary.observation_count }}</dt>
+            <dd>Observations</dd>
+          </div>
+        </dl>
+      </header>
+
+      {% if currency_warning %}
+        <div class="nfl-sample-note venue-section-currency-note">
+          <span aria-hidden="true">&#9432;</span><p>{{ currency_warning }}</p>
+        </div>
+      {% endif %}
+
+      <section class="venue-section-insight-grid">
+        <article class="venue-section-card venue-section-location-card">
+          <header class="venue-section-card__header">
+            <div>
+              <span class="nfl-section-kicker">Section location</span>
+              <h2>Where {{ selected_section }} sits.</h2>
+            </div>
+            <span class="venue-section-badge">{{ map_badge }}</span>
+          </header>
+
+          <div class="venue-section-map-stage" data-section-map-stage>
+            <svg data-section-location-map viewBox="0 0 1000 700" role="img" aria-label="{{ selected_section }} highlighted at {{ selected_venue }}"></svg>
+          </div>
+          <p class="venue-section-note">{{ map_note }}</p>
+
+          {% if representative_map_url or representative_provider_url %}
+            <div class="venue-section-card__actions">
+              {% if representative_map_url %}
+                <a href="{{ representative_map_url }}">Open exact game map <span aria-hidden="true">&#8594;</span></a>
+              {% elif representative_provider_url %}
+                <a href="{{ representative_provider_url }}" target="_blank" rel="noreferrer">Open provider seating map <span aria-hidden="true">&#8599;</span></a>
+              {% endif %}
+              {% if representative_game_label %}<small>{{ representative_game_label }}</small>{% endif %}
+            </div>
+          {% endif %}
+        </article>
+
+        <article class="venue-section-card venue-section-timeline-card" id="price-timeline">
+          <header class="venue-section-card__header">
+            <div>
+              <span class="nfl-section-kicker">Price timeline</span>
+              <h2>Average price toward {{ event_moment }}.</h2>
+            </div>
+            <span class="venue-section-badge">{{ currency_label }}</span>
+          </header>
+
+          {% if timeline.points %}
+            <div class="venue-section-chart" data-section-timeline-chart>
+              <svg data-section-timeline-svg viewBox="0 0 920 430" role="img" aria-label="Average {{ selected_section }} price as {{ event_moment }} approaches"></svg>
+              <div class="venue-section-chart-tooltip" data-section-chart-tooltip hidden></div>
+            </div>
+
+            <div class="venue-section-timeline-summary is-{{ timeline.movement_direction }}">
+              <div>
+                <span>{{ timeline.movement_direction_label }}</span>
+                {% if timeline.points|length >= 2 %}<small>{{ timeline.from_label }} → {{ timeline.to_label }}</small>{% endif %}
+              </div>
+              <strong>{% if timeline.points|length >= 2 %}{{ timeline.movement_label }} · {{ timeline.movement_percent_label }}{% else %}More history needed{% endif %}</strong>
+            </div>
+          {% else %}
+            <div class="venue-section-chart-empty">
+              <strong>No time-series points yet</strong>
+              <p>This section has an aggregate price, but not enough timestamped observations to draw its approach-to-game curve.</p>
+            </div>
+          {% endif %}
+
+          <p class="venue-section-note">Each point takes one median price per game in that time window, then averages those game-level values. Extra snapshots in one game do not give it extra weight.</p>
+        </article>
+      </section>
+
+      <section class="venue-section-games" id="section-games">
+        <div class="venue-section-games__heading">
+          <div><span class="nfl-section-kicker">Underlying games</span><h2>Games behind this section average.</h2></div>
+          <p>{{ section_games|length }} game{% if section_games|length != 1 %}s{% endif %} contain usable {{ selected_section }} observations.</p>
+        </div>
+
+        <div class="venue-section-game-list">
+          {% for game in section_games %}
+            <article class="venue-section-game-row">
+              <span class="nfl-game-status nfl-game-status--{{ game.status_key }}">{{ game.status }}</span>
+              <div class="venue-section-game-row__copy">
+                <h3>{{ game.label }}</h3>
+                <p>{{ game.observation_count }} observation{% if game.observation_count != 1 %}s{% endif %} · {{ game.coverage_label }}</p>
+              </div>
+              <dl>
+                <div><dt>{{ game.average_price_label }}</dt><dd>Typical price</dd></div>
+                <div><dt>{{ game.movement_label }}</dt><dd>First to latest · {{ game.movement_percent_label }}</dd></div>
+              </dl>
+              <div class="venue-section-game-row__actions">
+                <a href="{{ game.game_url }}">View game chart <span aria-hidden="true">&#8594;</span></a>
+                {% if game.map_url %}<a href="{{ game.map_url }}">Map</a>{% endif %}
+              </div>
+            </article>
+          {% else %}
+            <div class="empty-state nfl-empty-state"><span>!</span><h3>No game histories available</h3><p>This section does not yet have usable timestamped observations.</p></div>
+          {% endfor %}
+        </div>
+      </section>
+
+      <script id="venue-section-timeline-data" type="application/json">{{ timeline | tojson }}</script>
+      <script id="venue-section-map-data" type="application/json">{{ map_data | tojson }}</script>
+    {% endif %}
+  </main>
+</div>
+{% endblock %}
+
+{% block scripts %}{% if not error %}<script src="{{ url_for('static', filename='js/venue-section.js') }}?v=1"></script>{% endif %}{% endblock %}

@@ -22,9 +22,9 @@
       </a>
       {% set endpoint = request.endpoint or '' %}
       <nav class="site-nav" aria-label="Primary navigation">
-        <a href="{{ url_for('home') }}"{% if endpoint in ('home', 'graph', 'predict') or endpoint == 'nfl_stadium.mlb_stadium' %} class="is-active" aria-current="page"{% endif %}>MLB</a>
-        <a href="{{ url_for('nfl.nfl_home') }}"{% if endpoint.startswith('nfl.') or endpoint == 'nfl_stadium.nfl_stadium' %} class="is-active" aria-current="page"{% endif %}>NFL</a>
-        <a href="{{ url_for('nhl.nhl_home') }}"{% if endpoint.startswith('nhl.') or endpoint == 'nfl_stadium.nhl_arena' %} class="is-active" aria-current="page"{% endif %}>NHL</a>
+        <a href="{{ url_for('home') }}"{% if endpoint in ('home', 'graph', 'predict') or endpoint in ('nfl_stadium.mlb_stadium', 'nfl_stadium.mlb_section') %} class="is-active" aria-current="page"{% endif %}>MLB</a>
+        <a href="{{ url_for('nfl.nfl_home') }}"{% if endpoint.startswith('nfl.') or endpoint in ('nfl_stadium.nfl_stadium', 'nfl_stadium.nfl_section') %} class="is-active" aria-current="page"{% endif %}>NFL</a>
+        <a href="{{ url_for('nhl.nhl_home') }}"{% if endpoint.startswith('nhl.') or endpoint in ('nfl_stadium.nhl_arena', 'nfl_stadium.nhl_section') %} class="is-active" aria-current="page"{% endif %}>NHL</a>
         <a class="nav-github" href="https://github.com/DevingGrosko/TicketPricePredictor-Public" target="_blank" rel="noreferrer">View project <span aria-hidden="true">&#8599;</span></a>
       </nav>
     </header>
