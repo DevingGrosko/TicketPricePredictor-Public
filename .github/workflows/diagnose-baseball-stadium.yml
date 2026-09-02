@@ -1,0 +1,83 @@
+name: Diagnose baseball stadium pages
+
+on:
+  push:
+    branches:
+      - diagnose/baseball-stadium-500
+    paths:
+      - ".github/workflows/diagnose-baseball-stadium.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe live MLB stadium pages
+        run: |
+          python - <<'PY'
+          from html import unescape
+          from html.parser import HTMLParser
+          from urllib.error import HTTPError, URLError
+          from urllib.parse import urljoin
+          from urllib.request import Request, urlopen
+
+          BASE = "https://bunnyjeff.pythonanywhere.com"
+
+          class LinkParser(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.links = []
+              def handle_starttag(self, tag, attrs):
+                  if tag.lower() != "a":
+                      return
+                  href = dict(attrs).get("href")
+                  if href:
+                      self.links.append(unescape(href))
+
+          def fetch(url):
+              req = Request(url, headers={"User-Agent": "TicketSignal-diagnostic/1.0"})
+              try:
+                  with urlopen(req, timeout=30) as response:
+                      body = response.read().decode("utf-8", "replace")
+                      print(f"STATUS {response.status} {url}")
+                      return response.status, body
+              except HTTPError as exc:
+                  body = exc.read().decode("utf-8", "replace")
+                  print(f"STATUS {exc.code} {url}")
+                  print("BODY", body[:1200].replace("\n", " "))
+                  return exc.code, body
+              except URLError as exc:
+                  print(f"NETWORK ERROR {url}: {exc}")
+                  return 0, ""
+
+          status, directory = fetch(f"{BASE}/baseball/stadium")
+          if status != 200:
+              raise SystemExit("MLB stadium directory itself failed")
+
+          parser = LinkParser()
+          parser.feed(directory)
+          stadium_links = []
+          for href in parser.links:
+              absolute = urljoin(BASE, href)
+              if "/baseball/stadium?venue=" in absolute and absolute not in stadium_links:
+                  stadium_links.append(absolute)
+
+          print(f"FOUND {len(stadium_links)} stadium links")
+          failures = []
+          for url in stadium_links[:40]:
+              status, body = fetch(url)
+              if status != 200:
+                  failures.append((status, url, body[:1200]))
+
+          if failures:
+              print("FAILURES")
+              for status, url, body in failures:
+                  print(status, url)
+                  print(body.replace("\n", " "))
+              raise SystemExit(f"{len(failures)} MLB stadium page(s) failed")
+
+          print("All discovered MLB stadium pages returned 200.")
+          PY
