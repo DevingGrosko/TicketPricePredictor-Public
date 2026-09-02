@@ -24,6 +24,7 @@ jobs:
       - name: Add temporary authenticated diagnostic route
         run: |
           python - <<'PY'
+          import base64
           from pathlib import Path
 
           path = Path("Flask_App/nfl_stadium_blueprint.py")
@@ -38,47 +39,9 @@ jobs:
               "from flask import Blueprint, jsonify, render_template, request, url_for\n",
               1,
           )
-          route = r'''
-
-@nfl_stadium_blueprint.get("/api/diagnostics/mlb-stadium")
-def diagnose_mlb_stadium():
-    """Temporarily expose a sanitized traceback to authenticated collectors."""
-    configured = os.environ.get("COLLECTOR_INGEST_TOKEN", "")
-    supplied = request.headers.get("Authorization", "")
-    if not configured or not hmac.compare_digest(supplied, f"Bearer {configured}"):
-        return jsonify({"status": "error", "error": "unauthorized"}), 401
-
-    venue = _clean(request.args.get("venue", ""))
-    try:
-        context = build_mlb_stadium_context(venue)
-    except Exception as exc:
-        frames = traceback.extract_tb(exc.__traceback__)[-10:]
-        return jsonify(
-            {
-                "status": "error",
-                "exception": type(exc).__name__,
-                "message": str(exc),
-                "frames": [
-                    {
-                        "file": Path(frame.filename).name,
-                        "line": frame.lineno,
-                        "function": frame.name,
-                        "code": frame.line or "",
-                    }
-                    for frame in frames
-                ],
-            }
-        ), 500
-
-    return jsonify(
-        {
-            "status": "ok",
-            "venue": context.get("selected_venue", ""),
-            "section_count": context.get("section_count", 0),
-            "drop_count": len(context.get("biggest_drops", [])),
-        }
-    )
-'''
+          route = base64.b64decode(
+              "CgpAbmZsX3N0YWRpdW1fYmx1ZXByaW50LmdldCgiL2FwaS9kaWFnbm9zdGljcy9tbGItc3RhZGl1bSIpCmRlZiBkaWFnbm9zZV9tbGJfc3RhZGl1bSgpOgogICAgIiIiVGVtcG9yYXJpbHkgZXhwb3NlIGEgc2FuaXRpemVkIHRyYWNlYmFjayB0byBhdXRoZW50aWNhdGVkIGNvbGxlY3RvcnMuIiIiCiAgICBjb25maWd1cmVkID0gb3MuZW52aXJvbi5nZXQoIkNPTExFQ1RPUl9JTkdFU1RfVE9LRU4iLCAiIikKICAgIHN1cHBsaWVkID0gcmVxdWVzdC5oZWFkZXJzLmdldCgiQXV0aG9yaXphdGlvbiIsICIiKQogICAgaWYgbm90IGNvbmZpZ3VyZWQgb3Igbm90IGhtYWMuY29tcGFyZV9kaWdlc3Qoc3VwcGxpZWQsIGYiQmVhcmVyIHtjb25maWd1cmVkfSIpOgogICAgICAgIHJldHVybiBqc29uaWZ5KHsic3RhdHVzIjogImVycm9yIiwgImVycm9yIjogInVuYXV0aG9yaXplZCJ9KSwgNDAxCgogICAgdmVudWUgPSBfY2xlYW4ocmVxdWVzdC5hcmdzLmdldCgidmVudWUiLCAiIikpCiAgICB0cnk6CiAgICAgICAgY29udGV4dCA9IGJ1aWxkX21sYl9zdGFkaXVtX2NvbnRleHQodmVudWUpCiAgICBleGNlcHQgRXhjZXB0aW9uIGFzIGV4YzoKICAgICAgICBmcmFtZXMgPSB0cmFjZWJhY2suZXh0cmFjdF90YihleGMuX190cmFjZWJhY2tfXylbLTEwOl0KICAgICAgICByZXR1cm4ganNvbmlmeSgKICAgICAgICAgICAgewogICAgICAgICAgICAgICAgInN0YXR1cyI6ICJlcnJvciIsCiAgICAgICAgICAgICAgICAiZXhjZXB0aW9uIjogdHlwZShleGMpLl9fbmFtZV9fLAogICAgICAgICAgICAgICAgIm1lc3NhZ2UiOiBzdHIoZXhjKSwKICAgICAgICAgICAgICAgICJmcmFtZXMiOiBbCiAgICAgICAgICAgICAgICAgICAgewogICAgICAgICAgICAgICAgICAgICAgICAiZmlsZSI6IFBhdGgoZnJhbWUuZmlsZW5hbWUpLm5hbWUsCiAgICAgICAgICAgICAgICAgICAgICAgICJsaW5lIjogZnJhbWUubGluZW5vLAogICAgICAgICAgICAgICAgICAgICAgICAiZnVuY3Rpb24iOiBmcmFtZS5uYW1lLAogICAgICAgICAgICAgICAgICAgICAgICAiY29kZSI6IGZyYW1lLmxpbmUgb3IgIiIsCiAgICAgICAgICAgICAgICAgICAgfQogICAgICAgICAgICAgICAgICAgIGZvciBmcmFtZSBpbiBmcmFtZXMKICAgICAgICAgICAgICAgIF0sCiAgICAgICAgICAgIH0KICAgICAgICApLCA1MDAKCiAgICByZXR1cm4ganNvbmlmeSgKICAgICAgICB7CiAgICAgICAgICAgICJzdGF0dXMiOiAib2siLAogICAgICAgICAgICAidmVudWUiOiBjb250ZXh0LmdldCgic2VsZWN0ZWRfdmVudWUiLCAiIiksCiAgICAgICAgICAgICJzZWN0aW9uX2NvdW50IjogY29udGV4dC5nZXQoInNlY3Rpb25fY291bnQiLCAwKSwKICAgICAgICAgICAgImRyb3BfY291bnQiOiBsZW4oY29udGV4dC5nZXQoImJpZ2dlc3RfZHJvcHMiLCBbXSkpLAogICAgICAgIH0KICAgICApCg=="
+          ).decode()
           if "/api/diagnostics/mlb-stadium" in text:
               raise SystemExit("Diagnostic route already exists")
           path.write_text(text + route)
