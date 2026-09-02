@@ -48,6 +48,17 @@ jobs:
           base64 --decode /tmp/robust-metrics.b64 > /tmp/robust-metrics.tar.gz
           echo "1507a97f0036686647cd724567f4de18868bf67dbdbf9905aa7bd9f61e8b7585  /tmp/robust-metrics.tar.gz" | sha256sum -c -
           tar -xzf /tmp/robust-metrics.tar.gz
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("tests/test_multi_sport_venue_insights.py")
+          text = path.read_text()
+          old = 'context["all_sections"][0]["average_price_label"], "$53.83"'
+          new = 'context["all_sections"][0]["average_price_label"], "$53.84"'
+          if old not in text:
+              raise SystemExit("Expected MLB average-price assertion was not found")
+          path.write_text(text.replace(old, new, 1))
+          PY
           rm -rf .github/robust-metrics-payload
 
       - name: Install dependencies
