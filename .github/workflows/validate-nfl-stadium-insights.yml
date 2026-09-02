@@ -1,0 +1,86 @@
+name: Validate NFL stadium insights
+
+on:
+  push:
+    branches:
+      - feature/nfl-stadium-insights
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/nfl-stadium-insights
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Verify reviewed file objects
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object Flask_App/flask_app.py)" = "451bc65fde7da3bdd8fcac44e2507a4a4a1c0ce3"
+          test "$(git hash-object Flask_App/templates/base.html)" = "aebf35ba7beb249ec3e438dbb34118a9dc6bd9c6"
+          test "$(git hash-object Flask_App/templates/NFLHomeScreen.html)" = "e95272fe40418ba2387654ef06f9c2b58139e870"
+          test "$(git hash-object Flask_App/templates/nfl_stadium.html)" = "84f39b352a14df88c6f70be5e142079822c21cd0"
+          test "$(git hash-object Flask_App/static/css/nfl-stadium.css)" = "239d4e40132fc4bad853620faf3b3335741e3fd7"
+          test "$(git hash-object Flask_App/static/css/nfl-stadium-dashboard.css)" = "382582922f37223e218c6ab655b11e88e1eac923"
+          test "$(git hash-object Flask_App/static/css/nfl-stadium-table.css)" = "ed288e73fee6a0c35ea76b41f2f330164c562717"
+          test "$(git hash-object Flask_App/static/js/nfl-stadium.js)" = "179db1981ab864151a416504bd48b40f83bce563"
+          test "$(git hash-object tests/test_nfl_stadium_insights.py)" = "efa03791e4722714849823334502bbb4589107a4"
+          test ! -e Flask_App/nfl_stadium_blueprint.py
+          test ! -e Flask_App/flask_app_original.py
+
+      - name: Run focused validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m py_compile Flask_App/flask_app.py tests/test_nfl_stadium_insights.py
+          node --check Flask_App/static/js/nfl-stadium.js
+          python - <<'PY'
+          from pathlib import Path
+          from jinja2 import Environment
+          from tinycss2 import parse_stylesheet
+
+          root = Path('.')
+          env = Environment()
+          for path in (
+              root / 'Flask_App/templates/base.html',
+              root / 'Flask_App/templates/NFLHomeScreen.html',
+              root / 'Flask_App/templates/nfl_stadium.html',
+          ):
+              env.parse(path.read_text())
+          for path in (
+              root / 'Flask_App/static/css/nfl-stadium.css',
+              root / 'Flask_App/static/css/nfl-stadium-dashboard.css',
+              root / 'Flask_App/static/css/nfl-stadium-table.css',
+          ):
+              errors = [
+                  rule for rule in parse_stylesheet(path.read_text(), skip_comments=True, skip_whitespace=True)
+                  if getattr(rule, 'type', None) == 'error'
+              ]
+              assert not errors, (path, errors)
+          PY
+          python -m unittest tests.test_nfl_stadium_insights
+
+      - name: Remove temporary validator
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/validate-nfl-stadium-insights.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Validate stadium-first NFL insights"
+          git push origin HEAD:feature/nfl-stadium-insights
