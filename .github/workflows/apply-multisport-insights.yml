@@ -1,5 +1,6 @@
 name: Apply multisport venue insights
 
+# Payload chunks are verified against their local Git blob hashes.
 on:
   push:
     branches:
