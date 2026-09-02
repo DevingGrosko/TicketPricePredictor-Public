@@ -37,6 +37,7 @@ jobs:
 
           path = Path(".github/scripts/simplify_navigation.py")
           text = path.read_text()
+
           old = '''for path, script_name in (
               ("Flask_App/templates/nfl_map.html", "nfl-map.js"),
               ("Flask_App/templates/nhl_map.html", "nhl-map.js"),
@@ -60,7 +61,23 @@ jobs:
           '''
           if text.count(old) != 1:
               raise SystemExit("Could not locate the map replacement block")
-          path.write_text(text.replace(old, new, 1))
+          text = text.replace(old, new, 1)
+
+          version_old = '''    replace_exact(
+              path,
+              f"js/{script_name}') }}?v=2",
+              f"js/{script_name}') }}?v=3",
+          )
+          '''
+          version_new = '''    replace_exact(
+              path,
+              "js/" + script_name + "') }}?v=2",
+              "js/" + script_name + "') }}?v=3",
+          )
+          '''
+          if text.count(version_old) != 1:
+              raise SystemExit("Could not locate the map asset version block")
+          path.write_text(text.replace(version_old, version_new, 1))
           PY
           python .github/scripts/simplify_navigation.py
 
