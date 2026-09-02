@@ -24,6 +24,7 @@ from models import (
     clean_event_title,
     event_datetime_eastern,
     event_has_complete_public_data,
+    hours_before_event,
 )
 from Flask_App.nfl_blueprint import (
     CreateNFLModel,
@@ -31,8 +32,11 @@ from Flask_App.nfl_blueprint import (
     NFLIteration,
     NFLTicket,
     format_nfl_title,
+    geometry_is_usable,
+    geometry_section_count,
     nfl_display_venue,
     nfl_event_home_team,
+    sanitize_map_geometry,
 )
 from Flask_App.nhl_blueprint import (
     CreateNHLModel,
@@ -49,6 +53,44 @@ nfl_stadium_blueprint = Blueprint("nfl_stadium", __name__)
 MIN_DROP_SPAN = timedelta(hours=6)
 LOW_SAMPLE_GAMES = 3
 MLB_URL_MARKER = "--sports-mlb-baseball/"
+
+_TIMELINE_BUCKETS = {
+    "mlb": (
+        (60.0, 72.0, "72h", "60–72 hours before"),
+        (48.0, 60.0, "60h", "48–60 hours before"),
+        (36.0, 48.0, "48h", "36–48 hours before"),
+        (24.0, 36.0, "36h", "24–36 hours before"),
+        (12.0, 24.0, "24h", "12–24 hours before"),
+        (6.0, 12.0, "12h", "6–12 hours before"),
+        (0.0, 6.0, "Game", "Final 6 hours"),
+    ),
+    "nfl": (
+        (504.0, 720.0, "30d", "21–30 days before"),
+        (336.0, 504.0, "21d", "14–21 days before"),
+        (168.0, 336.0, "14d", "7–14 days before"),
+        (72.0, 168.0, "7d", "3–7 days before"),
+        (24.0, 72.0, "3d", "1–3 days before"),
+        (12.0, 24.0, "24h", "12–24 hours before"),
+        (6.0, 12.0, "12h", "6–12 hours before"),
+        (0.0, 6.0, "Game", "Final 6 hours"),
+    ),
+    "nhl": (
+        (504.0, 720.0, "30d", "21–30 days before"),
+        (336.0, 504.0, "21d", "14–21 days before"),
+        (168.0, 336.0, "14d", "7–14 days before"),
+        (72.0, 168.0, "7d", "3–7 days before"),
+        (24.0, 72.0, "3d", "1–3 days before"),
+        (12.0, 24.0, "24h", "12–24 hours before"),
+        (6.0, 12.0, "12h", "6–12 hours before"),
+        (0.0, 6.0, "Game", "Final 6 hours"),
+    ),
+}
+
+_EVENT_MOMENT_LABELS = {
+    "mlb": "first pitch",
+    "nfl": "kickoff",
+    "nhl": "puck drop",
+}
 
 
 _MLB_VENUE_TEAMS = {
@@ -165,6 +207,7 @@ def _public_sections(values: Iterable[Any]) -> list[str]:
         },
         key=str.casefold,
     )
+
 
 def _money(value: float | None) -> str:
     return _currency_money(value, "USD")
@@ -333,9 +376,8 @@ def _section_insights(
         now,
         currency="USD",
         detail_url_builder=lambda event, section: url_for(
-            "nfl.nfl_map",
-            team=_clean(nfl_event_home_team(event)) or _clean(nfl_display_venue(event)),
-            game=str(event.id),
+            "nfl_stadium.nfl_section",
+            venue=_clean(nfl_display_venue(event)),
             section=section,
         ),
         secondary_url_builder=None,
@@ -602,7 +644,7 @@ def _nfl_page_config() -> dict[str, Any]:
         home_url=url_for("nfl.nfl_home"),
         directory_url=url_for("nfl_stadium.nfl_stadium"),
         window_label="30D",
-        section_action_label="Latest map",
+        section_action_label="Section details",
         secondary_action_label="",
         game_action_label="Open stadium map",
         currency_label="USD",
@@ -827,11 +869,9 @@ def build_mlb_stadium_context(selected_venue: str = "") -> dict[str, Any]:
                 now,
                 currency="USD",
                 detail_url_builder=lambda _event, section: url_for(
-                    "graph",
-                    event=selected,
+                    "nfl_stadium.mlb_section",
+                    venue=selected,
                     section=section,
-                    mode="multi",
-                    display="money",
                 ),
                 secondary_url_builder=lambda _event, section: url_for(
                     "predict",
@@ -914,7 +954,7 @@ def _nhl_page_config(currency: str = "USD") -> dict[str, Any]:
         home_url=url_for("nhl.nhl_home"),
         directory_url=url_for("nfl_stadium.nhl_arena"),
         window_label="30D",
-        section_action_label="Latest arena map",
+        section_action_label="Section details",
         secondary_action_label="",
         game_action_label="Open arena map",
         currency_label=currency,
@@ -990,10 +1030,9 @@ def build_nhl_arena_context(selected_venue: str = "") -> dict[str, Any]:
                 rows,
                 now,
                 currency=analysis_currency,
-                detail_url_builder=lambda event, section: url_for(
-                    "nhl.nhl_map",
-                    team=_clean(nhl_event_home_team(event)) or selected,
-                    game=str(event.id),
+                detail_url_builder=lambda _event, section: url_for(
+                    "nfl_stadium.nhl_section",
+                    venue=selected,
                     section=section,
                 ),
                 secondary_url_builder=None,
@@ -1059,6 +1098,671 @@ def build_nhl_arena_context(selected_venue: str = "") -> dict[str, Any]:
     }
 
 
+def _resolve_section(
+    sections: Iterable[dict[str, Any]],
+    requested: str,
+) -> dict[str, Any] | None:
+    requested_clean = _clean(requested)
+    if not requested_clean or is_parking_section(requested_clean):
+        return None
+
+    rows = list(sections)
+    for row in rows:
+        if _clean(row.get("name")) == requested_clean:
+            return row
+
+    normalized = _normalize(requested_clean)
+    matches = [row for row in rows if _normalize(row.get("name")) == normalized]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _timeline_bucket_index(sport_key: str, hours: float) -> int | None:
+    for index, (lower, upper, _short, _label) in enumerate(
+        _TIMELINE_BUCKETS[sport_key]
+    ):
+        if lower == 0:
+            if 0 < hours <= upper:
+                return index
+        elif lower < hours <= upper:
+            return index
+    return None
+
+
+def _lead_time_label(hours: float) -> str:
+    if hours >= 24:
+        days = hours / 24
+        rendered = f"{days:.0f}" if abs(days - round(days)) < 0.05 else f"{days:.1f}"
+        return f"{rendered}d"
+    rendered = f"{hours:.0f}" if abs(hours - round(hours)) < 0.05 else f"{hours:.1f}"
+    return f"{rendered}h"
+
+
+def _selected_section_histories(
+    events: Iterable[Any],
+    rows: Iterable[Any],
+    section_name: str,
+) -> dict[int, list[tuple[datetime, float, float]]]:
+    event_by_id = {event.id: event for event in events}
+    normalized_section = _normalize(section_name)
+    histories: dict[int, list[tuple[datetime, float, float]]] = defaultdict(list)
+
+    for row in rows:
+        values = row._mapping if hasattr(row, "_mapping") else row
+        event_id = int(values["event_id"])
+        event = event_by_id.get(event_id)
+        if event is None or _normalize(values["section"]) != normalized_section:
+            continue
+
+        captured = values["captured_at"]
+        if captured is None:
+            continue
+        try:
+            price = float(values["price"])
+        except (TypeError, ValueError):
+            continue
+        if price <= 0:
+            continue
+
+        lead_time = hours_before_event(event.event_date, captured)
+        if lead_time <= 0:
+            continue
+        histories[event_id].append((captured, lead_time, price))
+
+    for event_id in histories:
+        histories[event_id].sort(key=lambda item: item[0])
+    return histories
+
+
+def _section_timeline_context(
+    events: list[Any],
+    rows: Iterable[Any],
+    section_name: str,
+    now: datetime,
+    *,
+    sport_key: str,
+    currency: str,
+    event_label_builder: Callable[[Any], str],
+    game_url_builder: Callable[[Any, str], str],
+    map_url_builder: Callable[[Any, str], str | None] | None,
+    source_url_getter: Callable[[Any], str],
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    buckets = _TIMELINE_BUCKETS[sport_key]
+    bucket_game_values: list[list[float]] = [[] for _ in buckets]
+    histories = _selected_section_histories(events, rows, section_name)
+    event_by_id = {event.id: event for event in events}
+    game_rows: list[tuple[datetime, dict[str, Any]]] = []
+
+    for event_id, history in histories.items():
+        event = event_by_id[event_id]
+        per_bucket: list[list[float]] = [[] for _ in buckets]
+        for _captured, lead_time, price in history:
+            bucket_index = _timeline_bucket_index(sport_key, lead_time)
+            if bucket_index is not None:
+                per_bucket[bucket_index].append(price)
+        for index, prices in enumerate(per_bucket):
+            if prices:
+                bucket_game_values[index].append(float(median(prices)))
+
+        first_time, first_lead, first_price = history[0]
+        last_time, last_lead, last_price = history[-1]
+        dollar_drop = first_price - last_price if len(history) > 1 else None
+        percent_drop = (
+            dollar_drop / first_price * 100
+            if dollar_drop is not None and first_price > 0
+            else None
+        )
+        event_date = event_datetime_eastern(event.event_date)
+        completed = _event_completed(event, now)
+        game_rows.append(
+            (
+                event_date,
+                {
+                    "id": event.id,
+                    "label": event_label_builder(event),
+                    "status": "Completed" if completed else "Upcoming",
+                    "status_key": "completed" if completed else "upcoming",
+                    "average_price": round(float(median([item[2] for item in history])), 2),
+                    "average_price_label": _currency_money(
+                        float(median([item[2] for item in history])),
+                        currency,
+                    ),
+                    "latest_price_label": _currency_money(last_price, currency),
+                    "movement_label": _currency_price_change(dollar_drop, currency),
+                    "movement_percent_label": _percent_change(percent_drop),
+                    "observation_count": len(history),
+                    "coverage_label": (
+                        f"{_lead_time_label(first_lead)} to "
+                        f"{_lead_time_label(last_lead)} before"
+                    ),
+                    "game_url": game_url_builder(event, section_name),
+                    "map_url": (
+                        map_url_builder(event, section_name)
+                        if map_url_builder is not None
+                        else None
+                    ),
+                    "source_url": source_url_getter(event),
+                    "first_captured_at": first_time,
+                    "last_captured_at": last_time,
+                },
+            )
+        )
+
+    timeline_points = []
+    for slot, ((lower, upper, short_label, label), game_values) in enumerate(
+        zip(buckets, bucket_game_values)
+    ):
+        if not game_values:
+            continue
+        average_price = mean(game_values)
+        timeline_points.append(
+            {
+                "slot": slot,
+                "short_label": short_label,
+                "label": label,
+                "lower_hours": lower,
+                "upper_hours": upper,
+                "average_price": round(average_price, 2),
+                "average_price_label": _currency_money(average_price, currency),
+                "game_count": len(game_values),
+            }
+        )
+
+    timeline_drop = None
+    timeline_percent = None
+    timeline_direction = "flat"
+    timeline_direction_label = "Not enough points"
+    if len(timeline_points) >= 2:
+        first_point = timeline_points[0]
+        last_point = timeline_points[-1]
+        timeline_drop = first_point["average_price"] - last_point["average_price"]
+        if first_point["average_price"] > 0:
+            timeline_percent = timeline_drop / first_point["average_price"] * 100
+        if timeline_drop > 0.005:
+            timeline_direction = "down"
+            timeline_direction_label = "Average price fell"
+        elif timeline_drop < -0.005:
+            timeline_direction = "up"
+            timeline_direction_label = "Average price rose"
+        else:
+            timeline_direction_label = "Average price was flat"
+
+    upcoming = sorted(
+        [row for row in game_rows if row[1]["status_key"] == "upcoming"],
+        key=lambda item: item[0],
+    )
+    completed = sorted(
+        [row for row in game_rows if row[1]["status_key"] == "completed"],
+        key=lambda item: item[0],
+        reverse=True,
+    )
+
+    return (
+        {
+            "points": timeline_points,
+            "slot_count": len(buckets),
+            "currency": currency,
+            "event_moment": _EVENT_MOMENT_LABELS[sport_key],
+            "movement_label": _currency_price_change(timeline_drop, currency),
+            "movement_percent_label": _percent_change(timeline_percent),
+            "movement_direction": timeline_direction,
+            "movement_direction_label": timeline_direction_label,
+            "from_label": timeline_points[0]["label"] if timeline_points else "",
+            "to_label": timeline_points[-1]["label"] if timeline_points else "",
+        },
+        [row for _date, row in upcoming + completed],
+    )
+
+
+def _event_section_name(event: Any, section_getter: Callable[[Any], Iterable[str]], requested: str) -> str | None:
+    normalized = _normalize(requested)
+    matches = [
+        section
+        for section in _public_sections(section_getter(event))
+        if _normalize(section) == normalized
+    ]
+    return matches[0] if len(matches) == 1 else None
+
+
+def _section_map_context(
+    events: list[Any],
+    section_rows: list[dict[str, Any]],
+    section_name: str,
+    *,
+    sport_key: str,
+    venue: str,
+    section_getter: Callable[[Any], Iterable[str]],
+    geometry_getter: Callable[[Any], Any] | None,
+    event_label_builder: Callable[[Any], str],
+    exact_map_url_builder: Callable[[Any, str], str | None] | None,
+    source_url_getter: Callable[[Any], str],
+) -> dict[str, Any]:
+    candidates: list[tuple[int, int, int, datetime, Any, str, Any]] = []
+    selected_normalized = _normalize(section_name)
+
+    for event in events:
+        matched_name = _event_section_name(event, section_getter, section_name)
+        if not matched_name:
+            continue
+
+        visible_sections = _public_sections(section_getter(event))
+        sanitized_geometry = None
+        provider_usable = False
+        selected_has_shape = False
+        if geometry_getter is not None:
+            sanitized_geometry = sanitize_map_geometry(
+                geometry_getter(event),
+                visible_sections,
+            )
+            provider_usable = geometry_is_usable(
+                sanitized_geometry,
+                visible_sections,
+            )
+            selected_has_shape = bool(
+                sanitized_geometry
+                and any(
+                    _normalize(row.get("name")) == selected_normalized
+                    and bool(row.get("shapes"))
+                    for row in sanitized_geometry.get("sections", [])
+                )
+            )
+
+        candidates.append(
+            (
+                int(selected_has_shape),
+                int(provider_usable),
+                geometry_section_count(sanitized_geometry),
+                event_datetime_eastern(event.event_date),
+                event,
+                matched_name,
+                sanitized_geometry,
+            )
+        )
+
+    representative_event = None
+    map_section_name = section_name
+    representative_geometry = None
+    selected_has_provider_shape = False
+    provider_usable = False
+    if candidates:
+        (
+            selected_shape_score,
+            provider_score,
+            _geometry_count,
+            _event_date,
+            representative_event,
+            map_section_name,
+            representative_geometry,
+        ) = max(candidates, key=lambda item: item[:4])
+        selected_has_provider_shape = bool(selected_shape_score)
+        provider_usable = bool(provider_score)
+
+    averages_by_name = {_normalize(row["name"]): row for row in section_rows}
+    if representative_event is not None:
+        visible_sections = _public_sections(section_getter(representative_event))
+    else:
+        visible_sections = [row["name"] for row in section_rows]
+
+    map_sections = []
+    for name in visible_sections:
+        aggregate = averages_by_name.get(_normalize(name))
+        map_sections.append(
+            {
+                "name": name,
+                "average_price": (
+                    aggregate["average_price"] if aggregate is not None else None
+                ),
+                "average_price_label": (
+                    aggregate["average_price_label"] if aggregate is not None else "—"
+                ),
+                "game_count": aggregate["game_count"] if aggregate is not None else 0,
+            }
+        )
+
+    has_provider_geometry = bool(
+        provider_usable and selected_has_provider_shape and representative_geometry
+    )
+    geometry = representative_geometry if has_provider_geometry else None
+
+    representative_label = (
+        event_label_builder(representative_event)
+        if representative_event is not None
+        else ""
+    )
+    exact_map_url = (
+        exact_map_url_builder(representative_event, map_section_name)
+        if representative_event is not None and exact_map_url_builder is not None
+        else None
+    )
+    provider_url = (
+        source_url_getter(representative_event)
+        if representative_event is not None
+        else ""
+    )
+
+    if has_provider_geometry:
+        map_note = f"Highlighted on the stored seating map for {representative_label}."
+        map_badge = "Provider layout"
+    elif sport_key == "mlb":
+        map_note = (
+            "Approximate bowl layout generated from section labels. "
+            "Open the provider event for exact placement."
+        )
+        map_badge = "Section schematic"
+    else:
+        map_note = (
+            "A complete provider map was not stored for this section, so the "
+            "highlight is shown on an approximate bowl layout."
+        )
+        map_badge = "Section schematic"
+
+    return {
+        "map_data": {
+            "sport": sport_key,
+            "venue": venue,
+            "selected_section": map_section_name,
+            "sections": map_sections,
+            "geometry": geometry,
+            "geometry_mode": "provider" if has_provider_geometry else "schematic",
+        },
+        "map_note": map_note,
+        "map_badge": map_badge,
+        "has_provider_geometry": has_provider_geometry,
+        "representative_game_label": representative_label,
+        "representative_map_url": exact_map_url,
+        "representative_provider_url": provider_url,
+    }
+
+
+def _section_error_context(
+    base_context: dict[str, Any],
+    message: str,
+    requested_section: str,
+) -> dict[str, Any]:
+    report_url = base_context.get("directory_url", "")
+    endpoint = {
+        "nfl": "nfl_stadium.nfl_stadium",
+        "mlb": "nfl_stadium.mlb_stadium",
+        "nhl": "nfl_stadium.nhl_arena",
+    }.get(base_context.get("sport_key"))
+    if endpoint and base_context.get("selected_venue"):
+        report_url = url_for(endpoint, venue=base_context["selected_venue"])
+
+    return {
+        **base_context,
+        "error": message,
+        "selected_section": _clean(requested_section),
+        "section_summary": None,
+        "section_games": [],
+        "timeline": {"points": [], "slot_count": 0},
+        "map_data": {"sections": []},
+        "report_url": report_url,
+        "buying_window_url": "",
+    }
+
+
+def _build_section_detail_context(
+    base_context: dict[str, Any],
+    events: list[Any],
+    rows: Iterable[Any],
+    requested_section: str,
+    now: datetime,
+    *,
+    sport_key: str,
+    currency: str,
+    report_endpoint: str,
+    section_getter: Callable[[Any], Iterable[str]],
+    geometry_getter: Callable[[Any], Any] | None,
+    event_label_builder: Callable[[Any], str],
+    game_url_builder: Callable[[Any, str], str],
+    map_url_builder: Callable[[Any, str], str | None] | None,
+    source_url_getter: Callable[[Any], str],
+    buying_window_url_builder: Callable[[str], str] | None = None,
+) -> dict[str, Any]:
+    if base_context.get("error") or not base_context.get("selected_venue"):
+        return _section_error_context(
+            base_context,
+            base_context.get("error") or "Choose a team and section.",
+            requested_section,
+        )
+
+    section_summary = _resolve_section(
+        base_context.get("all_sections", []),
+        requested_section,
+    )
+    if section_summary is None:
+        return _section_error_context(
+            base_context,
+            "That seating section is not in this team's tracked history.",
+            requested_section,
+        )
+
+    section_name = section_summary["name"]
+    timeline, section_games = _section_timeline_context(
+        events,
+        rows,
+        section_name,
+        now,
+        sport_key=sport_key,
+        currency=currency,
+        event_label_builder=event_label_builder,
+        game_url_builder=game_url_builder,
+        map_url_builder=map_url_builder,
+        source_url_getter=source_url_getter,
+    )
+    map_context = _section_map_context(
+        events,
+        base_context.get("all_sections", []),
+        section_name,
+        sport_key=sport_key,
+        venue=base_context["selected_venue"],
+        section_getter=section_getter,
+        geometry_getter=geometry_getter,
+        event_label_builder=event_label_builder,
+        exact_map_url_builder=map_url_builder,
+        source_url_getter=source_url_getter,
+    )
+
+    report_url = url_for(
+        report_endpoint,
+        venue=base_context["selected_venue"],
+    )
+    buying_window_url = (
+        buying_window_url_builder(section_name)
+        if buying_window_url_builder is not None
+        else ""
+    )
+    return {
+        **base_context,
+        **map_context,
+        "error": None,
+        "selected_section": section_name,
+        "section_summary": section_summary,
+        "section_games": section_games,
+        "timeline": timeline,
+        "report_url": report_url,
+        "buying_window_url": buying_window_url,
+        "event_moment": _EVENT_MOMENT_LABELS[sport_key],
+    }
+
+
+def build_nfl_section_context(
+    selected_venue: str,
+    requested_section: str,
+) -> dict[str, Any]:
+    base_context = build_nfl_stadium_context(selected_venue)
+    if base_context.get("error") or not base_context.get("selected_venue"):
+        return _section_error_context(
+            base_context,
+            base_context.get("error") or "Choose an NFL team and section.",
+            requested_section,
+        )
+
+    now = datetime.now(timezone.utc)
+    model = CreateNFLModel()
+    try:
+        with model.getSession()() as session:
+            events = [
+                event
+                for event in session.query(NFLEvent).order_by(NFLEvent.event_date).all()
+                if _is_us_event(event)
+                and _clean(nfl_display_venue(event)) == base_context["selected_venue"]
+            ]
+            rows = _snapshot_rows(session, [event.id for event in events])
+    finally:
+        model.engine.dispose()
+
+    return _build_section_detail_context(
+        base_context,
+        events,
+        rows,
+        requested_section,
+        now,
+        sport_key="nfl",
+        currency="USD",
+        report_endpoint="nfl_stadium.nfl_stadium",
+        section_getter=lambda event: event.sections or [],
+        geometry_getter=lambda event: event.map_geometry,
+        event_label_builder=format_nfl_title,
+        game_url_builder=lambda event, section: url_for(
+            "nfl.nfl_graph",
+            team=_clean(nfl_event_home_team(event)) or base_context["selected_venue"],
+            game=str(event.id),
+            section=section,
+            display="money",
+        ),
+        map_url_builder=lambda event, section: url_for(
+            "nfl.nfl_map",
+            team=_clean(nfl_event_home_team(event)) or base_context["selected_venue"],
+            game=str(event.id),
+            section=section,
+        ),
+        source_url_getter=lambda event: event.source_url or "",
+    )
+
+
+def build_mlb_section_context(
+    selected_venue: str,
+    requested_section: str,
+) -> dict[str, Any]:
+    base_context = build_mlb_stadium_context(selected_venue)
+    if base_context.get("error") or not base_context.get("selected_venue"):
+        return _section_error_context(
+            base_context,
+            base_context.get("error") or "Choose an MLB team and section.",
+            requested_section,
+        )
+
+    now = datetime.now(timezone.utc)
+    model = CreateModel()
+    try:
+        with model.getSession()() as session:
+            events = [
+                event
+                for event in session.query(Event).order_by(Event.event_date).all()
+                if _is_public_mlb_event(event)
+                and _clean(event.Place) == base_context["selected_venue"]
+            ]
+            rows = _snapshot_rows_for(
+                session,
+                [event.id for event in events],
+                Iteration,
+                Ticket,
+            )
+    finally:
+        model.engine.dispose()
+
+    return _build_section_detail_context(
+        base_context,
+        events,
+        rows,
+        requested_section,
+        now,
+        sport_key="mlb",
+        currency="USD",
+        report_endpoint="nfl_stadium.mlb_stadium",
+        section_getter=lambda event: event.event_sections or [],
+        geometry_getter=None,
+        event_label_builder=format_mlb_title,
+        game_url_builder=lambda event, section: url_for(
+            "graph",
+            event=base_context["selected_venue"],
+            game=str(event.id),
+            section=section,
+            mode="single",
+            display="money",
+        ),
+        map_url_builder=None,
+        source_url_getter=lambda event: event.URL or "",
+        buying_window_url_builder=lambda section: url_for(
+            "predict",
+            event=base_context["selected_venue"],
+            section=section,
+        ),
+    )
+
+
+def build_nhl_section_context(
+    selected_venue: str,
+    requested_section: str,
+) -> dict[str, Any]:
+    base_context = build_nhl_arena_context(selected_venue)
+    if base_context.get("error") or not base_context.get("selected_venue"):
+        return _section_error_context(
+            base_context,
+            base_context.get("error") or "Choose an NHL team and section.",
+            requested_section,
+        )
+
+    currency = base_context.get("currency_label") or "USD"
+    now = datetime.now(timezone.utc)
+    model = CreateNHLModel()
+    try:
+        with model.getSession()() as session:
+            events = [
+                event
+                for event in session.query(NHLEvent).order_by(NHLEvent.event_date).all()
+                if _is_supported_nhl_event(event)
+                and _clean(nhl_display_venue(event)) == base_context["selected_venue"]
+                and (_clean(event.currency).upper() or "USD") == currency
+            ]
+            rows = _snapshot_rows_for(
+                session,
+                [event.id for event in events],
+                NHLIteration,
+                NHLTicket,
+            )
+    finally:
+        model.engine.dispose()
+
+    return _build_section_detail_context(
+        base_context,
+        events,
+        rows,
+        requested_section,
+        now,
+        sport_key="nhl",
+        currency=currency,
+        report_endpoint="nfl_stadium.nhl_arena",
+        section_getter=lambda event: event.sections or [],
+        geometry_getter=lambda event: event.map_geometry,
+        event_label_builder=format_nhl_title,
+        game_url_builder=lambda event, section: url_for(
+            "nhl.nhl_graph",
+            team=_clean(nhl_event_home_team(event)) or base_context["selected_venue"],
+            game=str(event.id),
+            section=section,
+            display="money",
+        ),
+        map_url_builder=lambda event, section: url_for(
+            "nhl.nhl_map",
+            team=_clean(nhl_event_home_team(event)) or base_context["selected_venue"],
+            game=str(event.id),
+            section=section,
+        ),
+        source_url_getter=lambda event: event.source_url or "",
+    )
+
+
 @nfl_stadium_blueprint.app_context_processor
 def inject_team_display_helpers() -> dict[str, Any]:
     return {
@@ -1083,3 +1787,30 @@ def mlb_stadium():
 def nhl_arena():
     context = build_nhl_arena_context(request.args.get("venue", ""))
     return render_template("nfl_stadium.html", **context)
+
+
+@nfl_stadium_blueprint.get("/nfl/stadium/section")
+def nfl_section():
+    context = build_nfl_section_context(
+        request.args.get("venue") or request.args.get("team") or "",
+        request.args.get("section", ""),
+    )
+    return render_template("venue_section.html", **context)
+
+
+@nfl_stadium_blueprint.get("/baseball/stadium/section")
+def mlb_section():
+    context = build_mlb_section_context(
+        request.args.get("venue") or request.args.get("team") or "",
+        request.args.get("section", ""),
+    )
+    return render_template("venue_section.html", **context)
+
+
+@nfl_stadium_blueprint.get("/nhl/arena/section")
+def nhl_section():
+    context = build_nhl_section_context(
+        request.args.get("venue") or request.args.get("team") or "",
+        request.args.get("section", ""),
+    )
+    return render_template("venue_section.html", **context)

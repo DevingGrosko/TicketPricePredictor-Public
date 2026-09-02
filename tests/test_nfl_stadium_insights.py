@@ -11,6 +11,7 @@ from jinja2 import Environment
 from collector import EventSnapshot, SectionSnapshot
 from Flask_App.nfl_blueprint import nfl_blueprint, store_nfl_snapshot
 from Flask_App.nfl_stadium_blueprint import (
+    build_nfl_section_context,
     build_nfl_stadium_context,
     nfl_stadium,
     nfl_stadium_blueprint,
@@ -172,6 +173,54 @@ class NFLStadiumInsightTests(unittest.TestCase):
                     by_name["Section 200"]["direction"],
                     "up",
                 )
+                self.assertIn(
+                    "/nfl/stadium/section?",
+                    by_name["Section 100"]["detail_url"],
+                )
+
+                with app.test_request_context(
+                    "/nfl/stadium/section?venue=MetLife%20Stadium&section=Section%20100"
+                ):
+                    section_context = build_nfl_section_context(
+                        "MetLife Stadium",
+                        "Section 100",
+                    )
+
+                self.assertIsNone(section_context["error"])
+                self.assertEqual(
+                    section_context["selected_section"],
+                    "Section 100",
+                )
+                self.assertAlmostEqual(
+                    section_context["section_summary"]["average_price"],
+                    85.0,
+                )
+                self.assertEqual(len(section_context["timeline"]["points"]), 2)
+                self.assertAlmostEqual(
+                    section_context["timeline"]["points"][0]["average_price"],
+                    100.0,
+                )
+                self.assertAlmostEqual(
+                    section_context["timeline"]["points"][-1]["average_price"],
+                    70.0,
+                )
+                self.assertEqual(
+                    section_context["timeline"]["movement_label"],
+                    "−$30",
+                )
+                self.assertEqual(
+                    section_context["timeline"]["movement_percent_label"],
+                    "−30.0%",
+                )
+                self.assertEqual(len(section_context["section_games"]), 3)
+                self.assertEqual(
+                    section_context["map_data"]["selected_section"],
+                    "Section 100",
+                )
+                self.assertEqual(
+                    section_context["map_data"]["geometry_mode"],
+                    "schematic",
+                )
             finally:
                 if previous is None:
                     os.environ.pop("NFL_DATABASE_PATH", None)
@@ -219,6 +268,7 @@ class NFLStadiumInsightTests(unittest.TestCase):
             "Flask_App/templates/base.html",
             "Flask_App/templates/NFLHomeScreen.html",
             "Flask_App/templates/nfl_stadium.html",
+            "Flask_App/templates/venue_section.html",
         ):
             environment.parse((root / relative).read_text())
 

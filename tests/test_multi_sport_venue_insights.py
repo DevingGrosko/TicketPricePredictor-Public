@@ -18,8 +18,10 @@ from models import (
     event_datetime_for_storage,
 )
 from Flask_App.nfl_stadium_blueprint import (
+    build_mlb_section_context,
     build_mlb_stadium_context,
     build_nhl_arena_context,
+    build_nhl_section_context,
     mlb_event_home_team,
     mlb_team_for_venue,
     nfl_stadium_blueprint,
@@ -131,11 +133,30 @@ class MLBVenueInsightTests(unittest.TestCase):
                 self.assertAlmostEqual(
                     by_name["Section 100"]["average_percent_drop"], 30.0
                 )
-                self.assertIn("/graph?", by_name["Section 100"]["detail_url"])
-                self.assertIn("mode=multi", by_name["Section 100"]["detail_url"])
+                self.assertIn(
+                    "/baseball/stadium/section?",
+                    by_name["Section 100"]["detail_url"],
+                )
+                self.assertIn("venue=Nationals+Park", by_name["Section 100"]["detail_url"])
+                self.assertIn("section=Section+100", by_name["Section 100"]["detail_url"])
                 self.assertIn("/predict?", by_name["Section 100"]["secondary_url"])
                 self.assertEqual(context["stadiums"][0]["team_label"], "Washington Nationals")
                 self.assertEqual(context["games"][0]["sections"][0], "Section 100")
+
+                with app.test_request_context(
+                    "/baseball/stadium/section?venue=Nationals%20Park&section=Section%20100"
+                ):
+                    detail = build_mlb_section_context(
+                        "Nationals Park",
+                        "Section 100",
+                    )
+                self.assertIsNone(detail["error"])
+                self.assertEqual(detail["selected_section"], "Section 100")
+                self.assertEqual(detail["event_moment"], "first pitch")
+                self.assertEqual(detail["map_data"]["geometry_mode"], "schematic")
+                self.assertEqual(len(detail["timeline"]["points"]), 2)
+                self.assertEqual(detail["timeline"]["movement_label"], "−$30")
+                self.assertIn("/predict?", detail["buying_window_url"])
             finally:
                 engine.dispose()
                 if previous is None:
@@ -247,6 +268,24 @@ class NHLVenueInsightTests(unittest.TestCase):
                 self.assertEqual(context["biggest_drops"][0]["name"], "Section 100")
                 self.assertEqual(context["stadiums"][0]["team_label"], "Pittsburgh Penguins")
                 self.assertIn("/nhl/map?", context["games"][0]["direct_url"])
+                by_name = {row["name"]: row for row in context["all_sections"]}
+                self.assertIn(
+                    "/nhl/arena/section?",
+                    by_name["Section 100"]["detail_url"],
+                )
+
+                with app.test_request_context(
+                    "/nhl/arena/section?venue=PPG%20Paints%20Arena&section=Section%20100"
+                ):
+                    detail = build_nhl_section_context(
+                        "PPG Paints Arena",
+                        "Section 100",
+                    )
+                self.assertIsNone(detail["error"])
+                self.assertEqual(detail["selected_section"], "Section 100")
+                self.assertEqual(detail["event_moment"], "puck drop")
+                self.assertEqual(detail["timeline"]["currency"], "USD")
+                self.assertEqual(detail["timeline"]["movement_label"], "−$30")
             finally:
                 model.engine.dispose()
                 if previous is None:
@@ -265,6 +304,7 @@ class VenueTemplateTests(unittest.TestCase):
             "Flask_App/templates/NFLHomeScreen.html",
             "Flask_App/templates/NHLHomeScreen.html",
             "Flask_App/templates/nfl_stadium.html",
+            "Flask_App/templates/venue_section.html",
         ):
             environment.parse((root / relative).read_text())
 
