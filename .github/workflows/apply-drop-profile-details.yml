@@ -1,0 +1,82 @@
+name: Apply drop profile details
+
+on:
+  push:
+    branches:
+      - feature/drop-profile-details
+    paths:
+      - ".github/workflows/apply-drop-profile-details.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-drop-profile-details
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/drop-profile-details
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Extract prepared implementation
+        run: |
+          parts=(
+            .github/drop-profile-payload/part00
+            .github/drop-profile-payload/part01
+            .github/drop-profile-payload/part02
+            .github/drop-profile-payload/part03
+            .github/drop-profile-payload/part040
+            .github/drop-profile-payload/part041
+            .github/drop-profile-payload/part050
+            .github/drop-profile-payload/part051
+          )
+          wc -c "${parts[@]}"
+          cat "${parts[@]}" > /tmp/drop-profile.b64
+          echo "eb691dec6fb724956cfa2aa781e6c4c22bfce299856d96dd7db7e67374c441b6  /tmp/drop-profile.b64" | sha256sum -c -
+          base64 --decode /tmp/drop-profile.b64 > /tmp/drop-profile.tar.gz
+          echo "a13ee9ddb75b384b3d18739a6ef274ccb452759e086b61627a8b63536955c0d7  /tmp/drop-profile.tar.gz" | sha256sum -c -
+          tar -xzf /tmp/drop-profile.tar.gz
+          rm -rf .github/drop-profile-payload
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate implementation
+        env:
+          DATABASE_PATH: ${{ runner.temp }}/ticket-price-validation/baseball.db
+          CONCERT_DATABASE_PATH: ${{ runner.temp }}/ticket-price-validation/concerts.db
+          NFL_DATABASE_PATH: ${{ runner.temp }}/ticket-price-validation/nfl.db
+          NHL_DATABASE_PATH: ${{ runner.temp }}/ticket-price-validation/nhl.db
+          FLASK_SECRET_KEY: deployment-validation-key
+          COLLECTOR_INGEST_TOKEN: deployment-validation-token
+        run: |
+          mkdir -p "$(dirname "$DATABASE_PATH")"
+          python -m py_compile \
+            Flask_App/nfl_stadium_blueprint.py \
+            tests/test_flask_production_startup.py \
+            tests/test_navigation_and_parking_filter.py \
+            tests/test_nfl_stadium_insights.py
+          node --check Flask_App/static/js/nfl-stadium.js
+          node --check Flask_App/static/js/venue-section.js
+          python -m unittest discover -s tests -v
+
+      - name: Commit drop profiles
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Show full typical drop profiles"
+          git push origin HEAD:feature/drop-profile-details
