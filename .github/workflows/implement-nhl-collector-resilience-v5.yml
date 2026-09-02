@@ -1,0 +1,297 @@
+name: Implement NHL collector resilience v5
+
+on:
+  push:
+    branches:
+      - fix/nhl-collector-resilience
+    paths:
+      - ".github/workflows/implement-nhl-collector-resilience-v5.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/nhl-collector-resilience
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Apply the validated NHL resilience patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path(
+              ".github/workflows/implement-nhl-collector-resilience-v3.yml"
+          ).read_text(encoding="utf-8")
+          marker = "python - <<'PY'\n"
+          start = workflow.index(marker) + len(marker)
+          end = workflow.index("\n          PY\n", start)
+          script = textwrap.dedent(workflow[start:end])
+          exec(compile(script, "/tmp/nhl-resilience-patch.py", "exec"))
+          PY
+
+      - name: Add a code-level guard for the baseball-only scheduled trigger
+        run: |
+          git checkout -- .github/workflows/collect-ticket-prices.yml
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("nhl_schedule_collector.py")
+          source = path.read_text(encoding="utf-8")
+          old = '''def run_schedule_collector(
+              endpoint: str,
+              token: str,
+              headless: bool,
+              timeout: int,
+              health_output: Path,
+              pending_dir: Path,
+          ) -> int:
+              started_at = datetime.now(timezone.utc)
+              replayed, endpoint_available, queue_errors = replay_pending_snapshots('''
+          new = '''def nhl_should_skip_for_trigger(event_name: str | None = None) -> bool:
+              """Reserve GitHub's scheduled recovery trigger for baseball only."""
+
+              normalized = (
+                  event_name
+                  if event_name is not None
+                  else os.environ.get("GITHUB_EVENT_NAME", "")
+              )
+              return str(normalized).strip().lower() == "schedule"
+
+
+          def run_schedule_collector(
+              endpoint: str,
+              token: str,
+              headless: bool,
+              timeout: int,
+              health_output: Path,
+              pending_dir: Path,
+          ) -> int:
+              started_at = datetime.now(timezone.utc)
+              if nhl_should_skip_for_trigger():
+                  report = {
+                      "status": "skipped",
+                      "event_type": "nhl",
+                      "timezone": "America/New_York",
+                      "started_at": eastern_iso(started_at),
+                      "reason": "scheduled GitHub recovery trigger is baseball-only",
+                  }
+                  _write_health(health_output, report)
+                  print(
+                      "Skipping NHL; the scheduled GitHub recovery trigger is "
+                      "reserved for baseball.",
+                      flush=True,
+                  )
+                  return 0
+
+              replayed, endpoint_available, queue_errors = replay_pending_snapshots('''
+          if source.count(old) != 1:
+              raise SystemExit("Could not locate the patched NHL collection function")
+          path.write_text(source.replace(old, new, 1), encoding="utf-8")
+
+          Path("tests/test_nhl_resilience.py").write_text(
+              '''from datetime import datetime, timezone
+          import json
+          import os
+          from pathlib import Path
+          import tempfile
+          import unittest
+          from unittest.mock import patch
+
+          from nhl_collector import (
+              DiscoveredNHLGame,
+              NHLInventoryIncompleteError,
+              NHLSnapshotParser,
+          )
+          from nhl_schedule_collector import (
+              NHLProviderGapError,
+              ScheduleResolution,
+              ScheduledNHLGame,
+              _capture_resolution,
+              candidates_for_schedule_game,
+              nhl_collection_should_fail,
+              nhl_should_skip_for_trigger,
+              run_schedule_collector,
+              validate_captured_match,
+          )
+
+
+          class NHLResilienceTests(unittest.TestCase):
+              def _scheduled_game(self):
+                  return ScheduledNHLGame(
+                      schedule_id="2026010001",
+                      event_date=datetime(2026, 9, 12, 23, tzinfo=timezone.utc),
+                      away_team="Toronto Maple Leafs",
+                      home_team="Ottawa Senators",
+                      venue="Canadian Tire Centre",
+                      name="Toronto Maple Leafs at Ottawa Senators",
+                      venue_timezone="America/Toronto",
+                      country="Canada",
+                      game_type=1,
+                      season=20262027,
+                  )
+
+              def _thin_payload(self):
+                  return {
+                      "global": [
+                          {
+                              "productionName": "Toronto Maple Leafs at Ottawa Senators",
+                              "mapTitle": "Centre Slush Puppie",
+                              "productionId": "7227372",
+                              "currencyCode": "USD",
+                          }
+                      ],
+                      "tickets": [
+                          {
+                              "l": "General Admission",
+                              "p": "45",
+                              "r": "GA",
+                              "q": "2",
+                              "tags": [],
+                          }
+                      ],
+                  }
+
+              def test_thin_inventory_has_a_specific_provider_gap_exception(self):
+                  with self.assertRaises(NHLInventoryIncompleteError):
+                      NHLSnapshotParser.parse(self._thin_payload())
+
+              def test_explicitly_wrong_dates_are_never_used_as_fallbacks(self):
+                  game = self._scheduled_game()
+                  wrong_date = DiscoveredNHLGame(
+                      url="https://www.vividseats.com/wrong/production/1",
+                      title=game.name,
+                      date_hint=datetime(2026, 10, 28).date(),
+                  )
+                  undated = DiscoveredNHLGame(
+                      url="https://www.vividseats.com/undated/production/2",
+                      title=game.name,
+                      date_hint=None,
+                  )
+                  self.assertEqual(candidates_for_schedule_game(game, [wrong_date]), ())
+                  self.assertEqual(
+                      candidates_for_schedule_game(game, [wrong_date, undated]),
+                      (undated,),
+                  )
+
+              def test_date_only_provider_metadata_uses_official_puck_drop(self):
+                  game = self._scheduled_game()
+                  provider_midnight = datetime(2026, 9, 12, 4, tzinfo=timezone.utc)
+                  self.assertEqual(
+                      validate_captured_match(game, provider_midnight, game.name),
+                      game.event_date,
+                  )
+                  with self.assertRaisesRegex(ValueError, "does not match"):
+                      validate_captured_match(
+                          game,
+                          datetime(2026, 10, 28, 23, tzinfo=timezone.utc),
+                          game.name,
+                      )
+
+              def test_capture_classifies_thin_inventory_as_provider_gap(self):
+                  game = self._scheduled_game()
+                  candidate = DiscoveredNHLGame(
+                      url="https://www.vividseats.com/game/production/7227372",
+                      title=game.name,
+                      date_hint=game.local_date,
+                  )
+                  resolution = ScheduleResolution(game, (candidate,), "test")
+                  payload = self._thin_payload()
+
+                  class FakeBrowser:
+                      def __init__(self, **kwargs):
+                          pass
+
+                      def capture(self, url):
+                          return (
+                              payload,
+                              datetime(2026, 9, 12, 4, tzinfo=timezone.utc),
+                          )
+
+                      def close(self):
+                          pass
+
+                  with patch("nhl_schedule_collector.VividNFLBrowser", FakeBrowser):
+                      with self.assertRaises(NHLProviderGapError):
+                          _capture_resolution(
+                              resolution,
+                              headless=True,
+                              timeout=1,
+                          )
+
+              def test_provider_gaps_do_not_define_an_operational_failure(self):
+                  self.assertFalse(nhl_collection_should_fail([], []))
+                  self.assertTrue(
+                      nhl_collection_should_fail(["browser crashed"], [])
+                  )
+                  self.assertTrue(
+                      nhl_collection_should_fail([], ["search failed"])
+                  )
+
+              def test_scheduled_fallback_exits_before_network_or_browser_work(self):
+                  self.assertTrue(nhl_should_skip_for_trigger("schedule"))
+                  self.assertFalse(nhl_should_skip_for_trigger("workflow_dispatch"))
+                  with tempfile.TemporaryDirectory() as directory:
+                      health = Path(directory) / "nhl-health.json"
+                      pending = Path(directory) / "pending"
+                      with patch.dict(
+                          os.environ,
+                          {"GITHUB_EVENT_NAME": "schedule"},
+                          clear=False,
+                      ), patch(
+                          "nhl_schedule_collector.fetch_schedule_games"
+                      ) as fetch_schedule:
+                          code = run_schedule_collector(
+                              "https://example.test/api/nhl/snapshot",
+                              "token",
+                              True,
+                              1,
+                              health,
+                              pending,
+                          )
+                      self.assertEqual(code, 0)
+                      fetch_schedule.assert_not_called()
+                      report = json.loads(health.read_text(encoding="utf-8"))
+                      self.assertEqual(report["status"], "skipped")
+
+
+          if __name__ == "__main__":
+              unittest.main()
+          ''',
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate the full repository
+        env:
+          DATABASE_PATH: ${{ runner.temp }}/ticket-price-validation/baseball.db
+          CONCERT_DATABASE_PATH: ${{ runner.temp }}/ticket-price-validation/concerts.db
+          NFL_DATABASE_PATH: ${{ runner.temp }}/ticket-price-validation/nfl.db
+          NHL_DATABASE_PATH: ${{ runner.temp }}/ticket-price-validation/nhl.db
+          FLASK_SECRET_KEY: deployment-validation-key
+          COLLECTOR_INGEST_TOKEN: deployment-validation-token
+        run: |
+          mkdir -p "$(dirname "$DATABASE_PATH")"
+          python -m py_compile nhl_collector.py nhl_schedule_collector.py tests/test_nhl_resilience.py
+          python -m unittest discover -s tests -v
+
+      - name: Commit only application and test files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add nhl_collector.py nhl_schedule_collector.py tests/test_nhl_resilience.py
+          git commit -m "Make NHL collection tolerant of provider-limited events"
+          git push origin HEAD:fix/nhl-collector-resilience
