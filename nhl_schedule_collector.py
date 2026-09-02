@@ -34,6 +34,7 @@ from nhl_collector import (
     NHL_CAPTURE_WINDOW_HOURS,
     NHL_DAILY_CADENCE_HOURS,
     NHL_FINAL_CADENCE_HOURS,
+    NHLInventoryIncompleteError,
     NHL_SIX_HOUR_CADENCE_HOURS,
     NHL_TEAM_NAMES,
     NHL_TWELVE_HOUR_CADENCE_HOURS,
@@ -175,6 +176,10 @@ class ScheduleResolution:
     game: ScheduledNHLGame
     candidates: tuple[DiscoveredNHLGame, ...]
     source: str
+
+
+class NHLProviderGapError(RuntimeError):
+    """Vivid lacks enough trustworthy inventory for a scheduled game."""
 
 
 JsonFetcher = Callable[[str, int], dict[str, Any]]
@@ -430,7 +435,11 @@ def candidates_for_schedule_game(
         if ordered_matchup_from_title(row.title) == expected_order
     ]
     same_date = [row for row in matches if row.date_hint == game.local_date]
-    return _dedupe_candidates(same_date or matches)
+    undated = [row for row in matches if row.date_hint is None]
+    # A later meeting between the same teams is not a fallback for this
+    # game. Undated candidates remain eligible and are verified from the
+    # captured provider metadata.
+    return _dedupe_candidates(same_date or undated)
 
 
 def _load_search_page(browser: VividNFLBrowser, url: str) -> None:
@@ -547,19 +556,36 @@ def validate_captured_match(
     scheduled: ScheduledNHLGame,
     event_date: datetime,
     title: str,
-) -> None:
+) -> datetime:
     if ordered_matchup_from_title(title) != scheduled.matchup_key:
         raise ValueError(
             "Captured title does not match scheduled NHL teams in away/home order: "
             f"{title}"
         )
-    difference = abs((as_utc(event_date) - scheduled.event_date).total_seconds())
-    if difference > EVENT_TIME_TOLERANCE_HOURS * 3600:
+
+    provider_utc = as_utc(event_date)
+    try:
+        provider_zone = ZoneInfo(
+            scheduled.venue_timezone or "America/New_York"
+        )
+    except Exception:
+        provider_zone = ZoneInfo("America/New_York")
+    provider_local_date = provider_utc.astimezone(provider_zone).date()
+    difference = abs((provider_utc - scheduled.event_date).total_seconds())
+    if (
+        provider_local_date != scheduled.local_date
+        and difference > EVENT_TIME_TOLERANCE_HOURS * 3600
+    ):
         raise ValueError(
-            "Vivid puck-drop time differs from the NHL schedule by more than "
-            f"{EVENT_TIME_TOLERANCE_HOURS} hours."
+            "Vivid event date does not match the NHL schedule: "
+            f"provider {provider_local_date.isoformat()}, "
+            f"schedule {scheduled.local_date.isoformat()}."
         )
 
+    # The official NHL schedule is canonical. Some Vivid pages expose a
+    # date-only startDate, which becomes local midnight and appears 19
+    # hours earlier than a normal evening game on the same calendar date.
+    return scheduled.event_date
 
 def _capture_resolution(
     resolution: ScheduleResolution,
@@ -567,30 +593,66 @@ def _capture_resolution(
     headless: bool,
     timeout: int,
 ) -> tuple[str, datetime, Any]:
-    errors: list[str] = []
+    provider_gap_errors: list[str] = []
+    capture_errors: list[str] = []
     for candidate in resolution.candidates:
         browser: VividNFLBrowser | None = None
         try:
             url = validated_vivid_url(candidate.url)
             browser = VividNFLBrowser(headless=headless, timeout=timeout)
-            raw_payload, event_date = browser.capture(url)
+            raw_payload, provider_event_date = browser.capture(url)
             snapshot = NHLSnapshotParser.parse(raw_payload)
-            validate_captured_match(resolution.game, event_date, snapshot.title)
+            event_date = validate_captured_match(
+                resolution.game,
+                provider_event_date,
+                snapshot.title,
+            )
             return url, event_date, snapshot
+        except NHLInventoryIncompleteError as exc:
+            provider_gap_errors.append(
+                f"{candidate.url}: {type(exc).__name__}: {exc}"
+            )
         except Exception as exc:
-            errors.append(f"{candidate.url}: {type(exc).__name__}: {exc}")
+            capture_errors.append(
+                f"{candidate.url}: {type(exc).__name__}: {exc}"
+            )
         finally:
             if browser is not None:
                 try:
                     browser.close()
                 except Exception:
                     pass
-    raise RuntimeError("; ".join(errors) or "No Vivid candidate was available.")
 
+    if provider_gap_errors and not capture_errors:
+        raise NHLProviderGapError("; ".join(provider_gap_errors))
+    raise RuntimeError(
+        "; ".join(capture_errors + provider_gap_errors)
+        or "No Vivid candidate was available."
+    )
+
+
+def nhl_collection_should_fail(
+    capture_errors: list[str],
+    search_errors: list[str],
+) -> bool:
+    """Only operational failures should turn the workflow red."""
+
+    return bool(capture_errors or search_errors)
 
 def _write_health(path: Path, report: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+
+
+def nhl_should_skip_for_trigger(event_name: str | None = None) -> bool:
+    """Reserve GitHub's scheduled recovery trigger for baseball only."""
+
+    normalized = (
+        event_name
+        if event_name is not None
+        else os.environ.get("GITHUB_EVENT_NAME", "")
+    )
+    return str(normalized).strip().lower() == "schedule"
 
 
 def run_schedule_collector(
@@ -602,6 +664,22 @@ def run_schedule_collector(
     pending_dir: Path,
 ) -> int:
     started_at = datetime.now(timezone.utc)
+    if nhl_should_skip_for_trigger():
+        report = {
+            "status": "skipped",
+            "event_type": "nhl",
+            "timezone": "America/New_York",
+            "started_at": eastern_iso(started_at),
+            "reason": "scheduled GitHub recovery trigger is baseball-only",
+        }
+        _write_health(health_output, report)
+        print(
+            "Skipping NHL; the scheduled GitHub recovery trigger is "
+            "reserved for baseball.",
+            flush=True,
+        )
+        return 0
+
     replayed, endpoint_available, queue_errors = replay_pending_snapshots(
         endpoint,
         token,
@@ -623,7 +701,11 @@ def run_schedule_collector(
                 "error": message,
             },
         )
-        print(f"NHL SCHEDULE FAILED: {message}", file=sys.stderr, flush=True)
+        print(
+            f"NHL SCHEDULE FAILED: {message}",
+            file=sys.stderr,
+            flush=True,
+        )
         return 1
 
     due_schedule = schedule_games_due(schedule, capture_slot)
@@ -650,6 +732,7 @@ def run_schedule_collector(
     queued = 0
     capture_errors: list[str] = []
     unresolved: list[str] = []
+    provider_gaps: list[str] = []
     uploads: list[dict[str, Any]] = []
 
     for index, resolution in enumerate(resolutions, start=1):
@@ -660,13 +743,21 @@ def run_schedule_collector(
                 f"({eastern_iso(game.event_date)})"
             )
             unresolved.append(message)
-            print(f"NHL COVERAGE MISSING: {message}", file=sys.stderr, flush=True)
+            provider_gaps.append(
+                f"{message}: no exact-date Vivid event was available"
+            )
+            print(
+                f"NHL PROVIDER GAP: {message}",
+                file=sys.stderr,
+                flush=True,
+            )
             continue
 
         try:
             print(
                 f"[{index}/{len(resolutions)}] Capturing NHL game "
-                f"{game.away_team} at {game.home_team} via {resolution.source}.",
+                f"{game.away_team} at {game.home_team} via "
+                f"{resolution.source}.",
                 flush=True,
             )
             url, event_date, snapshot = _capture_resolution(
@@ -679,7 +770,7 @@ def run_schedule_collector(
                 datetime.now(timezone.utc),
             ):
                 raise ValueError(
-                    "Resolved Vivid event is outside the exact 30-day window."
+                    "Resolved NHL event is outside the exact 30-day window."
                 )
 
             payload = nhl_snapshot_to_payload(
@@ -694,7 +785,11 @@ def run_schedule_collector(
 
             if endpoint_available:
                 try:
-                    response = post_snapshot_with_retry(endpoint, token, payload)
+                    response = post_snapshot_with_retry(
+                        endpoint,
+                        token,
+                        payload,
+                    )
                 except Exception as exc:
                     endpoint_available = False
                     queued += 1
@@ -741,22 +836,52 @@ def run_schedule_collector(
             else:
                 queued += 1
                 print(
-                    f"QUEUED: {len(snapshot.sections)} sections for {snapshot.title}.",
+                    f"QUEUED: {len(snapshot.sections)} sections for "
+                    f"{snapshot.title}.",
                     flush=True,
                 )
+        except NHLProviderGapError as exc:
+            message = (
+                f"{game.away_team} at {game.home_team}: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            provider_gaps.append(message)
+            print(
+                f"NHL PROVIDER GAP: {message}",
+                file=sys.stderr,
+                flush=True,
+            )
         except Exception as exc:
             message = (
                 f"{game.away_team} at {game.home_team}: "
                 f"{type(exc).__name__}: {exc}"
             )
             capture_errors.append(message)
-            print(f"NHL CAPTURE FAILED: {message}", file=sys.stderr, flush=True)
+            print(
+                f"NHL CAPTURE FAILED: {message}",
+                file=sys.stderr,
+                flush=True,
+            )
 
     pending_count = len(list(pending_dir.glob("*.json")))
     expected = len(due_schedule)
-    coverage = 100.0 if expected == 0 else round(captured / expected * 100, 2)
+    coverage = (
+        100.0
+        if expected == 0
+        else round(captured / expected * 100, 2)
+    )
+    provider_supported_expected = max(0, expected - len(provider_gaps))
+    provider_supported_coverage = (
+        100.0
+        if provider_supported_expected == 0
+        else round(captured / provider_supported_expected * 100, 2)
+    )
     all_errors = search_errors + capture_errors + queue_errors
-    if unresolved or capture_errors or search_errors:
+    collection_failed = nhl_collection_should_fail(
+        capture_errors,
+        search_errors,
+    )
+    if collection_failed or provider_gaps:
         status = "degraded"
     elif pending_count:
         status = "queued"
@@ -789,6 +914,10 @@ def run_schedule_collector(
         "feed_warnings": feed_warnings,
         "unresolved_count": len(unresolved),
         "unresolved": unresolved,
+        "provider_gap_count": len(provider_gaps),
+        "provider_gaps": provider_gaps,
+        "provider_supported_expected": provider_supported_expected,
+        "provider_supported_coverage_percent": provider_supported_coverage,
         "coverage_percent": coverage,
         "captured": captured,
         "uploaded": uploaded,
@@ -802,18 +931,16 @@ def run_schedule_collector(
     _write_health(health_output, report)
     print(
         "NHL schedule-backed collection finished: "
-        f"{captured}/{expected} due games captured ({coverage:.2f}% coverage); "
+        f"{captured}/{expected} due games captured "
+        f"({coverage:.2f}% overall; "
+        f"{provider_supported_coverage:.2f}% of Vivid-supported games); "
         f"{len(schedule)} games remain inside the 30-day window, "
-        f"{len(unresolved)} unresolved, {queued} queued, {replayed} replayed.",
+        f"{len(provider_gaps)} provider gaps, {queued} queued, "
+        f"{replayed} replayed.",
         flush=True,
     )
 
-    if expected > 0 and captured < expected:
-        return 1
-    if search_errors:
-        return 1
-    return 0
-
+    return 1 if collection_failed else 0
 
 def run_schedule_smoke(
     requested_url: str,

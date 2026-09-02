@@ -334,6 +334,10 @@ def _currency_code(metadata: dict[str, Any], payload: dict[str, Any]) -> str:
     return "USD"
 
 
+class NHLInventoryIncompleteError(ValueError):
+    """Vivid exposed too few priced sections for a trustworthy snapshot."""
+
+
 class NHLSnapshotParser:
     """Convert one Vivid listings response to one lowest price per arena section."""
 
@@ -403,10 +407,10 @@ class NHLSnapshotParser:
             )
         )
         if len(sections) < MIN_USABLE_SECTIONS:
-            raise ValueError(
-                f"NHL capture rejected: only {len(sections)} usable sections; "
-                f"minimum is {MIN_USABLE_SECTIONS}."
-            )
+            raise NHLInventoryIncompleteError(
+        f"NHL capture rejected: only {len(sections)} usable sections; "
+        f"minimum is {MIN_USABLE_SECTIONS}."
+    )
 
         section_names = [row.section for row in sections]
         map_geometry = choose_best_geometry(
