@@ -1,0 +1,181 @@
+name: Implement NHL collector resilience v4
+
+on:
+  push:
+    branches:
+      - fix/nhl-collector-resilience
+    paths:
+      - ".github/workflows/implement-nhl-collector-resilience-v4.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/nhl-collector-resilience
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Apply the already validated NHL resilience patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import textwrap
+
+          workflow = Path(
+              ".github/workflows/implement-nhl-collector-resilience-v3.yml"
+          ).read_text(encoding="utf-8")
+          marker = "python - <<'PY'\n"
+          start = workflow.index(marker) + len(marker)
+          end = workflow.index("\n          PY\n", start)
+          script = textwrap.dedent(workflow[start:end])
+          exec(compile(script, "/tmp/nhl-resilience-patch.py", "exec"))
+          PY
+
+      - name: Keep the GitHub-trigger guard inside the NHL collector
+        run: |
+          git checkout -- .github/workflows/collect-ticket-prices.yml
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("nhl_schedule_collector.py")
+          source = path.read_text(encoding="utf-8")
+          old = '''def run_schedule_collector(
+              endpoint: str,
+              token: str,
+              headless: bool,
+              timeout: int,
+              health_output: Path,
+              pending_dir: Path,
+          ) -> int:
+              started_at = datetime.now(timezone.utc)
+              replayed, endpoint_available, queue_errors = replay_pending_snapshots('''
+          new = '''def nhl_should_skip_for_trigger(event_name: str | None = None) -> bool:
+              """Reserve GitHub's scheduled recovery trigger for baseball only."""
+
+              normalized = (
+                  event_name
+                  if event_name is not None
+                  else os.environ.get("GITHUB_EVENT_NAME", "")
+              )
+              return str(normalized).strip().lower() == "schedule"
+
+
+          def run_schedule_collector(
+              endpoint: str,
+              token: str,
+              headless: bool,
+              timeout: int,
+              health_output: Path,
+              pending_dir: Path,
+          ) -> int:
+              started_at = datetime.now(timezone.utc)
+              if nhl_should_skip_for_trigger():
+                  report = {
+                      "status": "skipped",
+                      "event_type": "nhl",
+                      "timezone": "America/New_York",
+                      "started_at": eastern_iso(started_at),
+                      "reason": "scheduled GitHub recovery trigger is baseball-only",
+                  }
+                  _write_health(health_output, report)
+                  print(
+                      "Skipping NHL; the scheduled GitHub recovery trigger is "
+                      "reserved for baseball.",
+                      flush=True,
+                  )
+                  return 0
+
+              replayed, endpoint_available, queue_errors = replay_pending_snapshots('''
+          if source.count(old) != 1:
+              raise SystemExit("Could not locate the patched NHL collection function")
+          path.write_text(source.replace(old, new, 1), encoding="utf-8")
+
+          test_path = Path("tests/test_nhl_resilience.py")
+          test_source = test_path.read_text(encoding="utf-8")
+          test_source = test_source.replace(
+              "from pathlib import Path\n",
+              "import json\nimport os\nfrom pathlib import Path\nimport tempfile\n",
+              1,
+          )
+          test_source = test_source.replace(
+              "    nhl_collection_should_fail,\n",
+              "    nhl_collection_should_fail,\n    nhl_should_skip_for_trigger,\n    run_schedule_collector,\n",
+              1,
+          )
+          old_test = '''    def test_scheduled_fallback_never_runs_hourly_league_jobs(self):
+              workflow = Path(
+                  ".github/workflows/collect-ticket-prices.yml"
+              ).read_text(encoding="utf-8")
+              self.assertEqual(
+                  workflow.count('if [[ "$EVENT_NAME" == "schedule" ]]; then'),
+                  2,
+              )
+              self.assertIn(
+                  "Collect due NHL games across the adaptive 30-day window",
+                  workflow,
+              )'''
+          new_test = '''    def test_scheduled_fallback_exits_before_network_or_browser_work(self):
+              self.assertTrue(nhl_should_skip_for_trigger("schedule"))
+              self.assertFalse(nhl_should_skip_for_trigger("workflow_dispatch"))
+              with tempfile.TemporaryDirectory() as directory:
+                  health = Path(directory) / "nhl-health.json"
+                  pending = Path(directory) / "pending"
+                  with patch.dict(
+                      os.environ,
+                      {"GITHUB_EVENT_NAME": "schedule"},
+                      clear=False,
+                  ), patch(
+                      "nhl_schedule_collector.fetch_schedule_games"
+                  ) as fetch_schedule:
+                      code = run_schedule_collector(
+                          "https://example.test/api/nhl/snapshot",
+                          "token",
+                          True,
+                          1,
+                          health,
+                          pending,
+                      )
+                  self.assertEqual(code, 0)
+                  fetch_schedule.assert_not_called()
+                  report = json.loads(health.read_text(encoding="utf-8"))
+                  self.assertEqual(report["status"], "skipped")'''
+          if test_source.count(old_test) != 1:
+              raise SystemExit("Could not locate the generated trigger test")
+          test_path.write_text(
+              test_source.replace(old_test, new_test, 1),
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate the full repository
+        env:
+          DATABASE_PATH: ${{ runner.temp }}/ticket-price-validation/baseball.db
+          CONCERT_DATABASE_PATH: ${{ runner.temp }}/ticket-price-validation/concerts.db
+          NFL_DATABASE_PATH: ${{ runner.temp }}/ticket-price-validation/nfl.db
+          NHL_DATABASE_PATH: ${{ runner.temp }}/ticket-price-validation/nhl.db
+          FLASK_SECRET_KEY: deployment-validation-key
+          COLLECTOR_INGEST_TOKEN: deployment-validation-token
+        run: |
+          mkdir -p "$(dirname "$DATABASE_PATH")"
+          python -m py_compile nhl_collector.py nhl_schedule_collector.py tests/test_nhl_resilience.py
+          python -m unittest discover -s tests -v
+
+      - name: Commit only application and test files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add nhl_collector.py nhl_schedule_collector.py tests/test_nhl_resilience.py
+          git commit -m "Make NHL collection tolerant of provider-limited events"
+          git push origin HEAD:fix/nhl-collector-resilience
