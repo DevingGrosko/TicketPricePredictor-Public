@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-stadium.css') }}?v=3">
   {% if sport_key == 'nhl' %}<link rel="stylesheet" href="{{ url_for('static', filename='css/nhl.css') }}?v=2">{% endif %}
   {% if sport_key == 'mlb' %}<link rel="stylesheet" href="{{ url_for('static', filename='css/mlb.css') }}?v=1">{% endif %}
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/venue-insights.css') }}?v=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/venue-insights.css') }}?v=2">
 {% endblock %}
 
 {% block content %}
@@ -93,17 +93,11 @@
         </div>
       {% endif %}
 
-      <nav class="nfl-dashboard-nav" aria-label="{{ venue_noun|capitalize }} report sections">
-        <a href="#overview" class="is-active">Top sections</a>
-        <a href="#all-sections">All sections</a>
-        <a href="#single-games">Games</a>
-      </nav>
-
-      <section class="nfl-dashboard-section" id="overview">
+      <section class="nfl-dashboard-section nfl-dashboard-section--compact" id="overview">
         <div class="nfl-dashboard-section__heading">
           <div>
-            <span class="nfl-section-kicker">Top sections</span>
-            <h2>Cheapest sections and biggest drops.</h2>
+            <span class="nfl-section-kicker">Section signals</span>
+            <h2>Cheapest sections and typical drops.</h2>
           </div>
         </div>
 
@@ -111,7 +105,7 @@
           <article class="nfl-ranking-card">
             <header>
               <div><h3>Cheapest sections</h3></div>
-              <span class="nfl-ranking-card__badge">{{ currency_label }} · across games</span>
+              <span class="nfl-ranking-card__badge">Time-balanced</span>
             </header>
             <ol>
               {% for section in cheapest_sections %}
@@ -119,21 +113,21 @@
                   <span class="nfl-rank-number">{{ loop.index }}</span>
                   <div class="nfl-rank-copy">
                     <strong>{{ section.name }}</strong>
-                    <small>{{ section.game_count }} game{% if section.game_count != 1 %}s{% endif %}{% if section.is_low_price_sample %} · small sample{% endif %}</small>
+                    <small>{{ section.game_count }} game{% if section.game_count != 1 %}s{% endif %} · {{ section.price_bucket_count }} time window{% if section.price_bucket_count != 1 %}s{% endif %}{% if section.is_low_price_sample %} · small sample{% endif %}</small>
                   </div>
-                  <div class="nfl-rank-value"><strong>{{ section.average_price_label }}</strong><small>average typical price</small></div>
+                  <div class="nfl-rank-value"><strong>{{ section.typical_price_label }}</strong><small>balanced average</small></div>
                   {% if section.detail_url %}<a href="{{ section.detail_url }}" aria-label="Open details for {{ section.name }}">View section <span aria-hidden="true">&#8594;</span></a>{% endif %}
                 </li>
               {% else %}
-                <li class="nfl-ranking-empty">No section prices are available for this {{ venue_noun }} yet.</li>
+                <li class="nfl-ranking-empty">No section prices are available yet.</li>
               {% endfor %}
             </ol>
           </article>
 
           <article class="nfl-ranking-card nfl-ranking-card--drops">
             <header>
-              <div><h3>Biggest price drops</h3></div>
-              <span class="nfl-ranking-card__badge">Ranked by %</span>
+              <div><h3>Largest typical drops</h3></div>
+              <span class="nfl-ranking-card__badge">Median max drop</span>
             </header>
             <ol>
               {% for section in biggest_drops %}
@@ -141,101 +135,37 @@
                   <span class="nfl-rank-number">{{ loop.index }}</span>
                   <div class="nfl-rank-copy">
                     <strong>{{ section.name }}</strong>
-                    <small>{{ section.drop_game_count }} qualifying game{% if section.drop_game_count != 1 %}s{% endif %} · fell in {{ section.drop_frequency }}%{% if section.is_low_drop_sample %} · small sample{% endif %}</small>
+                    <small>{{ section.drop_game_count }} completed game{% if section.drop_game_count != 1 %}s{% endif %}{% if section.is_low_drop_sample %} · small sample{% endif %}</small>
                   </div>
-                  <div class="nfl-rank-value nfl-rank-value--drop"><strong>{{ section.average_percent_drop_label }}</strong><small>{{ section.average_dollar_drop_label }} average</small></div>
+                  <div class="nfl-rank-value nfl-rank-value--drop"><strong>{{ section.typical_max_drop_percent_label }}</strong><small>{{ section.typical_max_drop_dollar_label }} median</small></div>
                   {% if section.detail_url %}<a href="{{ section.detail_url }}" aria-label="Open details for {{ section.name }}">View section <span aria-hidden="true">&#8594;</span></a>{% endif %}
                 </li>
               {% else %}
-                <li class="nfl-ranking-empty">No completed games have enough section history to calculate a decline yet.</li>
+                <li class="nfl-ranking-empty">More completed game history is needed.</li>
               {% endfor %}
             </ol>
           </article>
         </div>
 
-        <div class="nfl-sample-note">
-          <span aria-hidden="true">&#9432;</span>
-          <p>“Small sample” means fewer than three games.</p>
-        </div>
-      </section>
-
-      <section class="nfl-dashboard-section nfl-all-sections" id="all-sections">
-        <div class="nfl-dashboard-section__heading">
-          <div><span class="nfl-section-kicker">Compare</span><h2>All sections.</h2></div>
-        </div>
-
-        <div class="nfl-section-table-controls">
-          <label><span>Find a section</span><input type="search" placeholder="Try 136, club, upper…" autocomplete="off" data-section-filter></label>
-          <label>
-            <span>Sort sections</span>
-            <select data-section-sort>
-              <option value="price-asc">Lowest average price</option>
-              <option value="drop-desc">Largest average decline</option>
-              <option value="games-desc">Most games observed</option>
-              <option value="name-asc">Section name</option>
-            </select>
-          </label>
-          <span class="nfl-section-table-count"><strong data-section-visible>{{ all_sections|length }}</strong> of {{ all_sections|length }} sections</span>
-        </div>
-
-        <div class="nfl-section-table-wrap">
-          <table class="nfl-section-table">
-            <thead>
-              <tr><th>Section</th><th>Average price</th><th>Average movement</th><th>Games</th><th><span class="sr-only">Open details</span></th></tr>
-            </thead>
-            <tbody data-section-table>
+        <div class="nfl-report-lookup">
+          <div>
+            <span class="nfl-section-kicker">Explore</span>
+            <h3>Open another section.</h3>
+          </div>
+          <form data-section-jump>
+            <label class="sr-only" for="section-jump">Choose a section</label>
+            <select id="section-jump" data-section-jump-select>
+              <option value="">Choose a section</option>
               {% for section in all_sections %}
-                <tr data-section-row data-name="{{ section.name|lower }}" data-price="{{ section.average_price }}" data-drop="{{ section.average_percent_drop if section.average_percent_drop is not none else -999999 }}" data-games="{{ section.game_count }}">
-                  <td><strong>{{ section.name }}</strong><small>{{ section.observation_count }} observation{% if section.observation_count != 1 %}s{% endif %}{% if section.is_low_price_sample %} · small sample{% endif %}</small></td>
-                  <td><strong>{{ section.average_price_label }}</strong><small>across {{ section.game_count }} game{% if section.game_count != 1 %}s{% endif %}</small></td>
-                  <td class="is-{{ section.direction }}"><strong>{{ section.average_percent_drop_label }}</strong><small>{{ section.average_dollar_drop_label }} · {{ section.direction_label|lower }}</small></td>
-                  <td><strong>{{ section.game_count }}</strong><small>game-level values</small></td>
-                  <td>
-                    <div class="venue-row-actions">
-                      {% if section.detail_url %}<a href="{{ section.detail_url }}">{{ section_action_label }} <span aria-hidden="true">&#8594;</span></a>{% endif %}
-                      {% if section.secondary_url %}<a href="{{ section.secondary_url }}">{{ secondary_action_label }} <span aria-hidden="true">&#8594;</span></a>{% endif %}
-                    </div>
-                  </td>
-                </tr>
-              {% else %}
-                <tr><td colspan="5">No stored section observations are available for this {{ venue_noun }}.</td></tr>
+                {% if section.detail_url %}<option value="{{ section.detail_url }}">{{ section.name }} · {{ section.typical_price_label }}</option>{% endif %}
               {% endfor %}
-            </tbody>
-          </table>
-          <p class="nfl-section-table-empty" data-section-table-empty hidden>No sections match that search.</p>
-        </div>
-      </section>
-
-      <section class="nfl-dashboard-section nfl-stadium-games" id="single-games">
-        <div class="nfl-dashboard-section__heading">
-          <div><span class="nfl-section-kicker">Games</span><h2>Open one matchup.</h2></div>
+            </select>
+            <button class="button nfl-button nfl-button--primary" type="submit" data-section-jump-button disabled>Open section</button>
+          </form>
+          <a class="nfl-report-lookup__link" href="{{ home_url }}#single-game">Single-game tools <span aria-hidden="true">&#8594;</span></a>
         </div>
 
-        <div class="nfl-game-history-list">
-          {% for game in games %}
-            <article class="nfl-game-history-row">
-              <span class="nfl-game-status nfl-game-status--{{ game.status_key }}">{{ game.status }}</span>
-              <div>
-                <h3>{{ game.label }}</h3>
-                <p>{{ game.snapshot_count }} snapshot{% if game.snapshot_count != 1 %}s{% endif %} · {{ game.section_count }} known sections{% if game.event_currency %} · {{ game.event_currency }}{% endif %}</p>
-              </div>
-              {% if game.direct_url %}
-                <a class="button nfl-map-launch" href="{{ game.direct_url }}">{{ game_action_label }} <span aria-hidden="true">&#8594;</span></a>
-              {% else %}
-                <div class="venue-game-picker" data-game-section-form data-base-url="{{ game.base_url }}">
-                  <label class="sr-only" for="game-section-{{ game.id }}">Choose a section for {{ game.label }}</label>
-                  <select id="game-section-{{ game.id }}" data-game-section {% if not game.sections %}disabled{% endif %}>
-                    <option value="">Choose section</option>
-                    {% for section in game.sections if not is_parking_section(section) %}<option value="{{ section }}">{{ section }}</option>{% endfor %}
-                  </select>
-                  <a class="button nfl-map-launch" href="#" aria-disabled="true" data-game-open>{{ game_action_label }} <span aria-hidden="true">&#8594;</span></a>
-                </div>
-              {% endif %}
-            </article>
-          {% else %}
-            <div class="empty-state nfl-empty-state"><span>!</span><h3>No games stored</h3><p>This {{ venue_noun }} does not yet have a selectable game history.</p></div>
-          {% endfor %}
-        </div>
+        <p class="nfl-report-method-note">Prices use fixed time windows; drops use each game’s largest peak-to-later-low move after within-window spikes are removed.</p>
       </section>
 
     {% endif %}
@@ -243,4 +173,4 @@
 </div>
 {% endblock %}
 
-{% block scripts %}<script src="{{ url_for('static', filename='js/nfl-stadium.js') }}?v=3"></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/nfl-stadium.js') }}?v=4"></script>{% endblock %}

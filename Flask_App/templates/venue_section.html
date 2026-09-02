@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-stadium.css') }}?v=3">
   {% if sport_key == 'nhl' %}<link rel="stylesheet" href="{{ url_for('static', filename='css/nhl.css') }}?v=2">{% endif %}
   {% if sport_key == 'mlb' %}<link rel="stylesheet" href="{{ url_for('static', filename='css/mlb.css') }}?v=1">{% endif %}
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/venue-section.css') }}?v=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/venue-section.css') }}?v=2">
 {% endblock %}
 
 {% block content %}
@@ -28,29 +28,25 @@
         <div class="venue-section-hero__copy">
           <span class="nfl-section-kicker">{{ selected_team_label }} · {{ selected_venue }}</span>
           <h1>{{ selected_section }}</h1>
-          <p>Based on {{ section_summary.game_count }} tracked home game{% if section_summary.game_count != 1 %}s{% endif %}.</p>
+          <p>{{ section_summary.game_count }} tracked home game{% if section_summary.game_count != 1 %}s{% endif %} across {{ section_summary.price_bucket_count }} comparable time window{% if section_summary.price_bucket_count != 1 %}s{% endif %}.</p>
           <div class="venue-section-hero__actions">
             <a class="button nfl-button nfl-button--primary" href="#price-timeline">View price timeline <span aria-hidden="true">&#8595;</span></a>
             {% if buying_window_url %}<a class="venue-section-text-link" href="{{ buying_window_url }}">Buying window <span aria-hidden="true">&#8594;</span></a>{% endif %}
           </div>
         </div>
 
-        <dl class="venue-section-metrics">
+        <dl class="venue-section-metrics venue-section-metrics--three">
           <div>
-            <dt>{{ section_summary.average_price_label }}</dt>
-            <dd>Average price</dd>
+            <dt>{{ section_summary.typical_price_label }}</dt>
+            <dd>Time-balanced average · {{ section_summary.price_bucket_count }} window{% if section_summary.price_bucket_count != 1 %}s{% endif %}</dd>
           </div>
           <div class="is-{{ section_summary.direction }}">
-            <dt>{{ section_summary.average_percent_drop_label }}</dt>
-            <dd>{% if section_summary.drop_game_count %}Average change · {{ section_summary.average_dollar_drop_label }}{% else %}More completed games needed{% endif %}</dd>
+            <dt>{{ section_summary.typical_max_drop_percent_label }}</dt>
+            <dd>{% if section_summary.drop_game_count %}Typical max drop · {{ section_summary.typical_max_drop_dollar_label }}{% else %}More completed games needed{% endif %}</dd>
           </div>
           <div>
             <dt>{{ section_summary.game_count }}</dt>
             <dd>Games{% if section_summary.is_low_price_sample %} · small sample{% endif %}</dd>
-          </div>
-          <div>
-            <dt>{{ section_summary.observation_count }}</dt>
-            <dd>Observations</dd>
           </div>
         </dl>
       </header>
@@ -92,7 +88,7 @@
           <header class="venue-section-card__header">
             <div>
               <span class="nfl-section-kicker">Price timeline</span>
-              <h2>Average price toward {{ event_moment }}.</h2>
+              <h2>Average price by time before {{ event_moment }}.</h2>
             </div>
             <span class="venue-section-badge">{{ currency_label }}</span>
           </header>
@@ -117,15 +113,15 @@
             </div>
           {% endif %}
 
-          <p class="venue-section-note">Each point takes one median price per game in that time window, then averages those game-level values. Extra snapshots in one game do not give it extra weight.</p>
+          <p class="venue-section-note">Each point takes one median per game in that time window, then averages across games. The headline averages these displayed windows, so frequent late snapshots do not outweigh earlier daily observations.</p>
         </article>
       </section>
 
-      <section class="venue-section-games" id="section-games">
-        <div class="venue-section-games__heading">
-          <div><span class="nfl-section-kicker">Underlying games</span><h2>Games behind this section average.</h2></div>
-          <p>{{ section_games|length }} game{% if section_games|length != 1 %}s{% endif %} contain usable {{ selected_section }} observations.</p>
-        </div>
+      <details class="venue-section-games venue-section-games--collapsed" id="section-games">
+        <summary>
+          <div><span class="nfl-section-kicker">Evidence</span><h2>Games used for this section.</h2></div>
+          <span>{{ section_games|length }} game{% if section_games|length != 1 %}s{% endif %} <b>Show details</b></span>
+        </summary>
 
         <div class="venue-section-game-list">
           {% for game in section_games %}
@@ -133,11 +129,11 @@
               <span class="nfl-game-status nfl-game-status--{{ game.status_key }}">{{ game.status }}</span>
               <div class="venue-section-game-row__copy">
                 <h3>{{ game.label }}</h3>
-                <p>{{ game.observation_count }} observation{% if game.observation_count != 1 %}s{% endif %} · {{ game.coverage_label }}</p>
+                <p>{{ game.bucket_count }} time window{% if game.bucket_count != 1 %}s{% endif %} · {{ game.observation_count }} observation{% if game.observation_count != 1 %}s{% endif %} · {{ game.coverage_label }}</p>
               </div>
               <dl>
-                <div><dt>{{ game.average_price_label }}</dt><dd>Typical price</dd></div>
-                <div><dt>{{ game.movement_label }}</dt><dd>First to latest · {{ game.movement_percent_label }}</dd></div>
+                <div><dt>{{ game.average_price_label }}</dt><dd>Time-balanced average</dd></div>
+                <div><dt>{{ game.max_drop_label }}</dt><dd>Max bucket drop · {{ game.max_drop_percent_label }}</dd></div>
               </dl>
               <div class="venue-section-game-row__actions">
                 <a href="{{ game.game_url }}">View game chart <span aria-hidden="true">&#8594;</span></a>
@@ -148,7 +144,7 @@
             <div class="empty-state nfl-empty-state"><span>!</span><h3>No game histories available</h3><p>This section does not yet have usable timestamped observations.</p></div>
           {% endfor %}
         </div>
-      </section>
+      </details>
 
       <script id="venue-section-timeline-data" type="application/json">{{ timeline | tojson }}</script>
       <script id="venue-section-map-data" type="application/json">{{ map_data | tojson }}</script>

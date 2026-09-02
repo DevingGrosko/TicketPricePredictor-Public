@@ -202,7 +202,7 @@ class FlaskProductionStartupTests(unittest.TestCase):
                     "/nfl/stadium/section?venue=MetLife%20Stadium&section=Section%200"
                 )
                 assert nfl_section.status_code == 200
-                assert b"Average price toward kickoff" in nfl_section.data
+                assert b"Average price by time before kickoff" in nfl_section.data
                 assert b"Section 0" in nfl_section.data
 
                 nhl_page = client.get("/nhl")
@@ -221,7 +221,7 @@ class FlaskProductionStartupTests(unittest.TestCase):
                     "/nhl/arena/section?venue=Scotiabank%20Arena&section=Section%20100"
                 )
                 assert nhl_section.status_code == 200
-                assert b"Average price toward puck drop" in nhl_section.data
+                assert b"Average price by time before puck drop" in nhl_section.data
                 assert b"Section 100" in nhl_section.data
                 """
             )

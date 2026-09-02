@@ -126,7 +126,7 @@ class MLBVenueInsightTests(unittest.TestCase):
                 self.assertEqual(context["cheapest_sections"][0]["name"], "Section 500")
                 self.assertEqual(context["biggest_drops"][0]["name"], "Section 100")
                 self.assertEqual(
-                    context["all_sections"][0]["average_price_label"], "$53.83"
+                    context["all_sections"][0]["average_price_label"], "$53.84"
                 )
 
                 by_name = {row["name"]: row for row in context["all_sections"]}
