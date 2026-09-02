@@ -1,0 +1,30 @@
+name: Export robust-metrics working copy
+
+on:
+  push:
+    branches:
+      - feature/robust-section-metrics
+    paths:
+      - ".github/workflows/export-robust-metrics-working-copy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/robust-section-metrics
+
+      - name: Remove Git metadata
+        run: rm -rf .git
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: robust-metrics-working-copy
+          path: .
+          include-hidden-files: true
+          retention-days: 1
