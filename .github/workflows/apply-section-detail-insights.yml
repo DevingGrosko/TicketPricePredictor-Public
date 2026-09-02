@@ -52,8 +52,7 @@ jobs:
           echo "e42749eee489ffeea792fb55b3836b0d1556622d2cb81e335c693d3e257e7bb8  /tmp/section-detail.tar.gz" | sha256sum -c -
           tar -xzf /tmp/section-detail.tar.gz
           rm -rf .github/section-detail-payload
-          rm -f .github/workflows/export-working-copy.yml
-          rm -f .github/workflows/apply-section-detail-insights.yml
+          git checkout HEAD -- .github/workflows/deploy-pythonanywhere.yml
 
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
