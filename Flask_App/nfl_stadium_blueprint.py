@@ -9,11 +9,15 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
+import hmac
+import os
+from pathlib import Path
 import re
+import traceback
 from statistics import mean, median
 from typing import Any, Callable, Iterable
 
-from flask import Blueprint, render_template, request, url_for
+from flask import Blueprint, jsonify, render_template, request, url_for
 from sqlalchemy import select
 
 from models import (
@@ -2103,3 +2107,43 @@ def nhl_section():
         request.args.get("section", ""),
     )
     return render_template("venue_section.html", **context)
+
+
+@nfl_stadium_blueprint.get("/api/diagnostics/mlb-stadium")
+def diagnose_mlb_stadium():
+    """Temporarily expose a sanitized traceback to authenticated collectors."""
+    configured = os.environ.get("COLLECTOR_INGEST_TOKEN", "")
+    supplied = request.headers.get("Authorization", "")
+    if not configured or not hmac.compare_digest(supplied, f"Bearer {configured}"):
+        return jsonify({"status": "error", "error": "unauthorized"}), 401
+
+    venue = _clean(request.args.get("venue", ""))
+    try:
+        context = build_mlb_stadium_context(venue)
+    except Exception as exc:
+        frames = traceback.extract_tb(exc.__traceback__)[-10:]
+        return jsonify(
+            {
+                "status": "error",
+                "exception": type(exc).__name__,
+                "message": str(exc),
+                "frames": [
+                    {
+                        "file": Path(frame.filename).name,
+                        "line": frame.lineno,
+                        "function": frame.name,
+                        "code": frame.line or "",
+                    }
+                    for frame in frames
+                ],
+            }
+        ), 500
+
+    return jsonify(
+        {
+            "status": "ok",
+            "venue": context.get("selected_venue", ""),
+            "section_count": context.get("section_count", 0),
+            "drop_count": len(context.get("biggest_drops", [])),
+        }
+     )
