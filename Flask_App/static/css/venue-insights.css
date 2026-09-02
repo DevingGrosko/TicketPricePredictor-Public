@@ -1,0 +1,150 @@
+/* Shared refinements for team-first NFL, NHL, and MLB venue dashboards. */
+
+.venue-row-actions {
+  display: grid;
+  justify-items: end;
+  gap: 7px;
+}
+
+.venue-row-actions a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.venue-game-picker {
+  min-width: 330px;
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+}
+
+.venue-game-picker select {
+  width: 100%;
+  height: 44px;
+  padding: 0 36px 0 12px;
+  border: 1px solid rgba(219, 230, 246, .16);
+  border-radius: 8px;
+  color: white;
+  background: #061a38;
+  font: inherit;
+  font-size: 10px;
+  outline: none;
+}
+
+.venue-game-picker select:focus {
+  border-color: var(--nfl-red-bright);
+  box-shadow: 0 0 0 3px rgba(213, 10, 10, .12);
+}
+
+.venue-game-picker [aria-disabled="true"] {
+  opacity: .42;
+  pointer-events: none;
+}
+
+.nfl-stadium-dashboard-hero__copy .nfl-section-kicker {
+  line-height: 1.5;
+}
+
+.nfl-stadium-card__eyebrow {
+  min-height: 26px;
+  line-height: 1.45;
+}
+
+.nfl-stadium-card h2,
+.nfl-stadium-card h3 {
+  text-wrap: balance;
+}
+
+/* Let the NHL palette carry through the shared NFL dashboard components. */
+.nhl-theme .nfl-stadium-preview,
+.nhl-theme .nfl-stadium-card,
+.nhl-theme .nfl-ranking-card,
+.nhl-theme .nfl-game-history-row,
+.nhl-theme .nfl-section-table-wrap {
+  background:
+    radial-gradient(circle at 100% 0, rgba(102, 199, 232, .12), transparent 13rem),
+    linear-gradient(150deg, rgba(12, 45, 64, .94), rgba(2, 12, 19, .97));
+  border-color: rgba(196, 231, 244, .14);
+}
+
+.nhl-theme .nfl-stadium-preview::before,
+.nhl-theme .nfl-stadium-dashboard-hero::before,
+.nhl-theme .nfl-ranking-card::before {
+  background: linear-gradient(90deg, #c8102e 0 30%, #f6fbff 30% 36%, #66c7e8 36% 100%);
+}
+
+.nhl-theme .nfl-stadium-card::before {
+  background: linear-gradient(180deg, #66c7e8, #c8102e);
+}
+
+.nhl-theme .nfl-stadium-card:hover {
+  border-color: rgba(102, 199, 232, .42);
+}
+
+.nhl-theme .nfl-stadium-card__eyebrow,
+.nhl-theme .nfl-section-kicker,
+.nhl-theme .nfl-stadium-card__action b,
+.nhl-theme .nfl-ranking-card li > a span,
+.nhl-theme .nfl-section-table td:last-child a span,
+.nhl-theme .nfl-method-grid article > span {
+  color: #76d7f5;
+}
+
+.nhl-theme .nfl-rank-number {
+  background: rgba(46, 134, 171, .86);
+}
+
+.nhl-theme .nfl-rank-value strong {
+  color: #76d7f5;
+}
+
+.nhl-theme .nfl-ranking-card--drops .nfl-rank-value strong,
+.nhl-theme .nfl-section-table td.is-down strong {
+  color: #8be0bb;
+}
+
+.nhl-theme .nfl-dashboard-nav {
+  background: rgba(2, 8, 13, .95);
+}
+
+.nhl-theme .nfl-dashboard-nav a.is-active::after {
+  background: #66c7e8;
+}
+
+.nhl-theme .nfl-stadium-dashboard-hero {
+  background:
+    radial-gradient(circle at 88% 20%, rgba(102, 199, 232, .2), transparent 24rem),
+    linear-gradient(145deg, rgba(12, 45, 64, .97), rgba(2, 9, 15, .99));
+}
+
+.nhl-theme .venue-game-picker select {
+  background: #0a2638;
+  border-color: rgba(196, 231, 244, .18);
+}
+
+.mlb-theme .venue-game-picker select {
+  background: #123229;
+  border-color: rgba(238, 228, 198, .18);
+}
+
+@media (max-width: 760px) {
+  .nfl-game-history-row {
+    grid-template-columns: 1fr;
+  }
+
+  .nfl-game-status {
+    justify-self: start;
+  }
+
+  .venue-game-picker {
+    min-width: 0;
+    width: 100%;
+    grid-template-columns: 1fr;
+  }
+
+  .venue-game-picker .nfl-map-launch {
+    width: 100%;
+  }
+}

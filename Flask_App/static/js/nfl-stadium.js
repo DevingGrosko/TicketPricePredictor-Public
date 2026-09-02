@@ -6,11 +6,12 @@
       .trim();
   }
 
-  function bindStadiumSearch(input) {
-    const scope = input.closest('.nfl-stadium-picker, .nfl-stadium-directory') || document;
+  function bindVenueSearch(input) {
+    const scope = input.closest('[data-venue-search-scope], .nfl-stadium-picker, .nfl-stadium-directory') || document;
     const cards = Array.from(scope.querySelectorAll('[data-stadium-card]'));
     const count = scope.querySelector('[data-stadium-count]');
     const empty = scope.querySelector('[data-stadium-empty]');
+    const noun = input.dataset.venueNoun || scope.dataset.venueNoun || 'stadium';
     if (!cards.length) return;
 
     const update = () => {
@@ -23,9 +24,7 @@
         if (matches) visible += 1;
       });
 
-      if (count) {
-        count.textContent = `${visible} stadium${visible === 1 ? '' : 's'}`;
-      }
+      if (count) count.textContent = `${visible} ${noun}${visible === 1 ? '' : 's'}`;
       if (empty) empty.hidden = visible !== 0;
     };
 
@@ -33,7 +32,7 @@
     input.addEventListener('search', update);
   }
 
-  document.querySelectorAll('[data-stadium-search]').forEach(bindStadiumSearch);
+  document.querySelectorAll('[data-stadium-search]').forEach(bindVenueSearch);
 
   const stadiumSwitch = document.querySelector('[data-stadium-switch]');
   if (stadiumSwitch) {
@@ -44,6 +43,31 @@
       });
     }
   }
+
+  document.querySelectorAll('[data-game-section-form]').forEach((picker) => {
+    const select = picker.querySelector('[data-game-section]');
+    const link = picker.querySelector('[data-game-open]');
+    const baseUrl = String(picker.dataset.baseUrl || '');
+    if (!select || !link || !baseUrl) return;
+
+    const update = () => {
+      const section = select.value;
+      if (!section) {
+        link.href = '#';
+        link.setAttribute('aria-disabled', 'true');
+        return;
+      }
+      const separator = baseUrl.includes('?') ? '&' : '?';
+      link.href = `${baseUrl}${separator}section=${encodeURIComponent(section)}`;
+      link.setAttribute('aria-disabled', 'false');
+    };
+
+    select.addEventListener('change', update);
+    link.addEventListener('click', (event) => {
+      if (link.getAttribute('aria-disabled') === 'true') event.preventDefault();
+    });
+    update();
+  });
 
   const sectionTable = document.querySelector('[data-section-table]');
   if (sectionTable) {
