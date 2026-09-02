@@ -48,9 +48,11 @@ app.config["SECRET_KEY"] = os.environ.get(
 )
 
 from Flask_App.nfl_blueprint import nfl_blueprint
+from Flask_App.nfl_stadium_blueprint import nfl_stadium_blueprint
 from Flask_App.nhl_blueprint import nhl_blueprint
 
 app.register_blueprint(nfl_blueprint)
+app.register_blueprint(nfl_stadium_blueprint)
 app.register_blueprint(nhl_blueprint)
 
 MAX_SNAPSHOT_REPLAY_AGE = timedelta(days=7)

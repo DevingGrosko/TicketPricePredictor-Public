@@ -1,94 +1,129 @@
 {% extends "base.html" %}
-{% block title %}NFL ticket history — TicketSignal{% endblock %}
+{% block title %}NFL stadium ticket intelligence — TicketSignal{% endblock %}
 {% block body_class %}nfl-theme{% endblock %}
 {% block head %}
   <meta name="theme-color" content="#013369">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl.css') }}?v=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl.css') }}?v=2">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-responsive.css') }}?v=1">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-map.css') }}?v=2">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-stadium.css') }}?v=1">
 {% endblock %}
 
 {% block content %}
 <div class="nfl-page">
-  <section class="nfl-hero">
+  <section class="nfl-hero nfl-hero--stadium-first">
     <div class="nfl-hero__copy">
       <div class="nfl-kicker">
         <span class="nfl-mini-shield" aria-hidden="true"><i></i><strong>TS</strong></span>
-        <span>NFL market tracker</span>
+        <span>NFL market tracker · Stadium intelligence</span>
         <span class="nfl-live-tag"><i></i> Live + historical</span>
       </div>
-      <h1>Track every game.<br><em>Build the market history.</em></h1>
-      <p class="nfl-hero__lede">Upcoming and completed games remain in one searchable history. Choose any tracked home team, matchup, and section to inspect its full ticket-price movement. Kickoff and capture times are shown in Eastern Time.</p>
+      <h1>Start with a stadium.<br><em>Find the sections that move.</em></h1>
+      <p class="nfl-hero__lede">Choose a stadium to compare sections across every tracked game. See the five cheapest sections, the sections with the largest average price declines, and the underlying single-game histories behind each result.</p>
       <div class="nfl-hero__actions">
-        <a class="button nfl-button nfl-button--primary" href="#explore-nfl">Explore game history <span aria-hidden="true">&#8595;</span></a>
-        <a class="nfl-text-link" href="#explore-nfl">{{ upcoming_count }} upcoming · {{ completed_count }} completed <span aria-hidden="true">&#8594;</span></a>
-        <a class="nfl-text-link" href="{{ url_for('home') }}">Switch to baseball <span aria-hidden="true">&#8594;</span></a>
+        <a class="button nfl-button nfl-button--primary" href="#stadiums">Choose a stadium <span aria-hidden="true">&#8595;</span></a>
+        <a class="nfl-text-link" href="#single-game">Open one game instead <span aria-hidden="true">&#8594;</span></a>
       </div>
 
       <dl class="nfl-metrics" aria-label="NFL database totals">
-        <div><dt>{{ team_count }}</dt><dd>Home teams</dd></div>
+        <div><dt>{{ stadium_count }}</dt><dd>Stadiums</dd></div>
         <div><dt>{{ game_count }}</dt><dd>Games tracked</dd></div>
-        <div><dt>{{ stadium_count }}</dt><dd>Stadiums tracked</dd></div>
+        <div><dt>{{ completed_count }}</dt><dd>Completed games</dd></div>
       </dl>
     </div>
 
-    <div class="nfl-scoreboard" aria-label="NFL collection window and cadence">
-      <div class="nfl-scoreboard__topline">
+    <div class="nfl-stadium-preview" aria-label="Example stadium insight dashboard">
+      <div class="nfl-stadium-preview__header">
         <div>
-          <span>Market history</span>
-          <strong>Thirty-day price movement</strong>
+          <span>Stadium report</span>
+          <strong>Section-level market signals</strong>
         </div>
-        <span class="nfl-status"><i></i> Persistent dataset</span>
+        <span class="nfl-status"><i></i> Persistent history</span>
       </div>
 
-      <div class="nfl-clock">
-        <span>Tracking window</span>
-        <strong>720:00</strong>
-        <small>Hours to kickoff</small>
+      <div class="nfl-stadium-preview__venue">
+        <span>Choose any tracked venue</span>
+        <strong>Compare games fairly</strong>
+        <small>Each game contributes once to the stadium averages.</small>
       </div>
 
-      <div class="nfl-field" aria-hidden="true">
-        <div class="nfl-field__endzone nfl-field__endzone--left">30 DAYS</div>
-        <div class="nfl-field__surface">
-          <div class="nfl-yard-labels"><span>20</span><span>40</span><span>50</span><span>40</span><span>20</span></div>
-          <div class="nfl-hash nfl-hash--top"></div>
-          <div class="nfl-hash nfl-hash--bottom"></div>
-          <svg viewBox="0 0 620 220" preserveAspectRatio="none" role="img" aria-label="Illustrative ticket price movement toward kickoff">
-            <defs>
-              <linearGradient id="nflHomeAreaGradient" x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stop-color="#d50a0a" stop-opacity=".34"/>
-                <stop offset="100%" stop-color="#d50a0a" stop-opacity="0"/>
-              </linearGradient>
-            </defs>
-            <path class="nfl-field__area" d="M0 62 C70 38,116 106,178 79 S280 128,342 91 S455 156,620 112 L620 220 L0 220 Z"/>
-            <path class="nfl-field__line" d="M0 62 C70 38,116 106,178 79 S280 128,342 91 S455 156,620 112"/>
-            <circle cx="455" cy="142" r="7"/>
-          </svg>
-          <span class="nfl-field__tooltip">Scheduled snapshot</span>
+      <div class="nfl-stadium-preview__columns">
+        <div>
+          <span>Cheapest sections</span>
+          <ol>
+            <li><b>1</b><span>Typical section price</span><strong>$</strong></li>
+            <li><b>2</b><span>Across tracked games</span><strong>$</strong></li>
+            <li><b>3</b><span>Low-sample flags</span><strong>$</strong></li>
+          </ol>
         </div>
-        <div class="nfl-field__endzone nfl-field__endzone--right">KICKOFF</div>
+        <div>
+          <span>Largest declines</span>
+          <ol>
+            <li><b>1</b><span>Average percent drop</span><strong>−%</strong></li>
+            <li><b>2</b><span>Average dollar drop</span><strong>−$</strong></li>
+            <li><b>3</b><span>Games in sample</span><strong>#</strong></li>
+          </ol>
+        </div>
       </div>
 
-      <div class="nfl-scoreboard__footer">
-        <div><span>Cadence</span><strong>6h → 3h → 1h</strong></div>
-        <div><span>Timezone</span><strong>Eastern Time</strong></div>
+      <div class="nfl-stadium-preview__footer">
+        <span>Overview</span><span>All sections</span><span>Single games</span>
       </div>
     </div>
   </section>
 
-  <section class="nfl-data-bar" id="how-it-works" aria-label="NFL tracker methodology">
-    <div><span>01</span><strong>Thirty-day window</strong><small>Collection begins up to 720 hours before kickoff.</small></div>
-    <div><span>02</span><strong>Adaptive cadence</strong><small>Every 6 hours, then 3 hours, then hourly in the final week.</small></div>
-    <div><span>03</span><strong>Persistent game history</strong><small>Upcoming and completed games stay together for cross-game and stadium analysis.</small></div>
+  <section class="nfl-data-bar" id="how-it-works" aria-label="NFL stadium workflow">
+    <div><span>01</span><strong>Choose a stadium</strong><small>Begin with the venue instead of working through three dropdowns.</small></div>
+    <div><span>02</span><strong>Compare section signals</strong><small>See average prices and first-to-last declines across games.</small></div>
+    <div><span>03</span><strong>Inspect the evidence</strong><small>Open all sections, stadium maps, and individual game histories.</small></div>
   </section>
 
-  <section class="nfl-explore" id="explore-nfl">
+  <section class="nfl-stadium-picker" id="stadiums">
+    <div class="nfl-section-heading nfl-stadium-picker__heading">
+      <div>
+        <span class="nfl-section-kicker">Stadium-first analysis</span>
+        <h2>Choose where you want to sit.</h2>
+      </div>
+      <p>Stadiums with more completed games provide stronger comparisons. Every dashboard shows its sample size, and small samples are marked rather than presented as established patterns.</p>
+    </div>
+
+    <div class="nfl-stadium-picker__controls">
+      <label for="nfl-stadium-search">Find a stadium or home team</label>
+      <div>
+        <input id="nfl-stadium-search" type="search" placeholder="Search MetLife, Lambeau, Dallas…" autocomplete="off" data-stadium-search>
+        <span data-stadium-count>{{ stadium_count }} stadium{% if stadium_count != 1 %}s{% endif %}</span>
+      </div>
+    </div>
+
+    <div class="nfl-stadium-card-grid" data-stadium-grid>
+      {% for venue, tracked_games in stadium_game_counts.items() %}
+        <a class="nfl-stadium-card" href="{{ url_for('nfl_stadium.nfl_stadium', venue=venue) }}" data-stadium-card data-search="{{ venue|lower }}">
+          <span class="nfl-stadium-card__eyebrow">NFL stadium</span>
+          <h3>{{ venue }}</h3>
+          <dl>
+            <div><dt>{{ tracked_games }}</dt><dd>game{% if tracked_games != 1 %}s{% endif %}</dd></div>
+            <div><dt>30D</dt><dd>tracking window</dd></div>
+          </dl>
+          <span class="nfl-stadium-card__action">Open stadium report <b aria-hidden="true">&#8594;</b></span>
+        </a>
+      {% else %}
+        <div class="empty-state nfl-empty-state nfl-stadium-picker__empty">
+          <span>!</span>
+          <h3>No NFL stadiums are stored yet</h3>
+          <p>The stadium directory will appear after NFL game snapshots are collected.</p>
+        </div>
+      {% endfor %}
+    </div>
+    <p class="nfl-stadium-no-results" data-stadium-empty hidden>No tracked stadium matches that search.</p>
+  </section>
+
+  <section class="nfl-explore nfl-single-game-explorer" id="single-game">
     <div class="nfl-section-heading">
       <div>
-        <span class="nfl-section-kicker">Any tracked matchup</span>
-        <h2>Choose a game in three steps.</h2>
+        <span class="nfl-section-kicker">Single-game analysis</span>
+        <h2>Already know the matchup?</h2>
       </div>
-      <p>Select the designated home team, game, and section. Games remain available after kickoff, so the same interface supports live decisions, historical review, and future stadium-level comparisons.</p>
+      <p>Use the detailed flow to inspect one home team, matchup, and section. The stadium dashboard remains the fastest way to compare patterns across several games.</p>
     </div>
 
     <div class="nfl-analysis-shell">
@@ -96,19 +131,19 @@
         <div class="nfl-playbook__mark" aria-hidden="true">
           <span class="nfl-football-icon"><i></i></span>
         </div>
-        <span class="nfl-section-kicker">Single-game analysis</span>
-        <h3>One dataset from collection through history.</h3>
-        <p>Completed games are not removed from the analysis flow. Their section histories remain alongside upcoming games and accumulate under canonical stadium names.</p>
+        <span class="nfl-section-kicker">Underlying evidence</span>
+        <h3>Move from the stadium summary into one exact game.</h3>
+        <p>Upcoming and completed games remain in the same history. Choose a section to view every stored market observation as kickoff approaches.</p>
         <div class="nfl-feature-list">
-          <div><span>720h</span><p><strong>Full 30-day window</strong><small>Early movement through the final kickoff countdown.</small></p></div>
-          <div><span>6→3→1h</span><p><strong>Adaptive snapshots</strong><small>More frequent observations as kickoff gets closer.</small></p></div>
-          <div><span>VENUE</span><p><strong>Canonical stadiums</strong><small>Games can later be compared and aggregated by home venue.</small></p></div>
+          <div><span>AVG</span><p><strong>Across-game dashboard</strong><small>Start with comparable section summaries for the stadium.</small></p></div>
+          <div><span>MAP</span><p><strong>Interactive seating map</strong><small>Open a section in the latest stored event layout.</small></p></div>
+          <div><span>1G</span><p><strong>Single-game timeline</strong><small>Audit the exact observations behind a price movement.</small></p></div>
         </div>
       </div>
 
       <form class="nfl-selection-form">
         <div class="nfl-form__header">
-          <div><span>Price chart setup</span><strong>Choose your view</strong></div>
+          <div><span>Detailed chart setup</span><strong>Choose one game</strong></div>
           <span class="nfl-form__count">3 picks</span>
         </div>
         {% if not games_dict %}
@@ -133,7 +168,7 @@
           <button class="button nfl-button nfl-button--primary submit-analysis" type="submit" disabled>Open price trend <span aria-hidden="true">&#8594;</span></button>
           <button class="button nfl-map-launch" type="button" data-map-launch data-map-base="{{ url_for('nfl.nfl_map') }}" disabled>Explore stadium map <span aria-hidden="true">&#8594;</span></button>
         </div>
-        <p class="nfl-form-note"><span aria-hidden="true">&#9432;</span> Prices are historical marketplace observations, not a guarantee of future availability.</p>
+        <p class="nfl-form-note"><span aria-hidden="true">&#9432;</span> Historical marketplace observations do not guarantee future prices or availability.</p>
       </form>
     </div>
   </section>
@@ -145,4 +180,7 @@
 </script>
 {% endblock %}
 
-{% block scripts %}<script src="{{ url_for('static', filename='js/nfl.js') }}?v=3"></script>{% endblock %}
+{% block scripts %}
+  <script src="{{ url_for('static', filename='js/nfl.js') }}?v=3"></script>
+  <script src="{{ url_for('static', filename='js/nfl-stadium.js') }}?v=1"></script>
+{% endblock %}

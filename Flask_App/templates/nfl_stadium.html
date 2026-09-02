@@ -1,0 +1,286 @@
+{% extends "base.html" %}
+{% block title %}{% if selected_venue %}{{ selected_venue }} NFL ticket insights{% else %}NFL stadium directory{% endif %} — TicketSignal{% endblock %}
+{% block body_class %}nfl-theme{% endblock %}
+{% block head %}
+  <meta name="theme-color" content="#013369">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl.css') }}?v=2">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-responsive.css') }}?v=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-stadium.css') }}?v=1">
+{% endblock %}
+
+{% block content %}
+<div class="nfl-page nfl-stadium-page">
+  <section class="nfl-stadium-directory{% if selected_venue %} nfl-stadium-directory--compact{% endif %}">
+    <a class="nfl-back-link" href="{{ url_for('nfl.nfl_home') }}#stadiums"><span aria-hidden="true">&#8592;</span> Back to NFL stadiums</a>
+
+    {% if error %}
+      <div class="empty-state nfl-empty-state nfl-stadium-error">
+        <span>!</span>
+        <h1>Stadium not found</h1>
+        <p>{{ error }}</p>
+        <a class="button nfl-button nfl-button--primary" href="{{ url_for('nfl_stadium.nfl_stadium') }}">Browse tracked stadiums</a>
+      </div>
+    {% elif not selected_venue %}
+      <div class="nfl-stadium-directory__hero">
+        <div>
+          <span class="nfl-section-kicker">NFL stadium directory</span>
+          <h1>Choose a stadium to compare its sections.</h1>
+          <p>Open a venue to see average section prices, the largest historical declines, every tracked section, and the individual games behind the results.</p>
+        </div>
+        <dl>
+          <div><dt>{{ stadium_count }}</dt><dd>Tracked stadiums</dd></div>
+          <div><dt>30D</dt><dd>Maximum window</dd></div>
+        </dl>
+      </div>
+
+      <div class="nfl-stadium-picker__controls nfl-stadium-picker__controls--directory">
+        <label for="nfl-directory-search">Search tracked stadiums</label>
+        <div>
+          <input id="nfl-directory-search" type="search" placeholder="Search by stadium or home team…" autocomplete="off" data-stadium-search>
+          <span data-stadium-count>{{ stadium_count }} stadium{% if stadium_count != 1 %}s{% endif %}</span>
+        </div>
+      </div>
+
+      <div class="nfl-stadium-card-grid" data-stadium-grid>
+        {% for stadium in stadiums %}
+          <a class="nfl-stadium-card" href="{{ stadium.url }}" data-stadium-card data-search="{{ (stadium.venue ~ ' ' ~ stadium.team_label)|lower }}">
+            <span class="nfl-stadium-card__eyebrow">{{ stadium.team_label or 'NFL venue' }}</span>
+            <h2>{{ stadium.venue }}</h2>
+            <dl>
+              <div><dt>{{ stadium.game_count }}</dt><dd>games</dd></div>
+              <div><dt>{{ stadium.section_count }}</dt><dd>sections</dd></div>
+            </dl>
+            <div class="nfl-stadium-card__status">
+              <span>{{ stadium.completed_count }} completed</span>
+              <span>{{ stadium.upcoming_count }} upcoming</span>
+            </div>
+            <span class="nfl-stadium-card__action">Open stadium report <b aria-hidden="true">&#8594;</b></span>
+          </a>
+        {% else %}
+          <div class="empty-state nfl-empty-state nfl-stadium-picker__empty">
+            <span>!</span>
+            <h2>No stadium history yet</h2>
+            <p>The directory will populate after NFL snapshots are stored.</p>
+          </div>
+        {% endfor %}
+      </div>
+      <p class="nfl-stadium-no-results" data-stadium-empty hidden>No tracked stadium matches that search.</p>
+    {% else %}
+      <header class="nfl-stadium-dashboard-hero">
+        <div class="nfl-stadium-dashboard-hero__copy">
+          <span class="nfl-section-kicker">Stadium market report</span>
+          <h1>{{ selected_venue }}</h1>
+          <p>Compare section-level prices and movement across the complete tracked history for this venue, then open the exact games and maps behind the averages.</p>
+        </div>
+
+        <form class="nfl-stadium-switch" method="get" action="{{ url_for('nfl_stadium.nfl_stadium') }}" data-stadium-switch>
+          <label for="nfl-stadium-switcher">Switch stadium</label>
+          <div>
+            <select id="nfl-stadium-switcher" name="venue">
+              {% for stadium in stadiums %}
+                <option value="{{ stadium.venue }}"{% if stadium.venue == selected_venue %} selected{% endif %}>{{ stadium.venue }} · {{ stadium.game_count }} game{% if stadium.game_count != 1 %}s{% endif %}</option>
+              {% endfor %}
+            </select>
+            <button class="button nfl-button nfl-button--primary" type="submit">Open</button>
+          </div>
+        </form>
+
+        <dl class="nfl-stadium-dashboard-metrics">
+          <div><dt>{{ game_count }}</dt><dd>Games tracked</dd></div>
+          <div><dt>{{ section_count }}</dt><dd>Sections compared</dd></div>
+          <div><dt>{{ observation_count }}</dt><dd>Price observations</dd></div>
+          <div><dt>{{ drop_section_count }}</dt><dd>Sections with drop data</dd></div>
+        </dl>
+      </header>
+
+      <nav class="nfl-dashboard-nav" aria-label="Stadium report sections">
+        <a href="#overview" class="is-active">Overview</a>
+        <a href="#all-sections">All sections</a>
+        <a href="#single-games">Single games</a>
+        <a href="#methodology">Methodology</a>
+      </nav>
+
+      <section class="nfl-dashboard-section" id="overview">
+        <div class="nfl-dashboard-section__heading">
+          <div>
+            <span class="nfl-section-kicker">Fast read</span>
+            <h2>Where prices are lowest—and where they fall.</h2>
+          </div>
+          <p>Rankings are calculated at the game level first. That prevents games with more snapshots from overpowering the rest of the stadium history.</p>
+        </div>
+
+        <div class="nfl-ranking-grid">
+          <article class="nfl-ranking-card">
+            <header>
+              <div>
+                <span>Lowest average price</span>
+                <h3>Five cheapest sections</h3>
+              </div>
+              <span class="nfl-ranking-card__badge">Across games</span>
+            </header>
+            <ol>
+              {% for section in cheapest_sections %}
+                <li>
+                  <span class="nfl-rank-number">{{ loop.index }}</span>
+                  <div class="nfl-rank-copy">
+                    <strong>{{ section.name }}</strong>
+                    <small>{{ section.game_count }} game{% if section.game_count != 1 %}s{% endif %} · {{ section.observation_count }} observations{% if section.is_low_price_sample %} · small sample{% endif %}</small>
+                  </div>
+                  <div class="nfl-rank-value">
+                    <strong>{{ section.average_price_label }}</strong>
+                    <small>average typical price</small>
+                  </div>
+                  {% if section.map_url %}<a href="{{ section.map_url }}" aria-label="Open {{ section.name }} in the latest tracked game">Inspect <span aria-hidden="true">&#8594;</span></a>{% endif %}
+                </li>
+              {% else %}
+                <li class="nfl-ranking-empty">No section prices are available for this stadium yet.</li>
+              {% endfor %}
+            </ol>
+          </article>
+
+          <article class="nfl-ranking-card nfl-ranking-card--drops">
+            <header>
+              <div>
+                <span>Largest average decline</span>
+                <h3>Five strongest price drops</h3>
+              </div>
+              <span class="nfl-ranking-card__badge">Ranked by %</span>
+            </header>
+            <ol>
+              {% for section in biggest_drops %}
+                <li>
+                  <span class="nfl-rank-number">{{ loop.index }}</span>
+                  <div class="nfl-rank-copy">
+                    <strong>{{ section.name }}</strong>
+                    <small>{{ section.drop_game_count }} qualifying game{% if section.drop_game_count != 1 %}s{% endif %} · fell in {{ section.drop_frequency }}%{% if section.is_low_drop_sample %} · small sample{% endif %}</small>
+                  </div>
+                  <div class="nfl-rank-value nfl-rank-value--drop">
+                    <strong>{{ section.average_percent_drop_label }}</strong>
+                    <small>{{ section.average_dollar_drop_label }} average</small>
+                  </div>
+                  {% if section.map_url %}<a href="{{ section.map_url }}" aria-label="Open {{ section.name }} in the latest tracked game">Inspect <span aria-hidden="true">&#8594;</span></a>{% endif %}
+                </li>
+              {% else %}
+                <li class="nfl-ranking-empty">No completed games have enough section history to calculate a decline yet.</li>
+              {% endfor %}
+            </ol>
+          </article>
+        </div>
+
+        <div class="nfl-sample-note">
+          <span aria-hidden="true">&#9432;</span>
+          <p><strong>Read the sample before the rank.</strong> A section is marked “small sample” until it appears in at least three games. Rankings remain visible so new stadium histories are still useful, but they should not be treated as stable patterns yet.</p>
+        </div>
+      </section>
+
+      <section class="nfl-dashboard-section nfl-all-sections" id="all-sections">
+        <div class="nfl-dashboard-section__heading">
+          <div>
+            <span class="nfl-section-kicker">Across-game comparison</span>
+            <h2>Every tracked section.</h2>
+          </div>
+          <p>Search or sort the full stadium history. Average price uses one typical value per game; movement uses completed games with a usable first and final observation.</p>
+        </div>
+
+        <div class="nfl-section-table-controls">
+          <label>
+            <span>Find a section</span>
+            <input type="search" placeholder="Try 136, club, upper…" autocomplete="off" data-section-filter>
+          </label>
+          <label>
+            <span>Sort sections</span>
+            <select data-section-sort>
+              <option value="price-asc">Lowest average price</option>
+              <option value="drop-desc">Largest average decline</option>
+              <option value="games-desc">Most games observed</option>
+              <option value="name-asc">Section name</option>
+            </select>
+          </label>
+          <span class="nfl-section-table-count"><strong data-section-visible>{{ all_sections|length }}</strong> of {{ all_sections|length }} sections</span>
+        </div>
+
+        <div class="nfl-section-table-wrap">
+          <table class="nfl-section-table">
+            <thead>
+              <tr>
+                <th>Section</th>
+                <th>Average price</th>
+                <th>Average movement</th>
+                <th>Drop frequency</th>
+                <th>Games</th>
+                <th><span class="sr-only">Open details</span></th>
+              </tr>
+            </thead>
+            <tbody data-section-table>
+              {% for section in all_sections %}
+                <tr
+                  data-section-row
+                  data-name="{{ section.name|lower }}"
+                  data-price="{{ section.average_price }}"
+                  data-drop="{{ section.average_percent_drop if section.average_percent_drop is not none else -999999 }}"
+                  data-games="{{ section.game_count }}"
+                >
+                  <td>
+                    <strong>{{ section.name }}</strong>
+                    <small>{{ section.observation_count }} observation{% if section.observation_count != 1 %}s{% endif %}{% if section.is_low_price_sample %} · small sample{% endif %}</small>
+                  </td>
+                  <td><strong>{{ section.average_price_label }}</strong><small>across {{ section.game_count }} game{% if section.game_count != 1 %}s{% endif %}</small></td>
+                  <td class="is-{{ section.direction }}"><strong>{{ section.average_percent_drop_label }}</strong><small>{{ section.average_dollar_drop_label }} · {{ section.direction_label|lower }}</small></td>
+                  <td><strong>{% if section.drop_game_count %}{{ section.drop_frequency }}%{% else %}—{% endif %}</strong><small>{{ section.drop_game_count }} qualifying game{% if section.drop_game_count != 1 %}s{% endif %}</small></td>
+                  <td><strong>{{ section.game_count }}</strong><small>game-level values</small></td>
+                  <td>{% if section.map_url %}<a href="{{ section.map_url }}">Latest map <span aria-hidden="true">&#8594;</span></a>{% endif %}</td>
+                </tr>
+              {% else %}
+                <tr><td colspan="6">No stored section observations are available for this stadium.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          <p class="nfl-section-table-empty" data-section-table-empty hidden>No sections match that search.</p>
+        </div>
+      </section>
+
+      <section class="nfl-dashboard-section nfl-stadium-games" id="single-games">
+        <div class="nfl-dashboard-section__heading">
+          <div>
+            <span class="nfl-section-kicker">Underlying game history</span>
+            <h2>Open a single matchup.</h2>
+          </div>
+          <p>Choose a game to enter its interactive stadium map. From there, click any section to see its exact time-series history.</p>
+        </div>
+
+        <div class="nfl-game-history-list">
+          {% for game in games %}
+            <article class="nfl-game-history-row">
+              <span class="nfl-game-status nfl-game-status--{{ game.status_key }}">{{ game.status }}</span>
+              <div>
+                <h3>{{ game.label }}</h3>
+                <p>{{ game.snapshot_count }} snapshot{% if game.snapshot_count != 1 %}s{% endif %} · {{ game.section_count }} known sections</p>
+              </div>
+              <a class="button nfl-map-launch" href="{{ game.map_url }}">Open stadium map <span aria-hidden="true">&#8594;</span></a>
+            </article>
+          {% else %}
+            <div class="empty-state nfl-empty-state"><span>!</span><h3>No games stored</h3><p>This stadium does not yet have a selectable game history.</p></div>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="nfl-dashboard-section nfl-methodology" id="methodology">
+        <div class="nfl-dashboard-section__heading">
+          <div>
+            <span class="nfl-section-kicker">Calculation notes</span>
+            <h2>What the rankings mean.</h2>
+          </div>
+          <p>The dashboard summarizes observed marketplace listings. It is descriptive historical analysis, not a forecast or a guarantee of future inventory.</p>
+        </div>
+        <div class="nfl-method-grid">
+          <article><span>01</span><h3>Average section price</h3><p>{{ method_price }}</p></article>
+          <article><span>02</span><h3>Average price decline</h3><p>{{ method_drop }}</p></article>
+          <article><span>03</span><h3>Sample-size guardrail</h3><p>Results based on fewer than three games are labeled as small samples. The exact game count is shown beside every result.</p></article>
+        </div>
+      </section>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}<script src="{{ url_for('static', filename='js/nfl-stadium.js') }}?v=1"></script>{% endblock %}
