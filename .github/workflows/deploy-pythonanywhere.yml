@@ -65,12 +65,14 @@ jobs:
             nhl_schedule_collector.py \
             Flask_App/flask_app.py \
             Flask_App/nfl_blueprint.py \
+            Flask_App/nfl_stadium_blueprint.py \
             Flask_App/nhl_blueprint.py
           node --check Flask_App/static/js/script.js
           node --check Flask_App/static/js/graph.js
           node --check Flask_App/static/js/concerts.js
           node --check Flask_App/static/js/nfl.js
           node --check Flask_App/static/js/nfl-map.js
+          node --check Flask_App/static/js/nfl-stadium.js
           node --check Flask_App/static/js/nhl.js
           node --check Flask_App/static/js/nhl-graph.js
           node --check Flask_App/static/js/nhl-map.js
