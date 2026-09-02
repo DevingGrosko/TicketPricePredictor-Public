@@ -44,16 +44,20 @@ jobs:
           ):
               replace_exact(path, "    {% else %}\\n", map_counts)
           '''
-          new = '''for path, script_name, success_header in (
+          new = '''for path, script_name, success_header, current_version, next_version in (
               (
                   "Flask_App/templates/nfl_map.html",
                   "nfl-map.js",
                   '      <header class="nfl-matchup-banner nfl-map-banner">',
+                  "2",
+                  "3",
               ),
               (
                   "Flask_App/templates/nhl_map.html",
                   "nhl-map.js",
                   '      <header class="nfl-matchup-banner nhl-matchup-banner nfl-map-banner">',
+                  "1",
+                  "2",
               ),
           ):
               success_marker = "    {% else %}\\n" + success_header
@@ -66,11 +70,11 @@ jobs:
           version_pairs = (
               (
                   '''f"js/{script_name}') }}?v=2"''',
-                  '''"js/" + script_name + "') }}?v=2"''',
+                  '''"js/" + script_name + "') }}?v=" + current_version''',
               ),
               (
                   '''f"js/{script_name}') }}?v=3"''',
-                  '''"js/" + script_name + "') }}?v=3"''',
+                  '''"js/" + script_name + "') }}?v=" + next_version''',
               ),
           )
           for old_version, new_version in version_pairs:
