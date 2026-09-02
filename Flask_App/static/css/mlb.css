@@ -1,0 +1,205 @@
+/* Baseball treatment for the shared team-first venue experience. */
+
+body.mlb-theme {
+  --nfl-navy: #163a31;
+  --nfl-navy-deep: #07120f;
+  --nfl-navy-mid: #102c25;
+  --nfl-blue: #d6bd7a;
+  --nfl-red: #c33a32;
+  --nfl-red-bright: #e25549;
+  --nfl-white: #fbf7ec;
+  --nfl-silver: #d7d0bd;
+  --nfl-muted: #a5ad9f;
+  --bg: #07120f;
+  --bg-soft: #10231d;
+  --surface: rgba(17, 48, 40, .86);
+  --surface-solid: #123229;
+  --surface-light: #1b493c;
+  --line: rgba(238, 228, 198, .12);
+  --line-strong: rgba(238, 228, 198, .24);
+  --text: var(--nfl-white);
+  --muted: var(--nfl-muted);
+  --purple: var(--nfl-red);
+  --purple-light: #ef6a5e;
+  --cyan: #e4c982;
+  background:
+    radial-gradient(circle at 84% 10%, rgba(218, 190, 116, .18), transparent 31rem),
+    radial-gradient(circle at 8% 57%, rgba(195, 58, 50, .11), transparent 27rem),
+    linear-gradient(180deg, #07120f 0%, #10271f 48%, #07120f 100%);
+}
+
+.mlb-theme .site-glow--one {
+  background: #d6bd7a;
+  opacity: .13;
+}
+
+.mlb-theme .site-glow--two {
+  background: #c33a32;
+  opacity: .1;
+}
+
+.mlb-theme .site-header {
+  border-bottom-color: rgba(238, 228, 198, .13);
+}
+
+.mlb-theme .site-header::after {
+  background: linear-gradient(90deg, #c33a32 0 12%, #f2e7c8 12% 18%, #2f765f 18% 100%);
+}
+
+.mlb-theme .brand > span:last-child > span {
+  color: #e4c982;
+}
+
+.mlb-theme .brand-mark,
+.mlb-theme .nfl-mini-shield.mlb-mini-mark {
+  clip-path: none;
+  border-radius: 50%;
+  border: 1px solid rgba(238, 228, 198, .5);
+  background: radial-gradient(circle at 35% 30%, #fffdf7, #e8dfc8 72%, #c5b895);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, .25), 0 8px 22px rgba(0, 0, 0, .28);
+}
+
+.mlb-theme .brand-mark span {
+  width: 2px;
+  height: 7px;
+  border-radius: 2px;
+  background: #ba3932;
+  transform: rotate(42deg);
+}
+
+.mlb-theme .brand-mark span:nth-child(1) { left: 8px; top: 7px; }
+.mlb-theme .brand-mark span:nth-child(2) { left: 13px; top: 11px; }
+.mlb-theme .brand-mark span:nth-child(3) { left: 17px; top: 17px; }
+
+.mlb-theme .nfl-mini-shield.mlb-mini-mark::before {
+  display: none;
+}
+
+.mlb-theme .nfl-mini-shield.mlb-mini-mark strong {
+  color: #17362e;
+  margin-top: 0;
+}
+
+.mlb-theme .nfl-mini-shield.mlb-mini-mark i {
+  position: absolute;
+  inset: 5px;
+  width: auto;
+  height: auto;
+  border: 0;
+  border-radius: 50%;
+  transform: none;
+}
+
+.mlb-theme .nfl-mini-shield.mlb-mini-mark i::before,
+.mlb-theme .nfl-mini-shield.mlb-mini-mark i::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 8px;
+  border: 1.5px dashed #c33a32;
+  border-top-color: transparent;
+  border-bottom-color: transparent;
+  border-radius: 50%;
+}
+
+.mlb-theme .nfl-mini-shield.mlb-mini-mark i::before { left: 2px; }
+.mlb-theme .nfl-mini-shield.mlb-mini-mark i::after { right: 2px; }
+
+.mlb-theme .site-nav a.is-active::after {
+  background: #d6bd7a;
+  box-shadow: 0 0 14px rgba(214, 189, 122, .45);
+}
+
+.mlb-theme .nfl-hero h1 em,
+.mlb-theme .nfl-section-kicker,
+.mlb-theme .nfl-stadium-card__eyebrow {
+  color: #e4c982;
+  text-shadow: none;
+}
+
+.mlb-theme .nfl-button--primary,
+.mlb-theme .button--primary {
+  color: #fff;
+  background: linear-gradient(135deg, #a92f29, #df5045);
+  box-shadow: 0 16px 38px rgba(195, 58, 50, .22);
+}
+
+.mlb-theme .nfl-button--primary:hover,
+.mlb-theme .button--primary:hover {
+  box-shadow: 0 20px 46px rgba(195, 58, 50, .31);
+}
+
+.mlb-theme .nfl-stadium-preview,
+.mlb-theme .nfl-stadium-card,
+.mlb-theme .nfl-ranking-card,
+.mlb-theme .nfl-game-history-row,
+.mlb-theme .nfl-section-table-wrap {
+  background:
+    radial-gradient(circle at 100% 0, rgba(214, 189, 122, .11), transparent 13rem),
+    linear-gradient(150deg, rgba(22, 58, 49, .94), rgba(7, 20, 16, .97));
+  border-color: rgba(238, 228, 198, .13);
+}
+
+.mlb-theme .nfl-stadium-preview::before,
+.mlb-theme .nfl-stadium-dashboard-hero::before,
+.mlb-theme .nfl-ranking-card::before {
+  background: linear-gradient(90deg, #c33a32 0 36%, #f2e7c8 36% 42%, #3a8068 42% 100%);
+}
+
+.mlb-theme .nfl-stadium-card::before {
+  background: linear-gradient(180deg, #c33a32, #d6bd7a);
+}
+
+.mlb-theme .nfl-stadium-card:hover {
+  border-color: rgba(214, 189, 122, .42);
+}
+
+.mlb-theme .nfl-stadium-card__action b,
+.mlb-theme .nfl-ranking-card li > a span,
+.mlb-theme .nfl-section-table td:last-child a span,
+.mlb-theme .nfl-method-grid article > span {
+  color: #e4c982;
+}
+
+.mlb-theme .nfl-rank-number {
+  background: rgba(195, 58, 50, .8);
+}
+
+.mlb-theme .nfl-rank-value strong {
+  color: #e4c982;
+}
+
+.mlb-theme .nfl-ranking-card--drops .nfl-rank-value strong,
+.mlb-theme .nfl-section-table td.is-down strong {
+  color: #8bd0a8;
+}
+
+.mlb-theme .nfl-dashboard-nav {
+  background: rgba(7, 18, 15, .95);
+}
+
+.mlb-theme .nfl-dashboard-nav a.is-active::after {
+  background: #d6bd7a;
+}
+
+.mlb-theme .nfl-stadium-dashboard-hero {
+  background:
+    radial-gradient(circle at 88% 20%, rgba(214, 189, 122, .18), transparent 24rem),
+    linear-gradient(145deg, rgba(20, 59, 49, .97), rgba(7, 18, 15, .99));
+}
+
+.mlb-theme .analysis-tabs,
+.mlb-theme .analysis-shell {
+  border-color: rgba(238, 228, 198, .12);
+}
+
+.mlb-theme .analysis-tab.is-active .tab-number,
+.mlb-theme .section-kicker,
+.mlb-theme .panel-icon {
+  color: #d6bd7a;
+}
+
+.mlb-detailed-tools {
+  border-top: 1px solid rgba(238, 228, 198, .1);
+}
