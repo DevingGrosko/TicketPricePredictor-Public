@@ -761,3 +761,25 @@
     flex-direction: column;
   }
 }
+
+/* Keep the two drop definitions visible without adding another page section. */
+.venue-section-drop-metric {
+  min-height: 146px;
+}
+
+.venue-section-metric-detail {
+  display: grid;
+  gap: 4px;
+}
+
+.venue-section-metric-detail span {
+  display: block;
+}
+
+.venue-section-metric-detail span:not(:first-child) {
+  color: #637a96;
+  font-size: 8px;
+  letter-spacing: .025em;
+  line-height: 1.45;
+  text-transform: none;
+}

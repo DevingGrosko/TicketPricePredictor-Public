@@ -499,16 +499,51 @@ def _maximum_bucket_drawdown(
     return best
 
 
-def _mode_bucket_label(
+def _first_to_last_bucket_change(
+    points: Iterable[dict[str, Any]],
+    *,
+    value_key: str = "price",
+) -> dict[str, Any] | None:
+    """Compare the first and final usable time-window medians for one game."""
+    ordered = sorted(points, key=lambda point: int(point["slot"]))
+    if len(ordered) < 2:
+        return None
+
+    first = ordered[0]
+    last = ordered[-1]
+    first_price = float(first[value_key])
+    last_price = float(last[value_key])
+    if first_price <= 0:
+        return None
+
+    dollar_drop = first_price - last_price
+    return {
+        "percent": dollar_drop / first_price * 100,
+        "dollar": dollar_drop,
+        "first_slot": int(first["slot"]),
+        "last_slot": int(last["slot"]),
+        "span_hours": float(first["lead_time"]) - float(last["lead_time"]),
+    }
+
+
+def _typical_drawdown_window_labels(
     rows: Iterable[dict[str, Any]],
-    field: str,
     sport_key: str,
-) -> str:
-    slots = [row[field] for row in rows if row.get("percent", 0) > 0]
-    if not slots:
-        return ""
-    slot = Counter(slots).most_common(1)[0][0]
-    return _TIMELINE_BUCKETS[sport_key][slot][3]
+) -> tuple[str, str]:
+    """Return the most common peak-to-low bucket pair among positive drops."""
+    pairs = [
+        (int(row["peak_slot"]), int(row["low_slot"]))
+        for row in rows
+        if row.get("percent", 0) > 0
+    ]
+    if not pairs:
+        return "", ""
+
+    peak_slot, low_slot = Counter(pairs).most_common(1)[0][0]
+    return (
+        _TIMELINE_BUCKETS[sport_key][peak_slot][3],
+        _TIMELINE_BUCKETS[sport_key][low_slot][3],
+    )
 
 
 def _section_insights_for(
@@ -553,6 +588,7 @@ def _section_insights_for(
     )
     game_ids_by_section: dict[str, set[int]] = defaultdict(set)
     per_game_drops: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    per_game_first_to_last: dict[str, list[dict[str, Any]]] = defaultdict(list)
     observation_count: dict[str, int] = defaultdict(int)
     latest_event_by_section: dict[str, Any] = {}
 
@@ -582,6 +618,10 @@ def _section_insights_for(
             )
             if drawdown is not None:
                 per_game_drops[section].append(drawdown)
+
+            first_to_last = _first_to_last_bucket_change(bucket_points)
+            if first_to_last is not None:
+                per_game_first_to_last[section].append(first_to_last)
 
     insights = []
     for section, bucket_values in bucket_values_by_section.items():
@@ -614,6 +654,33 @@ def _section_insights_for(
         material_drop_frequency = (
             round(material_drop_count / len(drop_rows) * 100) if drop_rows else 0
         )
+        drop_peak_label, drop_low_label = _typical_drawdown_window_labels(
+            drop_rows,
+            sport_key,
+        )
+
+        first_to_last_rows = per_game_first_to_last.get(section, [])
+        average_first_to_last_percent = (
+            float(mean(row["percent"] for row in first_to_last_rows))
+            if first_to_last_rows
+            else None
+        )
+        average_first_to_last_dollar = (
+            float(mean(row["dollar"] for row in first_to_last_rows))
+            if first_to_last_rows
+            else None
+        )
+        first_to_last_direction = "flat"
+        if (
+            average_first_to_last_percent is not None
+            and average_first_to_last_percent > 0.05
+        ):
+            first_to_last_direction = "down"
+        elif (
+            average_first_to_last_percent is not None
+            and average_first_to_last_percent < -0.05
+        ):
+            first_to_last_direction = "up"
 
         direction = "down" if typical_percent_drop and typical_percent_drop > 0.05 else "flat"
         direction_label = (
@@ -671,15 +738,31 @@ def _section_insights_for(
                     else None
                 ),
                 "average_dollar_drop_label": dollar_label,
+                "material_drop_threshold": MATERIAL_DROP_PERCENT,
                 "material_drop_game_count": material_drop_count,
                 "material_drop_frequency": material_drop_frequency,
                 "drop_frequency": material_drop_frequency,
-                "drop_peak_label": _mode_bucket_label(
-                    drop_rows, "peak_slot", sport_key
+                "drop_peak_label": drop_peak_label,
+                "drop_low_label": drop_low_label,
+                "first_to_last_game_count": len(first_to_last_rows),
+                "average_first_to_last_percent": (
+                    round(average_first_to_last_percent, 2)
+                    if average_first_to_last_percent is not None
+                    else None
                 ),
-                "drop_low_label": _mode_bucket_label(
-                    drop_rows, "low_slot", sport_key
+                "average_first_to_last_percent_label": _percent_change(
+                    average_first_to_last_percent
                 ),
+                "average_first_to_last_dollar": (
+                    round(average_first_to_last_dollar, 2)
+                    if average_first_to_last_dollar is not None
+                    else None
+                ),
+                "average_first_to_last_dollar_label": _currency_price_change(
+                    average_first_to_last_dollar,
+                    currency,
+                ),
+                "first_to_last_direction": first_to_last_direction,
                 "direction": direction,
                 "direction_label": direction_label,
                 "is_low_price_sample": (

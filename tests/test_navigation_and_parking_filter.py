@@ -74,7 +74,14 @@ class SimplifiedNavigationTests(unittest.TestCase):
         section = (root / "Flask_App/templates/venue_section.html").read_text()
         self.assertIn('<details class="venue-section-games', section)
         self.assertIn("Time-balanced average", section)
-        self.assertIn("Typical max drop", section)
+        self.assertIn("Typical maximum decline", section)
+        self.assertIn("Average first-to-last", section)
+        self.assertIn("Dropped at least", section)
+
+        dashboard = (root / "Flask_App/templates/nfl_stadium.html").read_text()
+        self.assertIn("Median across", dashboard)
+        self.assertIn("Typical peak:", dashboard)
+        self.assertIn("Typical low:", dashboard)
 
     def test_primary_nav_is_shorter(self):
         root = Path(__file__).resolve().parents[1]

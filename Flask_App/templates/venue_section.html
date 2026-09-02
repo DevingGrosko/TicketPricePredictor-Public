@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-stadium.css') }}?v=3">
   {% if sport_key == 'nhl' %}<link rel="stylesheet" href="{{ url_for('static', filename='css/nhl.css') }}?v=2">{% endif %}
   {% if sport_key == 'mlb' %}<link rel="stylesheet" href="{{ url_for('static', filename='css/mlb.css') }}?v=1">{% endif %}
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/venue-section.css') }}?v=2">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/venue-section.css') }}?v=3">
 {% endblock %}
 
 {% block content %}
@@ -35,14 +35,34 @@
           </div>
         </div>
 
-        <dl class="venue-section-metrics venue-section-metrics--three">
+        <dl class="venue-section-metrics">
           <div>
             <dt>{{ section_summary.typical_price_label }}</dt>
             <dd>Time-balanced average · {{ section_summary.price_bucket_count }} window{% if section_summary.price_bucket_count != 1 %}s{% endif %}</dd>
           </div>
-          <div class="is-{{ section_summary.direction }}">
+          <div class="is-{{ section_summary.direction }} venue-section-drop-metric">
             <dt>{{ section_summary.typical_max_drop_percent_label }}</dt>
-            <dd>{% if section_summary.drop_game_count %}Typical max drop · {{ section_summary.typical_max_drop_dollar_label }}{% else %}More completed games needed{% endif %}</dd>
+            <dd class="venue-section-metric-detail">
+              {% if section_summary.drop_game_count %}
+                <span>Typical maximum decline · {{ section_summary.typical_max_drop_dollar_label }}</span>
+                <span>Median across {{ section_summary.drop_game_count }} game{% if section_summary.drop_game_count != 1 %}s{% endif %}</span>
+                <span>Dropped at least {{ section_summary.material_drop_threshold|int }}% in {{ section_summary.material_drop_game_count }} of {{ section_summary.drop_game_count }} games</span>
+                {% if section_summary.drop_peak_label and section_summary.drop_low_label %}<span>Peak: {{ section_summary.drop_peak_label }} · Low: {{ section_summary.drop_low_label }}</span>{% endif %}
+              {% else %}
+                <span>More completed games needed</span>
+              {% endif %}
+            </dd>
+          </div>
+          <div class="is-{{ section_summary.first_to_last_direction }}">
+            <dt>{{ section_summary.average_first_to_last_percent_label }}</dt>
+            <dd class="venue-section-metric-detail">
+              {% if section_summary.first_to_last_game_count %}
+                <span>Average first-to-last · {{ section_summary.average_first_to_last_dollar_label }}</span>
+                <span>Across {{ section_summary.first_to_last_game_count }} completed game{% if section_summary.first_to_last_game_count != 1 %}s{% endif %}</span>
+              {% else %}
+                <span>More completed games needed</span>
+              {% endif %}
+            </dd>
           </div>
           <div>
             <dt>{{ section_summary.game_count }}</dt>
