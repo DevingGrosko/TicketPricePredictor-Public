@@ -73,6 +73,7 @@ jobs:
           node --check Flask_App/static/js/nfl.js
           node --check Flask_App/static/js/nfl-map.js
           node --check Flask_App/static/js/nfl-stadium.js
+          node --check Flask_App/static/js/venue-section.js
           node --check Flask_App/static/js/nhl.js
           node --check Flask_App/static/js/nhl-graph.js
           node --check Flask_App/static/js/nhl-map.js
