@@ -175,12 +175,48 @@ class NFLStadiumInsightTests(unittest.TestCase):
                     by_name["Section 100"]["material_drop_frequency"],
                     100,
                 )
+                self.assertEqual(
+                    by_name["Section 100"]["material_drop_game_count"],
+                    3,
+                )
+                self.assertEqual(
+                    by_name["Section 100"]["drop_peak_label"],
+                    "1–3 days before",
+                )
+                self.assertEqual(
+                    by_name["Section 100"]["drop_low_label"],
+                    "Final 6 hours",
+                )
+                self.assertAlmostEqual(
+                    by_name["Section 100"]["average_first_to_last_percent"],
+                    30.0,
+                )
+                self.assertEqual(
+                    by_name["Section 100"]["average_first_to_last_percent_label"],
+                    "−30.0%",
+                )
+                self.assertEqual(
+                    by_name["Section 100"]["average_first_to_last_dollar_label"],
+                    "−$30",
+                )
+                self.assertEqual(
+                    by_name["Section 100"]["first_to_last_game_count"],
+                    3,
+                )
                 self.assertFalse(
                     by_name["Section 100"]["is_low_price_sample"]
                 )
                 self.assertEqual(
                     by_name["Section 200"]["direction"],
                     "flat",
+                )
+                self.assertEqual(
+                    by_name["Section 200"]["average_first_to_last_percent_label"],
+                    "+20.0%",
+                )
+                self.assertEqual(
+                    by_name["Section 200"]["first_to_last_direction"],
+                    "up",
                 )
                 self.assertIn(
                     "/nfl/stadium/section?",
@@ -219,6 +255,12 @@ class NFLStadiumInsightTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     section_context["timeline"]["movement_percent_label"],
+                    "−30.0%",
+                )
+                self.assertEqual(
+                    section_context["section_summary"][
+                        "average_first_to_last_percent_label"
+                    ],
                     "−30.0%",
                 )
                 self.assertEqual(len(section_context["section_games"]), 3)
@@ -320,6 +362,60 @@ class NFLStadiumInsightTests(unittest.TestCase):
                 self.assertEqual(section["typical_max_drop_percent_label"], "−20.0%")
                 self.assertEqual(section["typical_max_drop_dollar_label"], "−$20")
                 self.assertEqual(section["drop_game_count"], 3)
+                self.assertEqual(section["material_drop_game_count"], 3)
+                # First-to-last remains an average rather than a median: the
+                # three games moved 50%, 20%, and 20%, so the result is 30%.
+                self.assertAlmostEqual(
+                    section["average_first_to_last_percent"],
+                    30.0,
+                )
+                self.assertEqual(
+                    section["average_first_to_last_percent_label"],
+                    "−30.0%",
+                )
+            finally:
+                if previous is None:
+                    os.environ.pop("NFL_DATABASE_PATH", None)
+                else:
+                    os.environ["NFL_DATABASE_PATH"] = previous
+
+    def test_drop_profile_reports_typical_peak_low_and_first_to_last(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "nfl.db"
+            previous = os.environ.get("NFL_DATABASE_PATH")
+            os.environ["NFL_DATABASE_PATH"] = str(db_path)
+            try:
+                now = datetime.now(timezone.utc)
+                series = (
+                    ("8300001", (100, 150, 75)),
+                    ("8300002", (100, 140, 70)),
+                    ("8300003", (100, 130, 65)),
+                )
+                for offset, (source_id, prices) in enumerate(series, start=6):
+                    event_date = now - timedelta(days=offset)
+                    for hours_before, price in zip((240, 120, 4), prices):
+                        self._store_capture(
+                            db_path,
+                            source_id,
+                            event_date,
+                            hours_before,
+                            {"Section 100": price},
+                        )
+
+                app = Flask(__name__)
+                app.register_blueprint(nfl_blueprint)
+                app.register_blueprint(nfl_stadium_blueprint)
+                with app.test_request_context(
+                    "/nfl/stadium?venue=MetLife%20Stadium"
+                ):
+                    context = build_nfl_stadium_context("MetLife Stadium")
+
+                section = context["all_sections"][0]
+                self.assertEqual(section["typical_max_drop_percent_label"], "−50.0%")
+                self.assertEqual(section["average_first_to_last_percent_label"], "−30.0%")
+                self.assertEqual(section["material_drop_game_count"], 3)
+                self.assertEqual(section["drop_peak_label"], "3–7 days before")
+                self.assertEqual(section["drop_low_label"], "Final 6 hours")
             finally:
                 if previous is None:
                     os.environ.pop("NFL_DATABASE_PATH", None)

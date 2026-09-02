@@ -8,7 +8,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-stadium.css') }}?v=3">
   {% if sport_key == 'nhl' %}<link rel="stylesheet" href="{{ url_for('static', filename='css/nhl.css') }}?v=2">{% endif %}
   {% if sport_key == 'mlb' %}<link rel="stylesheet" href="{{ url_for('static', filename='css/mlb.css') }}?v=1">{% endif %}
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/venue-insights.css') }}?v=2">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/venue-insights.css') }}?v=3">
 {% endblock %}
 
 {% block content %}
@@ -28,7 +28,7 @@
         <div>
           <span class="nfl-section-kicker">{{ sport_label }} team directory</span>
           <h1>Choose a team.</h1>
-          <p>See its cheapest sections, biggest price drops, and game history.</p>
+          <p>See its cheapest sections, typical price drops, and game history.</p>
         </div>
       </div>
 
@@ -131,13 +131,22 @@
             </header>
             <ol>
               {% for section in biggest_drops %}
-                <li>
+                <li class="nfl-drop-profile-row">
                   <span class="nfl-rank-number">{{ loop.index }}</span>
-                  <div class="nfl-rank-copy">
+                  <div class="nfl-rank-copy nfl-drop-profile-copy">
                     <strong>{{ section.name }}</strong>
-                    <small>{{ section.drop_game_count }} completed game{% if section.drop_game_count != 1 %}s{% endif %}{% if section.is_low_drop_sample %} · small sample{% endif %}</small>
+                    <small>Median across {{ section.drop_game_count }} game{% if section.drop_game_count != 1 %}s{% endif %}</small>
+                    <div class="nfl-drop-profile-facts">
+                      <span>Dropped at least {{ section.material_drop_threshold|int }}% in {{ section.material_drop_game_count }} of {{ section.drop_game_count }} games</span>
+                      {% if section.drop_peak_label %}<span>Typical peak: {{ section.drop_peak_label }}</span>{% endif %}
+                      {% if section.drop_low_label %}<span>Typical low: {{ section.drop_low_label }}</span>{% endif %}
+                    </div>
                   </div>
-                  <div class="nfl-rank-value nfl-rank-value--drop"><strong>{{ section.typical_max_drop_percent_label }}</strong><small>{{ section.typical_max_drop_dollar_label }} median</small></div>
+                  <div class="nfl-rank-value nfl-rank-value--drop nfl-drop-profile-value">
+                    <small>Typical max drop</small>
+                    <strong>{{ section.typical_max_drop_percent_label }}</strong>
+                    <span>{{ section.typical_max_drop_dollar_label }} median</span>
+                  </div>
                   {% if section.detail_url %}<a href="{{ section.detail_url }}" aria-label="Open details for {{ section.name }}">View section <span aria-hidden="true">&#8594;</span></a>{% endif %}
                 </li>
               {% else %}
