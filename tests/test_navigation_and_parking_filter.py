@@ -2,6 +2,8 @@ from pathlib import Path
 import unittest
 
 from Flask_App.nfl_stadium_blueprint import (
+    _currency_money,
+    _currency_price_change,
     _public_sections,
     is_parking_section,
 )
@@ -43,6 +45,14 @@ class ParkingSectionFilterTests(unittest.TestCase):
             ),
             ["Club 2", "Section 101"],
         )
+
+
+class CurrencyFormattingTests(unittest.TestCase):
+    def test_zero_dollar_values_render_without_crashing(self):
+        self.assertEqual(_currency_money(0, "USD"), "$0")
+        self.assertEqual(_currency_money(0, "CAD"), "CA$0")
+        self.assertEqual(_currency_price_change(0, "USD"), "$0")
+        self.assertEqual(_currency_price_change(0.0, "CAD"), "CA$0")
 
 
 class SimplifiedNavigationTests(unittest.TestCase):
