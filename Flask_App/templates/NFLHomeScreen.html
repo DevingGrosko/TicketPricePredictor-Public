@@ -6,13 +6,23 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl.css') }}?v=2">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-responsive.css') }}?v=1">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-map.css') }}?v=2">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-stadium.css') }}?v=2">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/nfl-stadium.css') }}?v=3">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/venue-insights.css') }}?v=1">
 {% endblock %}
 
 {% block content %}
+  {% set visible_sections = namespace(names=[]) %}
+  {% for by_game in game_sections_dict.values() %}
+    {% for sections in by_game.values() %}
+      {% for section in sections %}
+        {% if not is_parking_section(section) and section not in visible_sections.names %}
+          {% set visible_sections.names = visible_sections.names + [section] %}
+        {% endif %}
+      {% endfor %}
+    {% endfor %}
+  {% endfor %}
 <div class="nfl-page">
-  <section class="nfl-hero nfl-hero--stadium-first">
+  <section class="nfl-hero nfl-hero--stadium-first nfl-hero--compact">
     <div class="nfl-hero__copy">
       <div class="nfl-kicker">
         <span class="nfl-mini-shield" aria-hidden="true"><i></i><strong>TS</strong></span>
@@ -20,7 +30,7 @@
         <span class="nfl-live-tag"><i></i> Live + historical</span>
       </div>
       <h1>Start with a team.<br><em>Find the sections that move.</em></h1>
-      <p class="nfl-hero__lede">Choose a home team to compare sections across every tracked game at its stadium. See the five cheapest sections, the sections with the largest average price declines, and the underlying single-game histories behind each result.</p>
+      <p class="nfl-hero__lede">Choose a team to see its cheapest sections, biggest average drops, and individual game histories.</p>
       <div class="nfl-hero__actions">
         <a class="button nfl-button nfl-button--primary" href="#stadiums">Choose a team <span aria-hidden="true">&#8595;</span></a>
         <a class="nfl-text-link" href="#single-game">Open one game instead <span aria-hidden="true">&#8594;</span></a>
@@ -33,48 +43,13 @@
       </dl>
     </div>
 
-    <div class="nfl-stadium-preview" aria-label="Example NFL section insight dashboard">
-      <div class="nfl-stadium-preview__header">
-        <div><span>Team report</span><strong>Section-level market signals</strong></div>
-        <span class="nfl-status"><i></i> Persistent history</span>
-      </div>
-      <div class="nfl-stadium-preview__venue">
-        <span>Choose any tracked home team</span>
-        <strong>Compare games fairly</strong>
-        <small>Each game contributes once to the stadium averages.</small>
-      </div>
-      <div class="nfl-stadium-preview__columns">
-        <div>
-          <span>Cheapest sections</span>
-          <ol>
-            <li><b>1</b><span>Typical section price</span><strong>$</strong></li>
-            <li><b>2</b><span>Across tracked games</span><strong>$</strong></li>
-            <li><b>3</b><span>Low-sample flags</span><strong>#</strong></li>
-          </ol>
-        </div>
-        <div>
-          <span>Largest declines</span>
-          <ol>
-            <li><b>1</b><span>Average percent drop</span><strong>−%</strong></li>
-            <li><b>2</b><span>Average dollar drop</span><strong>−$</strong></li>
-            <li><b>3</b><span>Games in sample</span><strong>#</strong></li>
-          </ol>
-        </div>
-      </div>
-      <div class="nfl-stadium-preview__footer"><span>Overview</span><span>All sections</span><span>Single games</span></div>
-    </div>
   </section>
 
-  <section class="nfl-data-bar" id="how-it-works" aria-label="NFL team analysis workflow">
-    <div><span>01</span><strong>Choose a team</strong><small>The team is shown first; the stadium's sponsor name appears as secondary context.</small></div>
-    <div><span>02</span><strong>Compare section signals</strong><small>See game-weighted average prices and first-to-last declines.</small></div>
-    <div><span>03</span><strong>Inspect the evidence</strong><small>Open all sections, stadium maps, and individual game histories.</small></div>
-  </section>
 
   <section class="nfl-stadium-picker" id="stadiums" data-venue-search-scope data-venue-noun="stadium">
     <div class="nfl-section-heading nfl-stadium-picker__heading">
-      <div><span class="nfl-section-kicker">Team-first analysis</span><h2>Choose the team you want to see.</h2></div>
-      <p>Teams with more completed games provide stronger comparisons. Every report shows its sample size, and small samples are marked rather than presented as established patterns.</p>
+      <div><span class="nfl-section-kicker">Team-first analysis</span><h2>Choose a team.</h2></div>
+      <p>Open a team report, or jump directly to one matchup below.</p>
     </div>
 
     <div class="nfl-stadium-picker__controls">
@@ -94,7 +69,7 @@
             {% if game.venue == venue %}
               {% if team not in team_ns.names %}{% set team_ns.names = team_ns.names + [team] %}{% endif %}
               {% for section in game_sections_dict.get(team, {}).get(game.value, []) %}
-                {% if section not in section_ns.names %}{% set section_ns.names = section_ns.names + [section] %}{% endif %}
+                {% if not is_parking_section(section) and section not in section_ns.names %}{% set section_ns.names = section_ns.names + [section] %}{% endif %}
               {% endfor %}
             {% endif %}
           {% endfor %}
@@ -120,8 +95,8 @@
 
   <section class="nfl-explore nfl-single-game-explorer" id="single-game">
     <div class="nfl-section-heading">
-      <div><span class="nfl-section-kicker">Single-game analysis</span><h2>Already know the matchup?</h2></div>
-      <p>Use the detailed flow to inspect one home team, matchup, and section. The team report remains the fastest way to compare patterns across several games.</p>
+      <div><span class="nfl-section-kicker">Single-game analysis</span><h2>Explore one matchup.</h2></div>
+      <p>Choose a game and section for its exact price history.</p>
     </div>
 
     <div class="nfl-analysis-shell">
@@ -160,6 +135,6 @@
 {% endblock %}
 
 {% block scripts %}
-  <script src="{{ url_for('static', filename='js/nfl.js') }}?v=3"></script>
+  <script src="{{ url_for('static', filename='js/nfl.js') }}?v=4"></script>
   <script src="{{ url_for('static', filename='js/nfl-stadium.js') }}?v=2"></script>
 {% endblock %}

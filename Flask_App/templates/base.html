@@ -22,10 +22,9 @@
       </a>
       {% set endpoint = request.endpoint or '' %}
       <nav class="site-nav" aria-label="Primary navigation">
-        <a href="{{ url_for('home') }}"{% if endpoint in ('home', 'graph', 'predict') or endpoint == 'nfl_stadium.mlb_stadium' %} class="is-active" aria-current="page"{% endif %}>Baseball</a>
+        <a href="{{ url_for('home') }}"{% if endpoint in ('home', 'graph', 'predict') or endpoint == 'nfl_stadium.mlb_stadium' %} class="is-active" aria-current="page"{% endif %}>MLB</a>
         <a href="{{ url_for('nfl.nfl_home') }}"{% if endpoint.startswith('nfl.') or endpoint == 'nfl_stadium.nfl_stadium' %} class="is-active" aria-current="page"{% endif %}>NFL</a>
         <a href="{{ url_for('nhl.nhl_home') }}"{% if endpoint.startswith('nhl.') or endpoint == 'nfl_stadium.nhl_arena' %} class="is-active" aria-current="page"{% endif %}>NHL</a>
-        <a href="{{ url_for('home') }}#how-it-works">How it works</a>
         <a class="nav-github" href="https://github.com/DevingGrosko/TicketPricePredictor-Public" target="_blank" rel="noreferrer">View project <span aria-hidden="true">&#8599;</span></a>
       </nav>
     </header>
@@ -40,7 +39,7 @@
         </a>
         <p>Historical ticket intelligence for smarter timing.</p>
       </div>
-      <p>Baseball, NFL, and NHL histories are collected and stored separately.</p>
+      <p>MLB, NFL, and NHL histories are collected and stored separately.</p>
     </footer>
     {% block scripts %}{% endblock %}
   </body>

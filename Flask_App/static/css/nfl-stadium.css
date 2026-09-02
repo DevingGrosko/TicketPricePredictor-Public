@@ -16,6 +16,18 @@
   min-height: 650px;
 }
 
+.nfl-hero--compact {
+  min-height: 0;
+  grid-template-columns: minmax(0, 780px);
+  justify-content: start;
+  padding-top: 62px;
+  padding-bottom: 58px;
+}
+
+.nfl-hero--compact .nfl-hero__copy {
+  max-width: 780px;
+}
+
 .nfl-stadium-preview {
   position: relative;
   overflow: hidden;
@@ -533,7 +545,7 @@
   grid-column: 1 / -1;
   margin: 0;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 10px;
 }
 
@@ -851,7 +863,7 @@
 
 .nfl-section-table {
   width: 100%;
-  min-width: 870px;
+  min-width: 760px;
   border-collapse: collapse;
 }
 

@@ -27,6 +27,16 @@
   const zoomOutButton = document.querySelector('[data-map-zoom-out]');
   const resetButton = document.querySelector('[data-map-reset]');
 
+  function isParkingSectionName(value) {
+    const normalized = String(value || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+    return /\bparking\b/.test(normalized)
+      || /^(lot|garage)\b/.test(normalized)
+      || normalized.includes('park and ride');
+  }
+
   const sections = Array.isArray(mapData.sections)
     ? mapData.sections.map((section) => ({
         name: String(section.name || '').trim(),
@@ -34,7 +44,9 @@
         listing_count: Number.isFinite(Number(section.listing_count))
           ? Number(section.listing_count)
           : null,
-      })).filter((section) => section.name)
+      })).filter(
+        (section) => section.name && !isParkingSectionName(section.name),
+      )
     : [];
 
   function createSvgElement(name, attributes = {}) {

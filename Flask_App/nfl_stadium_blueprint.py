@@ -144,6 +144,28 @@ def _normalize(value: Any) -> str:
     return re.sub(r"[^a-z0-9]+", " ", _clean(value).casefold()).strip()
 
 
+def is_parking_section(value: Any) -> bool:
+    # Parking products are inventory, not seating sections.
+    normalized = _normalize(value)
+    if not normalized:
+        return False
+    return bool(
+        re.search(r"\bparking\b", normalized)
+        or re.match(r"^(?:lot|garage)\b", normalized)
+        or "park and ride" in normalized
+    )
+
+
+def _public_sections(values: Iterable[Any]) -> list[str]:
+    return sorted(
+        {
+            _clean(value)
+            for value in values
+            if _clean(value) and not is_parking_section(value)
+        },
+        key=str.casefold,
+    )
+
 def _money(value: float | None) -> str:
     return _currency_money(value, "USD")
 
@@ -229,7 +251,7 @@ def _stadium_index(
             _clean(section)
             for event in venue_events
             for section in (getattr(event, "sections", None) or [])
-            if _clean(section)
+            if _clean(section) and not is_parking_section(section)
         }
         teams = sorted(
             {
@@ -345,7 +367,12 @@ def _section_insights_for(
             price = float(values["price"])
         except (TypeError, ValueError):
             continue
-        if not section or price <= 0 or captured is None:
+        if (
+            not section
+            or is_parking_section(section)
+            or price <= 0
+            or captured is None
+        ):
             continue
         if captured.tzinfo is None:
             captured = captured.replace(tzinfo=timezone.utc)
@@ -505,7 +532,7 @@ def _generic_venue_index(
             _clean(section)
             for event in venue_events
             for section in section_getter(event)
-            if _clean(section)
+            if _clean(section) and not is_parking_section(section)
         }
         team_label = _team_label(venue_events, team_getter)
         completed_count = sum(_event_completed(event, now) for event in venue_events)
@@ -631,14 +658,17 @@ def build_nfl_stadium_context(selected_venue: str = "") -> dict[str, Any]:
         is_completed = _event_completed(event, now)
         team = _clean(nfl_event_home_team(event)) or selected
         map_url = url_for("nfl.nfl_map", team=team, game=str(event.id))
+        public_sections = _public_sections(
+            getattr(event, "sections", None) or []
+        )
         game = {
             "id": event.id,
             "label": format_nfl_title(event),
             "status": "Completed" if is_completed else "Upcoming",
             "status_key": "completed" if is_completed else "upcoming",
             "snapshot_count": len(captures_by_event.get(event.id, set())),
-            "section_count": len(getattr(event, "sections", None) or []),
-            "sections": sorted(set(getattr(event, "sections", None) or [])),
+            "section_count": len(public_sections),
+            "sections": public_sections,
             "map_url": map_url,
             "direct_url": map_url,
             "base_url": "",
@@ -819,14 +849,15 @@ def build_mlb_stadium_context(selected_venue: str = "") -> dict[str, Any]:
     for event in selected_events:
         event_date = event_datetime_eastern(event.event_date)
         is_completed = _event_completed(event, now)
+        public_sections = _public_sections(event.event_sections or [])
         game = {
             "id": event.id,
             "label": format_mlb_title(event),
             "status": "Completed" if is_completed else "Upcoming",
             "status_key": "completed" if is_completed else "upcoming",
             "snapshot_count": len(captures_by_event.get(event.id, set())),
-            "section_count": len(event.event_sections or []),
-            "sections": sorted(set(event.event_sections or []), key=str.casefold),
+            "section_count": len(public_sections),
+            "sections": public_sections,
             "direct_url": "",
             "base_url": url_for(
                 "graph",
@@ -979,14 +1010,15 @@ def build_nhl_arena_context(selected_venue: str = "") -> dict[str, Any]:
         is_completed = _event_completed(event, now)
         team = _clean(nhl_event_home_team(event)) or selected
         map_url = url_for("nhl.nhl_map", team=team, game=str(event.id))
+        public_sections = _public_sections(event.sections or [])
         game = {
             "id": event.id,
             "label": format_nhl_title(event),
             "status": "Completed" if is_completed else "Upcoming",
             "status_key": "completed" if is_completed else "upcoming",
             "snapshot_count": len(captures_by_event.get(event.id, set())),
-            "section_count": len(event.sections or []),
-            "sections": sorted(set(event.sections or []), key=str.casefold),
+            "section_count": len(public_sections),
+            "sections": public_sections,
             "direct_url": map_url,
             "base_url": "",
             "source_url": event.source_url or "",
@@ -1029,7 +1061,10 @@ def build_nhl_arena_context(selected_venue: str = "") -> dict[str, Any]:
 
 @nfl_stadium_blueprint.app_context_processor
 def inject_team_display_helpers() -> dict[str, Any]:
-    return {"mlb_team_for_venue": mlb_team_for_venue}
+    return {
+        "mlb_team_for_venue": mlb_team_for_venue,
+        "is_parking_section": is_parking_section,
+    }
 
 
 @nfl_stadium_blueprint.get("/nfl/stadium")
