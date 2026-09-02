@@ -1,0 +1,215 @@
+name: Apply MLB zero-drop formatting hotfix
+
+on:
+  push:
+    branches:
+      - fix/mlb-zero-drop-formatting
+    paths:
+      - ".github/workflows/apply-mlb-zero-drop-fix.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-mlb-zero-drop-formatting
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/mlb-zero-drop-formatting
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Apply production hotfix
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          blueprint = Path("Flask_App/nfl_stadium_blueprint.py")
+          text = blueprint.read_text()
+
+          old_imports = (
+              "from datetime import datetime, timedelta, timezone\n"
+              "import hmac\n"
+              "import os\n"
+              "from pathlib import Path\n"
+              "import re\n"
+              "import traceback\n"
+          )
+          new_imports = "from datetime import datetime, timedelta, timezone\nimport re\n"
+          if old_imports not in text:
+              raise SystemExit("Expected temporary diagnostic imports were not found")
+          text = text.replace(old_imports, new_imports, 1)
+
+          old_flask_import = (
+              "from flask import Blueprint, jsonify, render_template, request, url_for\n"
+          )
+          new_flask_import = (
+              "from flask import Blueprint, render_template, request, url_for\n"
+          )
+          if old_flask_import not in text:
+              raise SystemExit("Expected temporary jsonify import was not found")
+          text = text.replace(old_flask_import, new_flask_import, 1)
+
+          old_rounding = "    rounded = round(value, 2)\n"
+          new_rounding = (
+              "    # round(int, 2) returns an int; normalize first so zero-dollar values\n"
+              "    # can safely use float.is_integer() below.\n"
+              "    rounded = round(float(value), 2)\n"
+          )
+          if old_rounding not in text:
+              raise SystemExit("Expected currency rounding line was not found")
+          text = text.replace(old_rounding, new_rounding, 1)
+
+          diagnostic_marker = (
+              '\n\n@nfl_stadium_blueprint.get("/api/diagnostics/mlb-stadium")\n'
+          )
+          if diagnostic_marker not in text:
+              raise SystemExit("Temporary diagnostic route was not found")
+          text = text.split(diagnostic_marker, 1)[0].rstrip() + "\n"
+          blueprint.write_text(text)
+
+          tests = Path("tests/test_navigation_and_parking_filter.py")
+          test_text = tests.read_text()
+          old_test_import = (
+              "from Flask_App.nfl_stadium_blueprint import (\n"
+              "    _public_sections,\n"
+              "    is_parking_section,\n"
+              ")\n"
+          )
+          new_test_import = (
+              "from Flask_App.nfl_stadium_blueprint import (\n"
+              "    _currency_money,\n"
+              "    _currency_price_change,\n"
+              "    _public_sections,\n"
+              "    is_parking_section,\n"
+              ")\n"
+          )
+          if old_test_import not in test_text:
+              raise SystemExit("Expected parking-filter test import was not found")
+          test_text = test_text.replace(old_test_import, new_test_import, 1)
+
+          insertion_marker = "\n\nclass SimplifiedNavigationTests(unittest.TestCase):\n"
+          regression_tests = '''
+
+class CurrencyFormattingTests(unittest.TestCase):
+    def test_zero_dollar_values_render_without_crashing(self):
+        self.assertEqual(_currency_money(0, "USD"), "$0")
+        self.assertEqual(_currency_money(0, "CAD"), "CA$0")
+        self.assertEqual(_currency_price_change(0, "USD"), "$0")
+        self.assertEqual(_currency_price_change(0.0, "CAD"), "CA$0")
+'''
+          if insertion_marker not in test_text:
+              raise SystemExit("Expected navigation-test insertion point was not found")
+          test_text = test_text.replace(
+              insertion_marker,
+              regression_tests + insertion_marker,
+              1,
+          )
+          tests.write_text(test_text)
+
+          deploy = Path(".github/workflows/deploy-pythonanywhere.yml")
+          deploy_text = deploy.read_text()
+
+          home_line = (
+              '            home_status="$(curl -sS --max-time 15 -o /tmp/home.html '
+              '-w \'%{http_code}\' "$base/" || true)"\n'
+          )
+          stadium_line = (
+              '            baseball_stadium_status="$(curl -sS --max-time 90 '
+              '-o /tmp/baseball-stadium.html -w \'%{http_code}\' '
+              '"$base/baseball/stadium?venue=Truist%20Park" || true)"\n'
+          )
+          if home_line not in deploy_text:
+              raise SystemExit("Expected production home probe was not found")
+          deploy_text = deploy_text.replace(home_line, home_line + stadium_line, 1)
+
+          old_echo = (
+              '            echo "Attempt $attempt: home=$home_status nfl=$nfl_status '
+              'nfl_archive=$nfl_archive_status nhl=$nhl_status concerts=$concerts_status '
+              'baseball_api=$baseball_api_status nfl_api=$nfl_api_status '
+              'nhl_api=$nhl_api_status concert_api=$concert_api_status"\n'
+          )
+          new_echo = (
+              '            echo "Attempt $attempt: home=$home_status '
+              'baseball_stadium=$baseball_stadium_status nfl=$nfl_status '
+              'nfl_archive=$nfl_archive_status nhl=$nhl_status concerts=$concerts_status '
+              'baseball_api=$baseball_api_status nfl_api=$nfl_api_status '
+              'nhl_api=$nhl_api_status concert_api=$concert_api_status"\n'
+          )
+          if old_echo not in deploy_text:
+              raise SystemExit("Expected deployment status line was not found")
+          deploy_text = deploy_text.replace(old_echo, new_echo, 1)
+
+          old_condition = (
+              '            if [[ "$home_status" == "200" && "$nfl_status" == "200" '
+              '&& "$nfl_archive_status" == "200" && "$nhl_status" == "200" '
+              '&& "$concerts_status" == "200" && "$baseball_api_status" == "401" '
+              '&& "$nfl_api_status" == "401" && "$nhl_api_status" == "401" '
+              '&& "$concert_api_status" == "401" ]]; then\n'
+          )
+          new_condition = (
+              '            if [[ "$home_status" == "200" '
+              '&& "$baseball_stadium_status" == "200" && "$nfl_status" == "200" '
+              '&& "$nfl_archive_status" == "200" && "$nhl_status" == "200" '
+              '&& "$concerts_status" == "200" && "$baseball_api_status" == "401" '
+              '&& "$nfl_api_status" == "401" && "$nhl_api_status" == "401" '
+              '&& "$concert_api_status" == "401" ]]; then\n'
+          )
+          if old_condition not in deploy_text:
+              raise SystemExit("Expected deployment success condition was not found")
+          deploy_text = deploy_text.replace(old_condition, new_condition, 1)
+
+          old_diagnostics = (
+              '          echo "Home response:"\n'
+              '          cat /tmp/home.html || true\n'
+              '          echo "NFL response:"\n'
+          )
+          new_diagnostics = (
+              '          echo "Home response:"\n'
+              '          cat /tmp/home.html || true\n'
+              '          echo "Baseball stadium response:"\n'
+              '          cat /tmp/baseball-stadium.html || true\n'
+              '          echo "NFL response:"\n'
+          )
+          if old_diagnostics not in deploy_text:
+              raise SystemExit("Expected deployment diagnostics block was not found")
+          deploy.write_text(deploy_text.replace(old_diagnostics, new_diagnostics, 1))
+          PY
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate hotfix
+        env:
+          DATABASE_PATH: ${{ runner.temp }}/ticket-price-validation/baseball.db
+          CONCERT_DATABASE_PATH: ${{ runner.temp }}/ticket-price-validation/concerts.db
+          NFL_DATABASE_PATH: ${{ runner.temp }}/ticket-price-validation/nfl.db
+          NHL_DATABASE_PATH: ${{ runner.temp }}/ticket-price-validation/nhl.db
+          FLASK_SECRET_KEY: deployment-validation-key
+          COLLECTOR_INGEST_TOKEN: deployment-validation-token
+        run: |
+          mkdir -p "$(dirname "$DATABASE_PATH")"
+          python -m py_compile Flask_App/nfl_stadium_blueprint.py tests/test_navigation_and_parking_filter.py
+          node --check Flask_App/static/js/nfl-stadium.js
+          node --check Flask_App/static/js/venue-section.js
+          python -m unittest discover -s tests -v
+
+      - name: Commit hotfix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Flask_App/nfl_stadium_blueprint.py tests/test_navigation_and_parking_filter.py .github/workflows/deploy-pythonanywhere.yml
+          git diff --cached --check
+          git commit -m "Fix zero-dollar MLB section formatting"
+          git push origin HEAD:fix/mlb-zero-drop-formatting
