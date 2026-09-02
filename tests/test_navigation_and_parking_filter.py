@@ -59,14 +59,22 @@ class SimplifiedNavigationTests(unittest.TestCase):
                 self.assertNotIn('class="nfl-stadium-preview', text)
                 self.assertIn("nfl-hero--compact", text)
 
-    def test_dashboard_keeps_only_core_navigation(self):
+    def test_dashboard_keeps_rankings_and_compact_lookup(self):
         root = Path(__file__).resolve().parents[1]
         text = (root / "Flask_App/templates/nfl_stadium.html").read_text()
-        self.assertIn('href="#overview"', text)
-        self.assertIn('href="#all-sections"', text)
-        self.assertIn('href="#single-games"', text)
-        self.assertNotIn('href="#methodology"', text)
-        self.assertNotIn("nfl-methodology", text)
+        self.assertIn('id="overview"', text)
+        self.assertIn("data-section-jump", text)
+        self.assertIn("Single-game tools", text)
+        self.assertNotIn('id="all-sections"', text)
+        self.assertNotIn('id="single-games"', text)
+        self.assertNotIn('class="nfl-dashboard-nav"', text)
+        self.assertNotIn("nfl-section-table", text)
+        self.assertNotIn("nfl-game-history-list", text)
+
+        section = (root / "Flask_App/templates/venue_section.html").read_text()
+        self.assertIn('<details class="venue-section-games', section)
+        self.assertIn("Time-balanced average", section)
+        self.assertIn("Typical max drop", section)
 
     def test_primary_nav_is_shorter(self):
         root = Path(__file__).resolve().parents[1]

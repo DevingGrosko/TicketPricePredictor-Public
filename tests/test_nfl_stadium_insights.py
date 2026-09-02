@@ -60,6 +60,15 @@ class NFLStadiumInsightTests(unittest.TestCase):
             db_path=db_path,
         )
 
+    def _store_capture(self, db_path, source_id, event_date, hours_before, prices):
+        store_nfl_snapshot(
+            f"https://www.vividseats.com/game/production/{source_id}",
+            event_date,
+            self._snapshot(source_id, prices),
+            event_date - timedelta(hours=hours_before),
+            db_path=db_path,
+        )
+
     def test_stadium_context_ranks_price_and_decline_across_games(self):
         with tempfile.TemporaryDirectory() as directory:
             db_path = Path(directory) / "nfl.db"
@@ -163,7 +172,7 @@ class NFLStadiumInsightTests(unittest.TestCase):
                     "−$30",
                 )
                 self.assertEqual(
-                    by_name["Section 100"]["drop_frequency"],
+                    by_name["Section 100"]["material_drop_frequency"],
                     100,
                 )
                 self.assertFalse(
@@ -171,7 +180,7 @@ class NFLStadiumInsightTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     by_name["Section 200"]["direction"],
-                    "up",
+                    "flat",
                 )
                 self.assertIn(
                     "/nfl/stadium/section?",
@@ -221,6 +230,96 @@ class NFLStadiumInsightTests(unittest.TestCase):
                     section_context["map_data"]["geometry_mode"],
                     "schematic",
                 )
+            finally:
+                if previous is None:
+                    os.environ.pop("NFL_DATABASE_PATH", None)
+                else:
+                    os.environ["NFL_DATABASE_PATH"] = previous
+
+    def test_time_balanced_price_ignores_extra_late_snapshots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "nfl.db"
+            previous = os.environ.get("NFL_DATABASE_PATH")
+            os.environ["NFL_DATABASE_PATH"] = str(db_path)
+            try:
+                event_date = datetime.now(timezone.utc) - timedelta(days=2)
+                self._store_capture(
+                    db_path, "8100001", event_date, 48, {"Section 100": 100}
+                )
+                for hours_before in (5, 4, 3, 2, 1):
+                    self._store_capture(
+                        db_path,
+                        "8100001",
+                        event_date,
+                        hours_before,
+                        {"Section 100": 40},
+                    )
+
+                app = Flask(__name__)
+                app.register_blueprint(nfl_blueprint)
+                app.register_blueprint(nfl_stadium_blueprint)
+                with app.test_request_context(
+                    "/nfl/stadium?venue=MetLife%20Stadium"
+                ):
+                    context = build_nfl_stadium_context("MetLife Stadium")
+
+                section = context["all_sections"][0]
+                self.assertEqual(section["price_bucket_count"], 2)
+                self.assertEqual(section["observation_count"], 6)
+                self.assertAlmostEqual(section["average_price"], 70.0)
+                self.assertEqual(section["typical_price_label"], "$70")
+            finally:
+                if previous is None:
+                    os.environ.pop("NFL_DATABASE_PATH", None)
+                else:
+                    os.environ["NFL_DATABASE_PATH"] = previous
+
+    def test_typical_drop_uses_bucket_medians_and_median_across_games(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "nfl.db"
+            previous = os.environ.get("NFL_DATABASE_PATH")
+            os.environ["NFL_DATABASE_PATH"] = str(db_path)
+            try:
+                now = datetime.now(timezone.utc)
+                event_dates = [
+                    now - timedelta(days=12),
+                    now - timedelta(days=9),
+                    now - timedelta(days=6),
+                ]
+
+                # One within-window spike is ignored: median(100, 1000, 100) = 100.
+                for hours_before, price in ((48, 100), (47, 1000), (46, 100), (4, 50)):
+                    self._store_capture(
+                        db_path,
+                        "8200001",
+                        event_dates[0],
+                        hours_before,
+                        {"Section 100": price},
+                    )
+
+                for source_id, event_date in zip(("8200002", "8200003"), event_dates[1:]):
+                    self._store_capture(
+                        db_path, source_id, event_date, 48, {"Section 100": 100}
+                    )
+                    self._store_capture(
+                        db_path, source_id, event_date, 4, {"Section 100": 80}
+                    )
+
+                app = Flask(__name__)
+                app.register_blueprint(nfl_blueprint)
+                app.register_blueprint(nfl_stadium_blueprint)
+                with app.test_request_context(
+                    "/nfl/stadium?venue=MetLife%20Stadium"
+                ):
+                    context = build_nfl_stadium_context("MetLife Stadium")
+
+                section = context["all_sections"][0]
+                # Per-game max drops are 50%, 20%, and 20%; the typical value is
+                # their median, not the 30% mean and not the spike-driven 95% drop.
+                self.assertAlmostEqual(section["typical_max_drop_percent"], 20.0)
+                self.assertEqual(section["typical_max_drop_percent_label"], "−20.0%")
+                self.assertEqual(section["typical_max_drop_dollar_label"], "−$20")
+                self.assertEqual(section["drop_game_count"], 3)
             finally:
                 if previous is None:
                     os.environ.pop("NFL_DATABASE_PATH", None)

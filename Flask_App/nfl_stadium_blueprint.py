@@ -52,6 +52,7 @@ from Flask_App.nhl_blueprint import (
 nfl_stadium_blueprint = Blueprint("nfl_stadium", __name__)
 MIN_DROP_SPAN = timedelta(hours=6)
 LOW_SAMPLE_GAMES = 3
+MATERIAL_DROP_PERCENT = 20.0
 MLB_URL_MARKER = "--sports-mlb-baseball/"
 
 _TIMELINE_BUCKETS = {
@@ -375,6 +376,7 @@ def _section_insights(
         rows,
         now,
         currency="USD",
+        sport_key="nfl",
         detail_url_builder=lambda event, section: url_for(
             "nfl_stadium.nfl_section",
             venue=_clean(nfl_display_venue(event)),
@@ -385,12 +387,137 @@ def _section_insights(
     )
 
 
+def _bucketed_game_prices(
+    event: Any,
+    points: Iterable[tuple[datetime, float]],
+    sport_key: str,
+) -> list[dict[str, Any]]:
+    """Condense one game's observations into one robust value per time window."""
+    per_bucket: list[list[tuple[float, float]]] = [
+        [] for _ in _TIMELINE_BUCKETS[sport_key]
+    ]
+    for captured, price in points:
+        lead_time = hours_before_event(event.event_date, captured)
+        bucket_index = _timeline_bucket_index(sport_key, lead_time)
+        if bucket_index is not None:
+            per_bucket[bucket_index].append((lead_time, price))
+
+    result: list[dict[str, Any]] = []
+    for slot, observations in enumerate(per_bucket):
+        if not observations:
+            continue
+        result.append(
+            {
+                "slot": slot,
+                "lead_time": float(median(item[0] for item in observations)),
+                "price": float(median(item[1] for item in observations)),
+                "observation_count": len(observations),
+            }
+        )
+    return result
+
+
+def _aggregate_bucket_points(
+    bucket_game_values: dict[int, list[float]],
+    *,
+    sport_key: str,
+    currency: str,
+    total_game_count: int,
+) -> tuple[list[dict[str, Any]], float | None, int, int]:
+    """Build chart points and a time-balanced headline from the same values."""
+    all_points: list[dict[str, Any]] = []
+    for slot, (lower, upper, short_label, label) in enumerate(
+        _TIMELINE_BUCKETS[sport_key]
+    ):
+        game_values = bucket_game_values.get(slot, [])
+        if not game_values:
+            continue
+        average_price = mean(game_values)
+        all_points.append(
+            {
+                "slot": slot,
+                "short_label": short_label,
+                "label": label,
+                "lower_hours": lower,
+                "upper_hours": upper,
+                "lead_time": (lower + upper) / 2,
+                "average_price": round(average_price, 2),
+                "average_price_label": _currency_money(average_price, currency),
+                "game_count": len(game_values),
+                "is_low_sample": len(game_values) < LOW_SAMPLE_GAMES,
+            }
+        )
+
+    if not all_points:
+        return [], None, 0, 0
+
+    minimum_games = min(LOW_SAMPLE_GAMES, max(total_game_count, 1))
+    supported = [
+        point for point in all_points if point["game_count"] >= minimum_games
+    ]
+    # Do not reduce an otherwise useful chart to one isolated point. When at
+    # least two well-supported windows exist, sparse windows are omitted.
+    displayed = supported if len(supported) >= 2 else all_points
+    balanced_average = mean(point["average_price"] for point in displayed)
+    return displayed, balanced_average, len(all_points), minimum_games
+
+
+def _maximum_bucket_drawdown(
+    points: Iterable[dict[str, Any]],
+    *,
+    sport_key: str,
+    value_key: str = "price",
+) -> dict[str, Any] | None:
+    """Return the largest earlier-high to later-low decline across time buckets."""
+    ordered = sorted(points, key=lambda point: int(point["slot"]))
+    best: dict[str, Any] | None = None
+    for earlier_index, earlier in enumerate(ordered):
+        earlier_price = float(earlier[value_key])
+        if earlier_price <= 0:
+            continue
+        for later in ordered[earlier_index + 1 :]:
+            span_hours = float(earlier["lead_time"]) - float(later["lead_time"])
+            # A distinct later time bucket is enough. The within-bucket median
+            # already suppresses transient snapshots, and allowing adjacent
+            # windows preserves genuine late drops.
+            if span_hours <= 0:
+                continue
+            later_price = float(later[value_key])
+            dollar_drop = max(0.0, earlier_price - later_price)
+            percent_drop = dollar_drop / earlier_price * 100
+            candidate = {
+                "percent": percent_drop,
+                "dollar": dollar_drop,
+                "peak_slot": int(earlier["slot"]),
+                "low_slot": int(later["slot"]),
+                "span_hours": span_hours,
+            }
+            if best is None or (
+                candidate["percent"], candidate["dollar"]
+            ) > (best["percent"], best["dollar"]):
+                best = candidate
+    return best
+
+
+def _mode_bucket_label(
+    rows: Iterable[dict[str, Any]],
+    field: str,
+    sport_key: str,
+) -> str:
+    slots = [row[field] for row in rows if row.get("percent", 0) > 0]
+    if not slots:
+        return ""
+    slot = Counter(slots).most_common(1)[0][0]
+    return _TIMELINE_BUCKETS[sport_key][slot][3]
+
+
 def _section_insights_for(
     events: list[Any],
     rows: Iterable[Any],
     now: datetime,
     *,
     currency: str,
+    sport_key: str,
     detail_url_builder: Callable[[Any, str], str | None],
     secondary_url_builder: Callable[[Any, str], str | None] | None,
     event_label_builder: Callable[[Any], str],
@@ -421,8 +548,11 @@ def _section_insights_for(
         histories[(section, event_id)].append((captured, price))
         captures_by_event[event_id].add(captured)
 
-    per_game_prices: dict[str, list[float]] = defaultdict(list)
-    per_game_drops: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    bucket_values_by_section: dict[str, dict[int, list[float]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    game_ids_by_section: dict[str, set[int]] = defaultdict(set)
+    per_game_drops: dict[str, list[dict[str, Any]]] = defaultdict(list)
     observation_count: dict[str, int] = defaultdict(int)
     latest_event_by_section: dict[str, Any] = {}
 
@@ -432,43 +562,63 @@ def _section_insights_for(
             continue
 
         ordered = sorted(points, key=lambda item: item[0])
-        prices = [price for _, price in ordered]
-        per_game_prices[section].append(float(median(prices)))
+        bucket_points = _bucketed_game_prices(event, ordered, sport_key)
+        if not bucket_points:
+            continue
+
+        game_ids_by_section[section].add(event_id)
         observation_count[section] += len(ordered)
+        for point in bucket_points:
+            bucket_values_by_section[section][point["slot"]].append(point["price"])
 
         latest_event = latest_event_by_section.get(section)
         if latest_event is None or event.event_date > latest_event.event_date:
             latest_event_by_section[section] = event
 
-        if event_id not in completed_ids or len(ordered) < 2:
-            continue
-        first_time, first_price = ordered[0]
-        last_time, last_price = ordered[-1]
-        if last_time - first_time < MIN_DROP_SPAN or first_price <= 0:
-            continue
-
-        dollar_drop = first_price - last_price
-        percent_drop = dollar_drop / first_price * 100
-        per_game_drops[section].append((percent_drop, dollar_drop))
+        if event_id in completed_ids:
+            drawdown = _maximum_bucket_drawdown(
+                bucket_points,
+                sport_key=sport_key,
+            )
+            if drawdown is not None:
+                per_game_drops[section].append(drawdown)
 
     insights = []
-    for section, game_prices in per_game_prices.items():
-        drop_rows = per_game_drops.get(section, [])
-        average_percent_drop = (
-            mean(row[0] for row in drop_rows) if drop_rows else None
+    for section, bucket_values in bucket_values_by_section.items():
+        game_count = len(game_ids_by_section[section])
+        timeline_points, balanced_price, available_bucket_count, minimum_games = (
+            _aggregate_bucket_points(
+                bucket_values,
+                sport_key=sport_key,
+                currency=currency,
+                total_game_count=game_count,
+            )
         )
-        average_dollar_drop = (
-            mean(row[1] for row in drop_rows) if drop_rows else None
+        if balanced_price is None:
+            continue
+
+        drop_rows = per_game_drops.get(section, [])
+        typical_percent_drop = (
+            float(median(row["percent"] for row in drop_rows))
+            if drop_rows
+            else None
+        )
+        typical_dollar_drop = (
+            float(median(row["dollar"] for row in drop_rows))
+            if drop_rows
+            else None
+        )
+        material_drop_count = sum(
+            row["percent"] >= MATERIAL_DROP_PERCENT for row in drop_rows
+        )
+        material_drop_frequency = (
+            round(material_drop_count / len(drop_rows) * 100) if drop_rows else 0
         )
 
-        direction = "flat"
-        direction_label = "No qualified movement"
-        if average_percent_drop is not None and average_percent_drop > 0.05:
-            direction = "down"
-            direction_label = "Average decrease"
-        elif average_percent_drop is not None and average_percent_drop < -0.05:
-            direction = "up"
-            direction_label = "Average increase"
+        direction = "down" if typical_percent_drop and typical_percent_drop > 0.05 else "flat"
+        direction_label = (
+            "Typical maximum decline" if direction == "down" else "No typical decline"
+        )
 
         latest_event = latest_event_by_section.get(section)
         detail_url = (
@@ -479,42 +629,62 @@ def _section_insights_for(
             if latest_event is not None and secondary_url_builder is not None
             else None
         )
-        average_price = mean(game_prices)
+        percent_label = _percent_change(typical_percent_drop)
+        dollar_label = _currency_price_change(typical_dollar_drop, currency)
         insights.append(
             {
                 "name": section,
-                "average_price": round(average_price, 2),
-                "average_price_label": _currency_money(average_price, currency),
-                "game_count": len(game_prices),
+                # Compatibility names remain, but the value is now the mean of
+                # the same fixed relative-time points displayed on the chart.
+                "average_price": round(balanced_price, 2),
+                "average_price_label": _currency_money(balanced_price, currency),
+                "typical_price": round(balanced_price, 2),
+                "typical_price_label": _currency_money(balanced_price, currency),
+                "price_bucket_count": len(timeline_points),
+                "available_price_bucket_count": available_bucket_count,
+                "price_bucket_game_threshold": minimum_games,
+                "game_count": game_count,
                 "observation_count": observation_count[section],
                 "drop_game_count": len(drop_rows),
+                "typical_max_drop_percent": (
+                    round(typical_percent_drop, 2)
+                    if typical_percent_drop is not None
+                    else None
+                ),
+                "typical_max_drop_percent_label": percent_label,
+                "typical_max_drop_dollar": (
+                    round(typical_dollar_drop, 2)
+                    if typical_dollar_drop is not None
+                    else None
+                ),
+                "typical_max_drop_dollar_label": dollar_label,
+                # Legacy field names map to the new robust drawdown definition.
                 "average_percent_drop": (
-                    round(average_percent_drop, 2)
-                    if average_percent_drop is not None
+                    round(typical_percent_drop, 2)
+                    if typical_percent_drop is not None
                     else None
                 ),
-                "average_percent_drop_label": _percent_change(average_percent_drop),
+                "average_percent_drop_label": percent_label,
                 "average_dollar_drop": (
-                    round(average_dollar_drop, 2)
-                    if average_dollar_drop is not None
+                    round(typical_dollar_drop, 2)
+                    if typical_dollar_drop is not None
                     else None
                 ),
-                "average_dollar_drop_label": _currency_price_change(
-                    average_dollar_drop,
-                    currency,
+                "average_dollar_drop_label": dollar_label,
+                "material_drop_game_count": material_drop_count,
+                "material_drop_frequency": material_drop_frequency,
+                "drop_frequency": material_drop_frequency,
+                "drop_peak_label": _mode_bucket_label(
+                    drop_rows, "peak_slot", sport_key
                 ),
-                "drop_frequency": (
-                    round(
-                        sum(1 for percent, _ in drop_rows if percent > 0)
-                        / len(drop_rows)
-                        * 100
-                    )
-                    if drop_rows
-                    else 0
+                "drop_low_label": _mode_bucket_label(
+                    drop_rows, "low_slot", sport_key
                 ),
                 "direction": direction,
                 "direction_label": direction_label,
-                "is_low_price_sample": len(game_prices) < LOW_SAMPLE_GAMES,
+                "is_low_price_sample": (
+                    game_count < LOW_SAMPLE_GAMES or len(timeline_points) < 2
+                ),
                 "is_low_drop_sample": 0 < len(drop_rows) < LOW_SAMPLE_GAMES,
                 "detail_url": detail_url,
                 "secondary_url": secondary_url,
@@ -534,16 +704,20 @@ def _rank_sections(
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     cheapest = sorted(
         sections,
-        key=lambda row: (row["average_price"], row["name"].casefold()),
+        key=lambda row: (row["typical_price"], row["name"].casefold()),
     )[:5]
     biggest_drops = sorted(
         [
             row
             for row in sections
-            if row["average_percent_drop"] is not None
-            and row["average_percent_drop"] > 0
+            if row["drop_game_count"] >= LOW_SAMPLE_GAMES
+            and row["typical_max_drop_percent"] is not None
+            and row["typical_max_drop_percent"] > 0
         ],
-        key=lambda row: (-row["average_percent_drop"], row["name"].casefold()),
+        key=lambda row: (
+            -row["typical_max_drop_percent"],
+            row["name"].casefold(),
+        ),
     )[:5]
     return cheapest, biggest_drops
 
@@ -740,14 +914,14 @@ def build_nfl_stadium_context(selected_venue: str = "") -> dict[str, Any]:
         "all_sections": sections,
         "games": games,
         "method_price": (
-            "Each game contributes one median observed section price. Those "
-            "game-level values are then averaged, so a matchup with more "
-            "snapshots does not receive extra weight."
+            "Observations are grouped into fixed time-to-kickoff windows. Each game "
+            "contributes one median per window, and the headline is the mean of the "
+            "same supported window averages shown on the chart."
         ),
         "method_drop": (
-            "For completed games with at least six hours of observations, the "
-            "first stored price is compared with the final stored price. Rankings "
-            "use the average percentage decrease and also show the average dollar change."
+            "For each completed game, bucket medians are used to find the largest "
+            "earlier-high to later-low decline. The section metric is the median of "
+            "those per-game maximum drawdowns."
         ),
     }
 
@@ -868,6 +1042,7 @@ def build_mlb_stadium_context(selected_venue: str = "") -> dict[str, Any]:
                 rows,
                 now,
                 currency="USD",
+                sport_key="mlb",
                 detail_url_builder=lambda _event, section: url_for(
                     "nfl_stadium.mlb_section",
                     venue=selected,
@@ -932,13 +1107,14 @@ def build_mlb_stadium_context(selected_venue: str = "") -> dict[str, Any]:
         "all_sections": sections,
         "games": games,
         "method_price": (
-            "Each game contributes one median observed section price inside the "
-            "72-hour collection window. Those game-level values are then averaged."
+            "Observations are grouped into fixed time-to-first-pitch windows. Each "
+            "game contributes one median per window, and the headline averages the "
+            "same supported window points shown on the chart."
         ),
         "method_drop": (
-            "For completed games with at least six hours between the first and "
-            "final stored observations, the dashboard calculates the percentage "
-            "and dollar decrease for each game before averaging across games."
+            "For each completed game, bucket medians are used to find the largest "
+            "earlier-high to later-low decline. The section metric is the median of "
+            "those per-game maximum drawdowns."
         ),
     }
 
@@ -1030,6 +1206,7 @@ def build_nhl_arena_context(selected_venue: str = "") -> dict[str, Any]:
                 rows,
                 now,
                 currency=analysis_currency,
+                sport_key="nhl",
                 detail_url_builder=lambda _event, section: url_for(
                     "nfl_stadium.nhl_section",
                     venue=selected,
@@ -1087,13 +1264,14 @@ def build_nhl_arena_context(selected_venue: str = "") -> dict[str, Any]:
         "all_sections": sections,
         "games": games,
         "method_price": (
-            "Each game contributes one median observed section price in the "
-            "arena's stored currency. Those game-level values are then averaged."
+            "Observations are grouped into fixed time-to-puck-drop windows. Each "
+            "game contributes one median per window, and the headline averages the "
+            "same supported window points shown on the chart."
         ),
         "method_drop": (
-            "For completed games with at least six hours of observations, the "
-            "first stored price is compared with the final stored price. Rankings "
-            "use average percentage decrease and also show average currency movement."
+            "For each completed game, bucket medians are used to find the largest "
+            "earlier-high to later-low decline. The section metric is the median of "
+            "those per-game maximum drawdowns."
         ),
     }
 
@@ -1186,31 +1364,30 @@ def _section_timeline_context(
     map_url_builder: Callable[[Any, str], str | None] | None,
     source_url_getter: Callable[[Any], str],
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    buckets = _TIMELINE_BUCKETS[sport_key]
-    bucket_game_values: list[list[float]] = [[] for _ in buckets]
+    bucket_game_values: dict[int, list[float]] = defaultdict(list)
     histories = _selected_section_histories(events, rows, section_name)
     event_by_id = {event.id: event for event in events}
     game_rows: list[tuple[datetime, dict[str, Any]]] = []
 
     for event_id, history in histories.items():
         event = event_by_id[event_id]
-        per_bucket: list[list[float]] = [[] for _ in buckets]
-        for _captured, lead_time, price in history:
-            bucket_index = _timeline_bucket_index(sport_key, lead_time)
-            if bucket_index is not None:
-                per_bucket[bucket_index].append(price)
-        for index, prices in enumerate(per_bucket):
-            if prices:
-                bucket_game_values[index].append(float(median(prices)))
-
-        first_time, first_lead, first_price = history[0]
-        last_time, last_lead, last_price = history[-1]
-        dollar_drop = first_price - last_price if len(history) > 1 else None
-        percent_drop = (
-            dollar_drop / first_price * 100
-            if dollar_drop is not None and first_price > 0
-            else None
+        bucket_points = _bucketed_game_prices(
+            event,
+            [(captured, price) for captured, _lead_time, price in history],
+            sport_key,
         )
+        if not bucket_points:
+            continue
+        for point in bucket_points:
+            bucket_game_values[point["slot"]].append(point["price"])
+
+        drawdown = _maximum_bucket_drawdown(
+            bucket_points,
+            sport_key=sport_key,
+        )
+        balanced_game_price = mean(point["price"] for point in bucket_points)
+        first_time, first_lead, _first_price = history[0]
+        last_time, last_lead, last_price = history[-1]
         event_date = event_datetime_eastern(event.event_date)
         completed = _event_completed(event, now)
         game_rows.append(
@@ -1221,14 +1398,27 @@ def _section_timeline_context(
                     "label": event_label_builder(event),
                     "status": "Completed" if completed else "Upcoming",
                     "status_key": "completed" if completed else "upcoming",
-                    "average_price": round(float(median([item[2] for item in history])), 2),
+                    "average_price": round(balanced_game_price, 2),
                     "average_price_label": _currency_money(
-                        float(median([item[2] for item in history])),
+                        balanced_game_price,
                         currency,
                     ),
                     "latest_price_label": _currency_money(last_price, currency),
-                    "movement_label": _currency_price_change(dollar_drop, currency),
-                    "movement_percent_label": _percent_change(percent_drop),
+                    "movement_label": _currency_price_change(
+                        drawdown["dollar"] if drawdown is not None else None,
+                        currency,
+                    ),
+                    "movement_percent_label": _percent_change(
+                        drawdown["percent"] if drawdown is not None else None
+                    ),
+                    "max_drop_label": _currency_price_change(
+                        drawdown["dollar"] if drawdown is not None else None,
+                        currency,
+                    ),
+                    "max_drop_percent_label": _percent_change(
+                        drawdown["percent"] if drawdown is not None else None
+                    ),
+                    "bucket_count": len(bucket_points),
                     "observation_count": len(history),
                     "coverage_label": (
                         f"{_lead_time_label(first_lead)} to "
@@ -1247,44 +1437,36 @@ def _section_timeline_context(
             )
         )
 
-    timeline_points = []
-    for slot, ((lower, upper, short_label, label), game_values) in enumerate(
-        zip(buckets, bucket_game_values)
-    ):
-        if not game_values:
-            continue
-        average_price = mean(game_values)
-        timeline_points.append(
-            {
-                "slot": slot,
-                "short_label": short_label,
-                "label": label,
-                "lower_hours": lower,
-                "upper_hours": upper,
-                "average_price": round(average_price, 2),
-                "average_price_label": _currency_money(average_price, currency),
-                "game_count": len(game_values),
-            }
+    timeline_points, balanced_price, available_bucket_count, minimum_games = (
+        _aggregate_bucket_points(
+            bucket_game_values,
+            sport_key=sport_key,
+            currency=currency,
+            total_game_count=len(histories),
         )
+    )
+    timeline_drawdown = _maximum_bucket_drawdown(
+        timeline_points,
+        sport_key=sport_key,
+        value_key="average_price",
+    )
+    timeline_drop = timeline_drawdown["dollar"] if timeline_drawdown else None
+    timeline_percent = timeline_drawdown["percent"] if timeline_drawdown else None
+    has_decline = timeline_percent is not None and timeline_percent > 0.05
+    timeline_direction = "down" if has_decline else "flat"
+    timeline_direction_label = (
+        "Largest decline on the average curve"
+        if has_decline
+        else "No clear decline on the average curve"
+    )
 
-    timeline_drop = None
-    timeline_percent = None
-    timeline_direction = "flat"
-    timeline_direction_label = "Not enough points"
-    if len(timeline_points) >= 2:
-        first_point = timeline_points[0]
-        last_point = timeline_points[-1]
-        timeline_drop = first_point["average_price"] - last_point["average_price"]
-        if first_point["average_price"] > 0:
-            timeline_percent = timeline_drop / first_point["average_price"] * 100
-        if timeline_drop > 0.005:
-            timeline_direction = "down"
-            timeline_direction_label = "Average price fell"
-        elif timeline_drop < -0.005:
-            timeline_direction = "up"
-            timeline_direction_label = "Average price rose"
-        else:
-            timeline_direction_label = "Average price was flat"
+    from_label = ""
+    to_label = ""
+    if timeline_drawdown is not None:
+        from_label = _TIMELINE_BUCKETS[sport_key][
+            timeline_drawdown["peak_slot"]
+        ][3]
+        to_label = _TIMELINE_BUCKETS[sport_key][timeline_drawdown["low_slot"]][3]
 
     upcoming = sorted(
         [row for row in game_rows if row[1]["status_key"] == "upcoming"],
@@ -1299,15 +1481,22 @@ def _section_timeline_context(
     return (
         {
             "points": timeline_points,
-            "slot_count": len(buckets),
+            "slot_count": len(_TIMELINE_BUCKETS[sport_key]),
             "currency": currency,
             "event_moment": _EVENT_MOMENT_LABELS[sport_key],
+            "balanced_price": (
+                round(balanced_price, 2) if balanced_price is not None else None
+            ),
+            "balanced_price_label": _currency_money(balanced_price, currency),
+            "price_bucket_count": len(timeline_points),
+            "available_price_bucket_count": available_bucket_count,
+            "minimum_games_per_bucket": minimum_games,
             "movement_label": _currency_price_change(timeline_drop, currency),
             "movement_percent_label": _percent_change(timeline_percent),
             "movement_direction": timeline_direction,
             "movement_direction_label": timeline_direction_label,
-            "from_label": timeline_points[0]["label"] if timeline_points else "",
-            "to_label": timeline_points[-1]["label"] if timeline_points else "",
+            "from_label": from_label,
+            "to_label": to_label,
         },
         [row for _date, row in upcoming + completed],
     )
@@ -1549,6 +1738,23 @@ def _build_section_detail_context(
         map_url_builder=map_url_builder,
         source_url_getter=source_url_getter,
     )
+    section_summary = dict(section_summary)
+    if timeline.get("balanced_price") is not None:
+        section_summary.update(
+            {
+                "average_price": timeline["balanced_price"],
+                "average_price_label": timeline["balanced_price_label"],
+                "typical_price": timeline["balanced_price"],
+                "typical_price_label": timeline["balanced_price_label"],
+                "price_bucket_count": timeline["price_bucket_count"],
+                "available_price_bucket_count": timeline[
+                    "available_price_bucket_count"
+                ],
+                "price_bucket_game_threshold": timeline[
+                    "minimum_games_per_bucket"
+                ],
+            }
+        )
     map_context = _section_map_context(
         events,
         base_context.get("all_sections", []),

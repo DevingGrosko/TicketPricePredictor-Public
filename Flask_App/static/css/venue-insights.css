@@ -148,3 +148,116 @@
     width: 100%;
   }
 }
+
+/* Compact team report: rankings first, everything else behind one selector. */
+.nfl-dashboard-section--compact {
+  padding-top: 68px;
+  padding-bottom: 78px;
+}
+
+.nfl-report-lookup {
+  margin-top: 18px;
+  padding: 18px;
+  display: grid;
+  grid-template-columns: minmax(180px, .55fr) minmax(320px, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  border: 1px solid rgba(219, 230, 246, .11);
+  border-radius: 12px;
+  background: rgba(3, 15, 36, .72);
+}
+
+.nfl-report-lookup h3 {
+  margin: 6px 0 0;
+  color: white;
+  font: 700 20px/1.05 var(--font-display);
+  letter-spacing: -.03em;
+}
+
+.nfl-report-lookup form {
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) auto;
+  gap: 9px;
+}
+
+.nfl-report-lookup select {
+  width: 100%;
+  height: 44px;
+  padding: 0 38px 0 13px;
+  border: 1px solid rgba(219, 230, 246, .16);
+  border-radius: 8px;
+  color: white;
+  background: #061a38;
+  font: inherit;
+  font-size: 10px;
+  outline: none;
+}
+
+.nfl-report-lookup select:focus {
+  border-color: var(--nfl-red-bright);
+  box-shadow: 0 0 0 3px rgba(213, 10, 10, .12);
+}
+
+.nfl-report-lookup button:disabled {
+  opacity: .42;
+  cursor: default;
+}
+
+.nfl-report-lookup__link {
+  color: #dce8f7;
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.nfl-report-lookup__link span {
+  margin-left: 4px;
+  color: var(--nfl-red-bright);
+}
+
+.nfl-report-method-note {
+  margin: 13px 2px 0;
+  color: #7186a1;
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.nhl-theme .nfl-report-lookup select {
+  background: #0a2638;
+  border-color: rgba(196, 231, 244, .18);
+}
+
+.nhl-theme .nfl-report-lookup__link span {
+  color: #76d7f5;
+}
+
+.mlb-theme .nfl-report-lookup select {
+  background: #123229;
+  border-color: rgba(238, 228, 198, .18);
+}
+
+@media (max-width: 900px) {
+  .nfl-report-lookup {
+    grid-template-columns: 1fr;
+    align-items: start;
+  }
+
+  .nfl-report-lookup__link {
+    justify-self: start;
+  }
+}
+
+@media (max-width: 560px) {
+  .nfl-dashboard-section--compact {
+    padding-top: 50px;
+    padding-bottom: 58px;
+  }
+
+  .nfl-report-lookup form {
+    grid-template-columns: 1fr;
+  }
+
+  .nfl-report-lookup button {
+    width: 100%;
+  }
+}

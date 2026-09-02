@@ -44,6 +44,22 @@
     }
   }
 
+  document.querySelectorAll('[data-section-jump]').forEach((form) => {
+    const select = form.querySelector('[data-section-jump-select]');
+    const button = form.querySelector('[data-section-jump-button]');
+    if (!select || !button) return;
+
+    const update = () => {
+      button.disabled = !select.value;
+    };
+    select.addEventListener('change', update);
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (select.value) window.location.assign(select.value);
+    });
+    update();
+  });
+
   document.querySelectorAll('[data-game-section-form]').forEach((picker) => {
     const select = picker.querySelector('[data-game-section]');
     const link = picker.querySelector('[data-game-open]');
