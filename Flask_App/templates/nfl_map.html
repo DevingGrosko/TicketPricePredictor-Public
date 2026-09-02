@@ -22,6 +22,15 @@
         <a class="button nfl-button nfl-button--primary" href="{{ url_for('nfl.nfl_home') }}#explore-nfl">Return to NFL games</a>
       </div>
     {% else %}
+      {% set visible_map_sections = namespace(total=0, priced=0) %}
+      {% for item in map_data.sections %}
+        {% if not is_parking_section(item.name) %}
+          {% set visible_map_sections.total = visible_map_sections.total + 1 %}
+          {% if item.price is not none %}
+            {% set visible_map_sections.priced = visible_map_sections.priced + 1 %}
+          {% endif %}
+        {% endif %}
+      {% endfor %}
       <header class="nfl-matchup-banner nfl-map-banner">
         <div class="nfl-matchup-banner__mark" aria-hidden="true">
           <span class="nfl-mini-shield"><i></i><strong>TS</strong></span>
@@ -29,11 +38,11 @@
         <div class="nfl-matchup-banner__copy">
           <span class="nfl-section-kicker">Interactive section explorer</span>
           <h1>{{ gameLabel }}</h1>
-          <p><strong>{{ team }}</strong><span>&middot;</span>{{ venue }}{% if city %}<span>&middot;</span>{{ city }}{% if country %}, {{ country }}{% endif %}{% endif %}{% if neutral_site %}<span>&middot;</span>Neutral site{% endif %}<span>&middot;</span>{{ section_count }} sections</p>
+          <p><strong>{{ team }}</strong><span>&middot;</span>{{ venue }}{% if city %}<span>&middot;</span>{{ city }}{% if country %}, {{ country }}{% endif %}{% endif %}{% if neutral_site %}<span>&middot;</span>Neutral site{% endif %}<span>&middot;</span>{{ visible_map_sections.total }} sections</p>
         </div>
         <div class="nfl-window-badge">
           <span>Latest market read</span>
-          <strong>{{ priced_section_count }}</strong>
+          <strong>{{ visible_map_sections.priced }}</strong>
           <small>sections priced</small>
         </div>
       </header>
@@ -116,4 +125,4 @@
 </div>
 {% endblock %}
 
-{% block scripts %}{% if not error %}<script src="{{ url_for('static', filename='js/nfl-map.js') }}?v=2"></script>{% endif %}{% endblock %}
+{% block scripts %}{% if not error %}<script src="{{ url_for('static', filename='js/nfl-map.js') }}?v=3"></script>{% endif %}{% endblock %}

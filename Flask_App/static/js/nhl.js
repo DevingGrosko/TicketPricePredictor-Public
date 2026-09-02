@@ -1,3 +1,14 @@
+function isParkingOption(value) {
+  const raw = typeof value === 'object' ? (value.label || value.value) : value;
+  const normalized = String(raw || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+  return /\bparking\b/.test(normalized)
+    || /^(lot|garage)\b/.test(normalized)
+    || normalized.includes('park and ride');
+}
+
 function replaceNhlOptions(select, values, placeholder) {
   select.innerHTML = '';
   const empty = document.createElement('option');
@@ -5,13 +16,14 @@ function replaceNhlOptions(select, values, placeholder) {
   empty.textContent = placeholder;
   select.appendChild(empty);
 
-  values.forEach((value) => {
+  const visibleValues = values.filter((value) => !isParkingOption(value));
+  visibleValues.forEach((value) => {
     const option = document.createElement('option');
     option.value = typeof value === 'object' ? value.value : value;
     option.textContent = typeof value === 'object' ? value.label : value;
     select.appendChild(option);
   });
-  select.disabled = values.length === 0;
+  select.disabled = visibleValues.length === 0;
 }
 
 const nhlForm = document.querySelector('.nhl-selection-form');
