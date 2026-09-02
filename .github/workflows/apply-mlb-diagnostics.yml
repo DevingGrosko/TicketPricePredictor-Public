@@ -1,0 +1,96 @@
+name: Apply authenticated MLB diagnostics
+
+on:
+  push:
+    branches:
+      - fix/mlb-stadium-500
+    paths:
+      - ".github/workflows/apply-mlb-diagnostics.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/mlb-stadium-500
+          fetch-depth: 0
+
+      - name: Add temporary authenticated diagnostic route
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("Flask_App/nfl_stadium_blueprint.py")
+          text = path.read_text()
+          text = text.replace(
+              "from datetime import datetime, timedelta, timezone\nimport re\n",
+              "from datetime import datetime, timedelta, timezone\nimport hmac\nimport os\nfrom pathlib import Path\nimport re\nimport traceback\n",
+              1,
+          )
+          text = text.replace(
+              "from flask import Blueprint, render_template, request, url_for\n",
+              "from flask import Blueprint, jsonify, render_template, request, url_for\n",
+              1,
+          )
+          route = r'''
+
+@nfl_stadium_blueprint.get("/api/diagnostics/mlb-stadium")
+def diagnose_mlb_stadium():
+    """Temporarily expose a sanitized traceback to authenticated collectors."""
+    configured = os.environ.get("COLLECTOR_INGEST_TOKEN", "")
+    supplied = request.headers.get("Authorization", "")
+    if not configured or not hmac.compare_digest(supplied, f"Bearer {configured}"):
+        return jsonify({"status": "error", "error": "unauthorized"}), 401
+
+    venue = _clean(request.args.get("venue", ""))
+    try:
+        context = build_mlb_stadium_context(venue)
+    except Exception as exc:
+        frames = traceback.extract_tb(exc.__traceback__)[-10:]
+        return jsonify(
+            {
+                "status": "error",
+                "exception": type(exc).__name__,
+                "message": str(exc),
+                "frames": [
+                    {
+                        "file": Path(frame.filename).name,
+                        "line": frame.lineno,
+                        "function": frame.name,
+                        "code": frame.line or "",
+                    }
+                    for frame in frames
+                ],
+            }
+        ), 500
+
+    return jsonify(
+        {
+            "status": "ok",
+            "venue": context.get("selected_venue", ""),
+            "section_count": context.get("section_count", 0),
+            "drop_count": len(context.get("biggest_drops", [])),
+        }
+    )
+'''
+          if "/api/diagnostics/mlb-stadium" in text:
+              raise SystemExit("Diagnostic route already exists")
+          path.write_text(text + route)
+          PY
+
+          python -m py_compile Flask_App/nfl_stadium_blueprint.py
+
+      - name: Commit diagnostic route
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Flask_App/nfl_stadium_blueprint.py
+          git diff --cached --check
+          git commit -m "Add authenticated MLB stadium diagnostics"
+          git push origin HEAD:fix/mlb-stadium-500
