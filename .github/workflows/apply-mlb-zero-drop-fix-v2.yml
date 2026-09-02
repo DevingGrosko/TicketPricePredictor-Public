@@ -106,50 +106,6 @@ jobs:
           if insertion not in test_text:
               raise SystemExit("Test insertion point not found")
           tests.write_text(test_text.replace(insertion, regression + insertion, 1))
-
-          deploy = Path(".github/workflows/deploy-pythonanywhere.yml")
-          lines = deploy.read_text().splitlines()
-          output = []
-          inserted_probe = False
-          inserted_diagnostics = False
-          updated_echo = False
-          updated_condition = False
-          for line in lines:
-              output.append(line)
-              if 'home_status="$(curl ' in line and not inserted_probe:
-                  output.append(
-                      '            baseball_stadium_status="$(curl -sS --max-time 90 '
-                      '-o /tmp/baseball-stadium.html -w \'%{http_code}\' '
-                      '\"$base/baseball/stadium?venue=Truist%20Park\" || true)"'
-                  )
-                  inserted_probe = True
-              if 'echo "Attempt $attempt:' in line:
-                  output[-1] = line.replace(
-                      'home=$home_status ',
-                      'home=$home_status baseball_stadium=$baseball_stadium_status ',
-                      1,
-                  )
-                  updated_echo = True
-              if 'if [[ "$home_status" == "200"' in line:
-                  output[-1] = line.replace(
-                      '"$home_status" == "200" && ',
-                      '"$home_status" == "200" && "$baseball_stadium_status" == "200" && ',
-                      1,
-                  )
-                  updated_condition = True
-              if line == '          echo "NFL response:"' and not inserted_diagnostics:
-                  output[-1:-1] = [
-                      '          echo "Baseball stadium response:"',
-                      '          cat /tmp/baseball-stadium.html || true',
-                  ]
-                  inserted_diagnostics = True
-
-          if not all((inserted_probe, inserted_diagnostics, updated_echo, updated_condition)):
-              raise SystemExit(
-                  f"Deploy patch incomplete: {inserted_probe=} {inserted_diagnostics=} "
-                  f"{updated_echo=} {updated_condition=}"
-              )
-          deploy.write_text("\n".join(output) + "\n")
           PY
 
       - name: Install dependencies
@@ -174,7 +130,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add Flask_App/nfl_stadium_blueprint.py tests/test_navigation_and_parking_filter.py .github/workflows/deploy-pythonanywhere.yml
+          git add Flask_App/nfl_stadium_blueprint.py tests/test_navigation_and_parking_filter.py
           git diff --cached --check
           git commit -m "Fix zero-dollar MLB section formatting"
           git push origin HEAD:fix/mlb-zero-drop-formatting
