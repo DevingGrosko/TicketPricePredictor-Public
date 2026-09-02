@@ -35,6 +35,17 @@ jobs:
           cat .github/patches/multisport-insights.part* \
             | base64 --decode > /tmp/multisport-insights.tar.gz
           tar -xzf /tmp/multisport-insights.tar.gz
+          python - <<'PY'
+          from pathlib import Path
+
+          page = Path("Flask_App/templates/HomeScreen.html")
+          text = page.read_text(encoding="utf-8")
+          old = "MLB market tracker · Team intelligence"
+          new = "MLB market tracker · Ticket price intelligence"
+          if old not in text:
+              raise SystemExit(f"Expected homepage copy was not found: {old}")
+          page.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
           rm -rf .github/patches
           rm -f .github/workflows/apply-multisport-insights.yml
 
