@@ -1,0 +1,60 @@
+{
+  "generated_at": "2026-09-03T01:37:38.450807+00:00",
+  "source": "Live public MLB, NFL, and NHL page inventories",
+  "scope": {
+    "games": 354,
+    "venues": 76,
+    "venue_scoped_raw_labels": 9392
+  },
+  "conservative_alias_audit": {
+    "high_confidence_groups": 20,
+    "duplicate_raw_labels_removed": 20,
+    "extra_section_game_histories_recovered": 23,
+    "ranking_threshold_rescues": 1
+  },
+  "likely_review_groups": {
+    "groups": 10,
+    "venue": "Fenway Park",
+    "pattern": "Pavilion Box N -> Aura Pavilion Box N",
+    "extra_section_game_histories_recovered": 34
+  },
+  "large_count_examples": [
+    {
+      "venue": "SoFi Stadium",
+      "games": 3,
+      "raw_labels": 268,
+      "labels_present_in_every_game": 244
+    },
+    {
+      "venue": "Reliant Stadium",
+      "games": 2,
+      "raw_labels": 212,
+      "labels_present_in_every_game": 200
+    },
+    {
+      "venue": "Uniqlo Field at Dodger Stadium",
+      "games": 20,
+      "raw_labels": 270,
+      "labels_present_in_every_game": 170
+    },
+    {
+      "venue": "Citi Field",
+      "games": 22,
+      "raw_labels": 287,
+      "labels_seen_in_only_one_game": 120
+    }
+  ],
+  "numeric_collision_audit": {
+    "venue_specific_identifiers_with_multiple_labels": 458,
+    "labels_involved": 1152,
+    "warning": "Do not canonicalize by section number alone; meaningful descriptors often identify different ticket areas or products."
+  },
+  "clear_non_section_labels": [
+    "GP Atrium (No Admission)",
+    "Optum Field Lounge (No Admission)",
+    "NORTHWEST SIDELINE PASS",
+    "401 W Washington St - Government Center",
+    "Lexus Club Pass (No Admission)"
+  ],
+  "conclusion": "Alias fragmentation is real and harms some section histories, but the 200-400 counts mostly reflect raw marketplace ticket-area granularity rather than simple duplicate spellings."
+}
