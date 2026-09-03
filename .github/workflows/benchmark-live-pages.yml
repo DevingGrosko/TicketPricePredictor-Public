@@ -1,0 +1,53 @@
+name: Benchmark live page response times
+
+on:
+  push:
+    branches:
+      - diagnose/page-performance-2026-09-03
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Measure cold and repeated requests
+        shell: bash
+        run: |
+          set -u
+          base="https://bunnyjeff.pythonanywhere.com"
+          declare -a names=(
+            "MLB home"
+            "NFL home"
+            "NHL home"
+            "Fenway report"
+            "Citi report"
+            "SoFi report"
+            "TD Garden report"
+            "Fenway section"
+            "Citi section"
+            "SoFi section"
+            "TD Garden section"
+          )
+          declare -a paths=(
+            "/"
+            "/nfl"
+            "/nhl"
+            "/baseball/stadium?venue=Fenway%20Park"
+            "/baseball/stadium?venue=Citi%20Field"
+            "/nfl/stadium?venue=SoFi%20Stadium"
+            "/nhl/arena?venue=TD%20Garden"
+            "/baseball/stadium/section?venue=Fenway%20Park&section=Field%20Box%2010"
+            "/baseball/stadium/section?venue=Citi%20Field&section=Baseline%20Box%20106"
+            "/nfl/stadium/section?venue=SoFi%20Stadium&section=Section%20100"
+            "/nhl/arena/section?venue=TD%20Garden&section=Balcony%20Level%20301"
+          )
+
+          printf '%-22s %-4s %-5s %-10s %-10s %-12s\n' "page" "run" "code" "ttfb_s" "total_s" "bytes"
+          for i in "${!names[@]}"; do
+            for run in 1 2 3; do
+              metrics="$(curl -L -sS --max-time 120 -o /tmp/page.html -w '%{http_code} %{time_starttransfer} %{time_total} %{size_download}' "${base}${paths[$i]}" || true)"
+              printf '%-22s %-4s %s\n' "${names[$i]}" "$run" "$metrics"
+            done
+          done
