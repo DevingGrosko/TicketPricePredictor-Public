@@ -89,9 +89,14 @@ class SimplifiedNavigationTests(unittest.TestCase):
         self.assertIn("Dropped at least", section)
 
         dashboard = (root / "Flask_App/templates/nfl_stadium.html").read_text()
-        self.assertIn("Median across", dashboard)
-        self.assertIn("Typical peak:", dashboard)
-        self.assertIn("Typical low:", dashboard)
+        self.assertIn("Largest typical drops", dashboard)
+        self.assertIn("fell {{ section.material_drop_threshold|int }}%+", dashboard)
+        self.assertIn("Peak {{ section.drop_peak_label", dashboard)
+        self.assertIn("→ low {{ section.drop_low_label", dashboard)
+        self.assertIn("ranking-readability.css", dashboard)
+        self.assertNotIn("Median across", dashboard)
+        self.assertNotIn("nfl-ranking-card__badge", dashboard)
+        self.assertNotIn("nfl-report-method-note", dashboard)
 
     def test_primary_nav_is_shorter(self):
         root = Path(__file__).resolve().parents[1]
