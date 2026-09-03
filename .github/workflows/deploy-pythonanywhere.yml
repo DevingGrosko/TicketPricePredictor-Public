@@ -137,12 +137,7 @@ jobs:
               )"
               echo "$response"
               complete="$(
-                RESPONSE="$response" python - <<'PYCODE'
-import json
-import os
-payload = json.loads(os.environ["RESPONSE"])
-print(1 if payload.get("complete") else 0)
-PYCODE
+                python -c 'import json, sys; print(1 if json.load(sys.stdin).get("complete") else 0)' <<< "$response"
               )"
               if [[ "$complete" == "1" ]]; then
                 break
