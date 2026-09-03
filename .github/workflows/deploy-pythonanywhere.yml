@@ -65,6 +65,7 @@ jobs:
             nhl_schedule_collector.py \
             Flask_App/flask_app.py \
             Flask_App/nfl_blueprint.py \
+            Flask_App/section_canonicalization.py \
             Flask_App/nfl_stadium_blueprint.py \
             Flask_App/nhl_blueprint.py
           node --check Flask_App/static/js/script.js

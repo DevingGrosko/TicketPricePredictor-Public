@@ -48,7 +48,6 @@
             <h2>{{ stadium.team_label or sport_label ~ ' home team' }}</h2>
             <dl>
               <div><dt>{{ stadium.game_count }}</dt><dd>games</dd></div>
-              <div><dt>{{ stadium.section_count }}</dt><dd>sections</dd></div>
             </dl>
             <span class="nfl-stadium-card__action">Open team report <b aria-hidden="true">&#8594;</b></span>
           </a>
@@ -83,7 +82,7 @@
 
         <dl class="nfl-stadium-dashboard-metrics">
           <div><dt>{{ game_count }}</dt><dd>Games</dd></div>
-          <div><dt>{{ section_count }}</dt><dd>Sections</dd></div>
+          <div><dt>{{ analyzed_area_count }}</dt><dd>Areas analyzed</dd></div>
           <div><dt>{{ completed_game_count }}</dt><dd>Completed</dd></div>
         </dl>
       </header>
