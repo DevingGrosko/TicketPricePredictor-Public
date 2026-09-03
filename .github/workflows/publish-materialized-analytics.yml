@@ -121,11 +121,19 @@ jobs:
         run: |
           set -euo pipefail
           # The Actions token cannot update workflow files. They were validated
-          # above, but are restored here and will be added to the clean branch
-          # through the repository connector after this job publishes the app.
-          git checkout origin/main -- \
+          # above. Restore both exactly to main before publishing the app branch;
+          # the repository connector will add their reviewed versions afterward.
+          git restore --source=origin/main --staged --worktree -- \
             .github/workflows/collect-ticket-prices.yml \
             .github/workflows/deploy-pythonanywhere.yml
+          git diff --exit-code origin/main -- \
+            .github/workflows/collect-ticket-prices.yml \
+            .github/workflows/deploy-pythonanywhere.yml
+          if git diff --name-only origin/main | grep -q '^\.github/workflows/'; then
+            echo "A workflow file remains in the app-only publish diff."
+            git diff --name-only origin/main
+            exit 1
+          fi
           test ! -e .github/materialized-analytics
           test ! -e .github/workflows/publish-materialized-analytics.yml
           git config user.name "github-actions[bot]"
