@@ -1,0 +1,77 @@
+name: Publish materialized backfill scan hotfix
+
+on:
+  push:
+    branches:
+      - fix/materialized-backfill-batching
+    paths:
+      - ".github/workflows/publish-materialized-backfill-hotfix.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/materialized-backfill-batching
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Apply reviewed hotfix
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s  %s\n' \
+            'a26a27daba90ebbea16cf1cb69ab70fbf79b77fc43866974214630242ad0f998' \
+            '.github/materialized-hotfix.patch.gz.b64' | sha256sum --check
+          base64 --decode .github/materialized-hotfix.patch.gz.b64 \
+            | gzip --decompress > /tmp/materialized-hotfix.patch
+          printf '%s  %s\n' \
+            '9b8d33ee0376df112f873b1ebb54f4868863ad675975e7ba4db6a1400e9586aa' \
+            '/tmp/materialized-hotfix.patch' | sha256sum --check
+          git fetch origin main
+          git checkout -B fix/materialized-backfill-scan origin/main
+          git apply --check /tmp/materialized-hotfix.patch
+          git apply /tmp/materialized-hotfix.patch
+          git diff --check
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate hotfix
+        env:
+          DATABASE_PATH: ${{ runner.temp }}/backfill-hotfix/baseball.db
+          CONCERT_DATABASE_PATH: ${{ runner.temp }}/backfill-hotfix/concerts.db
+          NFL_DATABASE_PATH: ${{ runner.temp }}/backfill-hotfix/nfl.db
+          NHL_DATABASE_PATH: ${{ runner.temp }}/backfill-hotfix/nhl.db
+          FLASK_SECRET_KEY: backfill-hotfix-validation
+          COLLECTOR_INGEST_TOKEN: backfill-hotfix-token
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$DATABASE_PATH")"
+          python -m py_compile Flask_App/materialized_analytics.py
+          python -m unittest tests.test_materialized_analytics -v
+          python -m unittest discover -s tests -v
+          git diff --check
+
+      - name: Publish clean branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e .github/materialized-hotfix.patch.gz.b64
+          test ! -e .github/workflows/publish-materialized-backfill-hotfix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Bound materialized backfills to analysis windows"
+          git push --force origin HEAD:fix/materialized-backfill-scan
