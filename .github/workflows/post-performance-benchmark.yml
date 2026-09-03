@@ -1,0 +1,45 @@
+name: Post-performance live benchmark
+
+on:
+  push:
+    branches:
+      - diagnose/page-performance-2026-09-03
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Measure representative pages twice
+        shell: bash
+        run: |
+          set -u
+          base="https://bunnyjeff.pythonanywhere.com"
+          measure() {
+            local name="$1"
+            local path="$2"
+            local attempt="$3"
+            metrics="$(curl --compressed -L -sS --max-time 60 -o /tmp/page.html -w '%{http_code}|%{time_starttransfer}|%{time_total}|%{size_download}' "${base}${path}" || true)"
+            echo "RESULT|${name}|${attempt}|${metrics}"
+          }
+
+          measure "MLB home" "/" 1
+          measure "MLB home" "/" 2
+          measure "NFL home" "/nfl" 1
+          measure "NFL home" "/nfl" 2
+          measure "NHL home" "/nhl" 1
+          measure "NHL home" "/nhl" 2
+
+          measure "Fenway report" "/baseball/stadium?venue=Fenway%20Park" 1
+          measure "Fenway report" "/baseball/stadium?venue=Fenway%20Park" 2
+          measure "Citi report" "/baseball/stadium?venue=Citi%20Field" 1
+          measure "Citi report" "/baseball/stadium?venue=Citi%20Field" 2
+          measure "Fenway section" "/baseball/stadium/section?venue=Fenway%20Park&section=Field%20Box%2010" 1
+          measure "Fenway section" "/baseball/stadium/section?venue=Fenway%20Park&section=Field%20Box%2010" 2
+          measure "SoFi report" "/nfl/stadium?venue=SoFi%20Stadium" 1
+          measure "SoFi report" "/nfl/stadium?venue=SoFi%20Stadium" 2
+          measure "SoFi section" "/nfl/stadium/section?venue=SoFi%20Stadium&section=Section%20100" 1
+          measure "SoFi section" "/nfl/stadium/section?venue=SoFi%20Stadium&section=Section%20100" 2
