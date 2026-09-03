@@ -10,6 +10,7 @@ permissions:
 
 jobs:
   apply:
+    if: github.event.head_commit.message != 'Use supported areas in team reports'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -46,13 +47,16 @@ jobs:
             Flask_App/nfl_stadium_blueprint.py
           python -m unittest discover -s tests -v
 
-      - name: Commit the clean implementation
+      - name: Commit the validated application changes
         run: |
-          rm -f tools/apply_meaningful_area_counts.py
-          rm -f .github/workflows/apply-meaningful-area-counts.yml
-          rmdir tools 2>/dev/null || true
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add \
+            Flask_App/nfl_stadium_blueprint.py \
+            Flask_App/templates/HomeScreen.html \
+            Flask_App/templates/NFLHomeScreen.html \
+            Flask_App/templates/NHLHomeScreen.html \
+            Flask_App/templates/nfl_stadium.html
+          git diff --cached --check
           git commit -m "Use supported areas in team reports"
           git push origin HEAD:fix/meaningful-area-counts
