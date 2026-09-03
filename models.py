@@ -51,6 +51,9 @@ PRODUCTION_ID_PATTERN = re.compile(r"/production/(\d+)")
 _LEGACY_MIGRATION_THREAD_LOCK = threading.Lock()
 _LEGACY_MIGRATION_ATTEMPTED = False
 
+_BASEBALL_INDEX_LOCK = threading.Lock()
+_BASEBALL_INDEX_READY: set[str] = set()
+
 
 def event_datetime_utc(value: datetime) -> datetime:
     """Interpret persisted event wall time as Eastern and return aware UTC."""
@@ -178,12 +181,55 @@ def database_path() -> Path:
     return Path(configured).expanduser().resolve()
 
 
+def _ensure_baseball_performance_indexes(engine, db_path: Path) -> None:
+    """Create the indexes used by venue and section history queries once."""
+
+    key = str(db_path)
+    with _BASEBALL_INDEX_LOCK:
+        if key in _BASEBALL_INDEX_READY:
+            return
+        with engine.begin() as connection:
+            tables = {
+                row[0]
+                for row in connection.exec_driver_sql(
+                    "SELECT name FROM sqlite_master WHERE type = 'table'"
+                ).fetchall()
+            }
+            if not {"event", "iterations", "tickets"}.issubset(tables):
+                return
+            connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_event_place ON event (Place)"
+            )
+            connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_event_url ON event (URL)"
+            )
+            connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_iterations_event_captured "
+                "ON iterations (event_id, captured_at)"
+            )
+            connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_tickets_iteration_id "
+                "ON tickets (iteration_id)"
+            )
+            connection.exec_driver_sql(
+                "CREATE INDEX IF NOT EXISTS ix_tickets_section_iteration "
+                "ON tickets (section, iteration_id)"
+            )
+            connection.exec_driver_sql("PRAGMA optimize")
+        _BASEBALL_INDEX_READY.add(key)
+
+
 class CreateModel:
     def __init__(self):
         db_path = database_path()
-        self.engine = create_engine(f"sqlite:///{db_path}", echo=False)
+        self.engine = create_engine(
+            f"sqlite:///{db_path}",
+            echo=False,
+            connect_args={"timeout": 30},
+        )
         if not db_path.exists():
             raise FileNotFoundError(f"Database file missing: {db_path}")
+        _ensure_baseball_performance_indexes(self.engine, db_path)
 
         self.SessionLocal = sessionmaker(
             bind=self.engine,

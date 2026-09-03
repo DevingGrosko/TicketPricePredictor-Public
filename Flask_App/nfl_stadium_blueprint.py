@@ -14,20 +14,24 @@ from statistics import mean, median
 from typing import Any, Callable, Iterable
 
 from flask import Blueprint, render_template, request, url_for
-from sqlalchemy import select
+from sqlalchemy import DateTime, Integer, and_, cast, func, literal, or_, select, union_all
+from sqlalchemy.orm import defer, load_only
 
 from models import (
     CreateModel,
+    database_path,
     Event,
     Iteration,
     Ticket,
     clean_event_title,
     event_datetime_eastern,
+    event_datetime_utc,
     event_has_complete_public_data,
     hours_before_event,
 )
 from Flask_App.nfl_blueprint import (
     CreateNFLModel,
+    nfl_database_path,
     NFLEvent,
     NFLIteration,
     NFLTicket,
@@ -40,6 +44,7 @@ from Flask_App.nfl_blueprint import (
 )
 from Flask_App.nhl_blueprint import (
     CreateNHLModel,
+    nhl_database_path,
     NHLEvent,
     NHLIteration,
     NHLTicket,
@@ -49,6 +54,12 @@ from Flask_App.nhl_blueprint import (
 )
 
 from Flask_App.section_canonicalization import section_identity
+from Flask_App.performance_cache import (
+    PAGE_CACHE_TTL_SECONDS,
+    cache_key,
+    file_version,
+    page_cache,
+)
 
 
 nfl_stadium_blueprint = Blueprint("nfl_stadium", __name__)
@@ -284,6 +295,7 @@ def _is_supported_nhl_event(event: NHLEvent) -> bool:
     return _country_label(getattr(event, "country", "")) in _NHL_COUNTRY_MARKERS
 
 
+
 def _stadium_index(
     events: Iterable[NFLEvent],
     now: datetime,
@@ -296,12 +308,6 @@ def _stadium_index(
 
     result = []
     for venue, venue_events in grouped.items():
-        sections = {
-            _clean(section)
-            for event in venue_events
-            for section in (getattr(event, "sections", None) or [])
-            if _clean(section) and not is_parking_section(section)
-        }
         teams = sorted(
             {
                 _clean(nfl_event_home_team(event))
@@ -316,7 +322,6 @@ def _stadium_index(
                 "game_count": len(venue_events),
                 "completed_count": completed_count,
                 "upcoming_count": len(venue_events) - completed_count,
-                "section_count": len(sections),
                 "team_label": " / ".join(teams[:2]),
                 "url": url_for("nfl_stadium.nfl_stadium", venue=venue),
             }
@@ -330,6 +335,7 @@ def _stadium_index(
     )
 
 
+
 def _snapshot_rows(session: Any, event_ids: list[int]) -> list[Any]:
     return _snapshot_rows_for(
         session,
@@ -339,12 +345,17 @@ def _snapshot_rows(session: Any, event_ids: list[int]) -> list[Any]:
     )
 
 
+
 def _snapshot_rows_for(
     session: Any,
     event_ids: list[int],
     iteration_model: Any,
     ticket_model: Any,
+    *,
+    sections: Iterable[str] | None = None,
 ) -> list[Any]:
+    """Fetch raw observations, optionally restricted to selected section labels."""
+
     if not event_ids:
         return []
 
@@ -366,9 +377,154 @@ def _snapshot_rows_for(
         )
         .select_from(ticket.join(iteration, ticket_iteration_id == iteration_id))
         .where(iteration_event_id.in_(event_ids))
-        .order_by(iteration_event_id, captured_at)
     )
+    selected_sections = sorted(
+        {_clean(section).casefold() for section in sections or [] if _clean(section)}
+    )
+    if selected_sections:
+        statement = statement.where(func.lower(ticket_section).in_(selected_sections))
     return list(session.execute(statement).all())
+
+
+
+def _event_chunks(events: Iterable[Any], size: int = 32) -> Iterable[list[Any]]:
+    rows = list(events)
+    for start in range(0, len(rows), max(size, 1)):
+        yield rows[start : start + max(size, 1)]
+
+
+def _capture_counts_for(
+    session: Any,
+    event_ids: list[int],
+    iteration_model: Any,
+) -> dict[int, int]:
+    """Count stored snapshot iterations without scanning the ticket table."""
+
+    if not event_ids:
+        return {}
+    iteration = iteration_model.__table__
+    iteration_id = _column(iteration, "id")
+    iteration_event_id = _column(iteration, "event_id")
+    statement = (
+        select(
+            iteration_event_id.label("event_id"),
+            func.count(iteration_id).label("capture_count"),
+        )
+        .where(iteration_event_id.in_(event_ids))
+        .group_by(iteration_event_id)
+    )
+    return {
+        int(row.event_id): int(row.capture_count)
+        for row in session.execute(statement)
+    }
+
+
+def _bucket_summary_rows_for(
+    session: Any,
+    events: Iterable[Any],
+    iteration_model: Any,
+    ticket_model: Any,
+    sport_key: str,
+    *,
+    sections: Iterable[str] | None = None,
+) -> list[Any]:
+    """Return one exact median price per game, section, and time window.
+
+    SQLite performs the expensive filtering, sorting, and median selection. The
+    web process therefore receives thousands of bucket summaries rather than
+    hundreds of thousands of raw ticket observations.
+    """
+
+    iteration = iteration_model.__table__
+    ticket = ticket_model.__table__
+    iteration_id = _column(iteration, "id")
+    iteration_event_id = _column(iteration, "event_id")
+    captured_at = _column(iteration, "captured_at", "created_at")
+    ticket_iteration_id = _column(ticket, "iteration_id")
+    ticket_section = _column(ticket, "section", "section_name")
+    ticket_price = _column(ticket, "price")
+    selected_sections = sorted(
+        {_clean(section).casefold() for section in sections or [] if _clean(section)}
+    )
+
+    output: list[Any] = []
+    for event_chunk in _event_chunks(events):
+        boundaries = []
+        for event in event_chunk:
+            event_utc = event_datetime_utc(event.event_date).replace(tzinfo=None)
+            for slot, (lower, upper, _short, _label) in enumerate(
+                _TIMELINE_BUCKETS[sport_key]
+            ):
+                boundaries.append(
+                    select(
+                        literal(int(event.id)).label("event_id"),
+                        literal(slot).label("slot"),
+                        literal(
+                            event_utc - timedelta(hours=upper),
+                            type_=DateTime(),
+                        ).label("starts_at"),
+                        literal(
+                            event_utc - timedelta(hours=lower),
+                            type_=DateTime(),
+                        ).label("ends_at"),
+                    )
+                )
+        if not boundaries:
+            continue
+
+        bucket_bounds = union_all(*boundaries).subquery("bucket_bounds")
+        raw_statement = (
+            select(
+                iteration_event_id.label("event_id"),
+                ticket_section.label("section"),
+                ticket_price.label("price"),
+                bucket_bounds.c.slot.label("slot"),
+            )
+            .select_from(
+                bucket_bounds.join(
+                    iteration,
+                    and_(
+                        iteration_event_id == bucket_bounds.c.event_id,
+                        captured_at >= bucket_bounds.c.starts_at,
+                        captured_at < bucket_bounds.c.ends_at,
+                    ),
+                ).join(ticket, ticket_iteration_id == iteration_id)
+            )
+            .where(ticket_price > 0)
+        )
+        if selected_sections:
+            raw_statement = raw_statement.where(
+                func.lower(ticket_section).in_(selected_sections)
+            )
+        raw = raw_statement.subquery("bucket_raw")
+        partition = [raw.c.event_id, raw.c.section, raw.c.slot]
+        ranked = select(
+            raw,
+            func.row_number()
+            .over(partition_by=partition, order_by=raw.c.price)
+            .label("price_rank"),
+            func.count().over(partition_by=partition).label("observation_count"),
+        ).subquery("bucket_ranked")
+        lower_rank = cast((ranked.c.observation_count + 1) / 2, Integer)
+        upper_rank = cast((ranked.c.observation_count + 2) / 2, Integer)
+        median_statement = (
+            select(
+                ranked.c.event_id,
+                ranked.c.section,
+                ranked.c.slot,
+                func.avg(ranked.c.price).label("price"),
+                func.max(ranked.c.observation_count).label("observation_count"),
+            )
+            .where(
+                or_(
+                    ranked.c.price_rank == lower_rank,
+                    ranked.c.price_rank == upper_rank,
+                )
+            )
+            .group_by(ranked.c.event_id, ranked.c.section, ranked.c.slot)
+        )
+        output.extend(session.execute(median_statement).all())
+    return output
 
 
 def _event_venue_for_sport(event: Any, sport_key: str) -> str:
@@ -615,6 +771,7 @@ def _typical_drawdown_window_labels(
     )
 
 
+
 def _section_insights_for(
     events: list[Any],
     rows: Iterable[Any],
@@ -626,11 +783,11 @@ def _section_insights_for(
     secondary_url_builder: Callable[[Any, str], str | None] | None,
     event_label_builder: Callable[[Any], str],
 ) -> tuple[list[dict[str, Any]], dict[int, set[datetime]]]:
+    """Compatibility path for focused raw-row calculations."""
+
     event_by_id = {event.id: event for event in events}
-    completed_ids = {event.id for event in events if _event_completed(event, now)}
     histories: dict[tuple[str, int], list[tuple[datetime, float]]] = defaultdict(list)
     captures_by_event: dict[int, set[datetime]] = defaultdict(set)
-
     for row in rows:
         values = row._mapping if hasattr(row, "_mapping") else row
         event_id = int(values["event_id"])
@@ -640,55 +797,143 @@ def _section_insights_for(
             price = float(values["price"])
         except (TypeError, ValueError):
             continue
-        if (
-            not section
-            or is_parking_section(section)
-            or price <= 0
-            or captured is None
-        ):
+        if not section or is_parking_section(section) or price <= 0 or captured is None:
             continue
         if captured.tzinfo is None:
             captured = captured.replace(tzinfo=timezone.utc)
         histories[(section, event_id)].append((captured, price))
         captures_by_event[event_id].add(captured)
 
+    prepared: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    for key, points in histories.items():
+        event = event_by_id.get(key[1])
+        if event is None:
+            continue
+        buckets = _bucketed_game_prices(event, points, sport_key)
+        if buckets:
+            prepared[key] = buckets
+
+    insights, _analyzed = _finalize_section_insights(
+        events,
+        prepared,
+        now,
+        currency=currency,
+        sport_key=sport_key,
+        detail_url_builder=detail_url_builder,
+        secondary_url_builder=secondary_url_builder,
+        event_label_builder=event_label_builder,
+    )
+    return insights, captures_by_event
+
+
+def _aggregated_section_insights_for(
+    session: Any,
+    events: list[Any],
+    now: datetime,
+    *,
+    iteration_model: Any,
+    ticket_model: Any,
+    currency: str,
+    sport_key: str,
+    detail_url_builder: Callable[[Any, str], str | None],
+    secondary_url_builder: Callable[[Any, str], str | None] | None,
+    event_label_builder: Callable[[Any], str],
+) -> tuple[list[dict[str, Any]], dict[int, int], int]:
+    bucket_rows = _bucket_summary_rows_for(
+        session,
+        events,
+        iteration_model,
+        ticket_model,
+        sport_key,
+    )
+    prepared: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
+    for row in bucket_rows:
+        values = row._mapping if hasattr(row, "_mapping") else row
+        section = _clean(values["section"])
+        if not section or is_parking_section(section):
+            continue
+        slot = int(values["slot"])
+        lower, upper, _short, _label = _TIMELINE_BUCKETS[sport_key][slot]
+        prepared[(section, int(values["event_id"]))].append(
+            {
+                "slot": slot,
+                "lead_time": (lower + upper) / 2,
+                "price": float(values["price"]),
+                "observation_count": int(values["observation_count"]),
+            }
+        )
+
+    insights, analyzed_area_count = _finalize_section_insights(
+        events,
+        prepared,
+        now,
+        currency=currency,
+        sport_key=sport_key,
+        detail_url_builder=detail_url_builder,
+        secondary_url_builder=secondary_url_builder,
+        event_label_builder=event_label_builder,
+    )
+    capture_counts = _capture_counts_for(
+        session,
+        [int(event.id) for event in events],
+        iteration_model,
+    )
+    return insights, capture_counts, analyzed_area_count
+
+
+def _finalize_section_insights(
+    events: list[Any],
+    prepared: dict[tuple[str, int], list[dict[str, Any]]],
+    now: datetime,
+    *,
+    currency: str,
+    sport_key: str,
+    detail_url_builder: Callable[[Any, str], str | None],
+    secondary_url_builder: Callable[[Any, str], str | None] | None,
+    event_label_builder: Callable[[Any], str],
+) -> tuple[list[dict[str, Any]], int]:
+    event_by_id = {event.id: event for event in events}
+    completed_ids = {event.id for event in events if _event_completed(event, now)}
     bucket_values_by_section: dict[str, dict[int, list[float]]] = defaultdict(
         lambda: defaultdict(list)
     )
     game_ids_by_section: dict[str, set[int]] = defaultdict(set)
+    canonical_game_ids: dict[str, set[int]] = defaultdict(set)
     per_game_drops: dict[str, list[dict[str, Any]]] = defaultdict(list)
     per_game_first_to_last: dict[str, list[dict[str, Any]]] = defaultdict(list)
     observation_count: dict[str, int] = defaultdict(int)
     latest_event_by_section: dict[str, Any] = {}
 
-    for (section, event_id), points in histories.items():
+    for (section, event_id), bucket_points in prepared.items():
         event = event_by_id.get(event_id)
-        if event is None:
+        if event is None or not bucket_points:
             continue
-
-        ordered = sorted(points, key=lambda item: item[0])
-        bucket_points = _bucketed_game_prices(event, ordered, sport_key)
-        if not bucket_points:
-            continue
-
+        ordered = sorted(bucket_points, key=lambda point: int(point["slot"]))
         game_ids_by_section[section].add(event_id)
-        observation_count[section] += len(ordered)
-        for point in bucket_points:
-            bucket_values_by_section[section][point["slot"]].append(point["price"])
+        observation_count[section] += sum(
+            int(point.get("observation_count") or 1) for point in ordered
+        )
+        identity = section_identity(
+            sport_key,
+            _event_venue_for_sport(event, sport_key),
+            section,
+        )
+        if identity is not None:
+            canonical_game_ids[identity.key].add(event_id)
+        for point in ordered:
+            bucket_values_by_section[section][int(point["slot"])].append(
+                float(point["price"])
+            )
 
         latest_event = latest_event_by_section.get(section)
         if latest_event is None or event.event_date > latest_event.event_date:
             latest_event_by_section[section] = event
 
         if event_id in completed_ids:
-            drawdown = _maximum_bucket_drawdown(
-                bucket_points,
-                sport_key=sport_key,
-            )
+            drawdown = _maximum_bucket_drawdown(ordered, sport_key=sport_key)
             if drawdown is not None:
                 per_game_drops[section].append(drawdown)
-
-            first_to_last = _first_to_last_bucket_change(bucket_points)
+            first_to_last = _first_to_last_bucket_change(ordered)
             if first_to_last is not None:
                 per_game_first_to_last[section].append(first_to_last)
 
@@ -708,14 +953,10 @@ def _section_insights_for(
 
         drop_rows = per_game_drops.get(section, [])
         typical_percent_drop = (
-            float(median(row["percent"] for row in drop_rows))
-            if drop_rows
-            else None
+            float(median(row["percent"] for row in drop_rows)) if drop_rows else None
         )
         typical_dollar_drop = (
-            float(median(row["dollar"] for row in drop_rows))
-            if drop_rows
-            else None
+            float(median(row["dollar"] for row in drop_rows)) if drop_rows else None
         )
         material_drop_count = sum(
             row["percent"] >= MATERIAL_DROP_PERCENT for row in drop_rows
@@ -724,8 +965,7 @@ def _section_insights_for(
             round(material_drop_count / len(drop_rows) * 100) if drop_rows else 0
         )
         drop_peak_label, drop_low_label = _typical_drawdown_window_labels(
-            drop_rows,
-            sport_key,
+            drop_rows, sport_key
         )
 
         first_to_last_rows = per_game_first_to_last.get(section, [])
@@ -740,26 +980,17 @@ def _section_insights_for(
             else None
         )
         first_to_last_direction = "flat"
-        if (
-            average_first_to_last_percent is not None
-            and average_first_to_last_percent > 0.05
-        ):
+        if average_first_to_last_percent is not None and average_first_to_last_percent > 0.05:
             first_to_last_direction = "down"
-        elif (
-            average_first_to_last_percent is not None
-            and average_first_to_last_percent < -0.05
-        ):
+        elif average_first_to_last_percent is not None and average_first_to_last_percent < -0.05:
             first_to_last_direction = "up"
 
         direction = "down" if typical_percent_drop and typical_percent_drop > 0.05 else "flat"
         direction_label = (
             "Typical maximum decline" if direction == "down" else "No typical decline"
         )
-
         latest_event = latest_event_by_section.get(section)
-        detail_url = (
-            detail_url_builder(latest_event, section) if latest_event is not None else None
-        )
+        detail_url = detail_url_builder(latest_event, section) if latest_event is not None else None
         secondary_url = (
             secondary_url_builder(latest_event, section)
             if latest_event is not None and secondary_url_builder is not None
@@ -770,8 +1001,6 @@ def _section_insights_for(
         insights.append(
             {
                 "name": section,
-                # Compatibility names remain, but the value is now the mean of
-                # the same fixed relative-time points displayed on the chart.
                 "average_price": round(balanced_price, 2),
                 "average_price_label": _currency_money(balanced_price, currency),
                 "typical_price": round(balanced_price, 2),
@@ -783,28 +1012,19 @@ def _section_insights_for(
                 "observation_count": observation_count[section],
                 "drop_game_count": len(drop_rows),
                 "typical_max_drop_percent": (
-                    round(typical_percent_drop, 2)
-                    if typical_percent_drop is not None
-                    else None
+                    round(typical_percent_drop, 2) if typical_percent_drop is not None else None
                 ),
                 "typical_max_drop_percent_label": percent_label,
                 "typical_max_drop_dollar": (
-                    round(typical_dollar_drop, 2)
-                    if typical_dollar_drop is not None
-                    else None
+                    round(typical_dollar_drop, 2) if typical_dollar_drop is not None else None
                 ),
                 "typical_max_drop_dollar_label": dollar_label,
-                # Legacy field names map to the new robust drawdown definition.
                 "average_percent_drop": (
-                    round(typical_percent_drop, 2)
-                    if typical_percent_drop is not None
-                    else None
+                    round(typical_percent_drop, 2) if typical_percent_drop is not None else None
                 ),
                 "average_percent_drop_label": percent_label,
                 "average_dollar_drop": (
-                    round(typical_dollar_drop, 2)
-                    if typical_dollar_drop is not None
-                    else None
+                    round(typical_dollar_drop, 2) if typical_dollar_drop is not None else None
                 ),
                 "average_dollar_drop_label": dollar_label,
                 "material_drop_threshold": MATERIAL_DROP_PERCENT,
@@ -828,15 +1048,12 @@ def _section_insights_for(
                     else None
                 ),
                 "average_first_to_last_dollar_label": _currency_price_change(
-                    average_first_to_last_dollar,
-                    currency,
+                    average_first_to_last_dollar, currency
                 ),
                 "first_to_last_direction": first_to_last_direction,
                 "direction": direction,
                 "direction_label": direction_label,
-                "is_low_price_sample": (
-                    game_count < LOW_SAMPLE_GAMES or len(timeline_points) < 2
-                ),
+                "is_low_price_sample": game_count < LOW_SAMPLE_GAMES or len(timeline_points) < 2,
                 "is_low_drop_sample": 0 < len(drop_rows) < LOW_SAMPLE_GAMES,
                 "detail_url": detail_url,
                 "secondary_url": secondary_url,
@@ -848,7 +1065,11 @@ def _section_insights_for(
         )
 
     insights.sort(key=lambda row: (row["average_price"], row["name"].casefold()))
-    return insights, captures_by_event
+    analyzed_area_count = sum(
+        len(game_ids) >= LOW_SAMPLE_GAMES for game_ids in canonical_game_ids.values()
+    )
+    return insights, analyzed_area_count
+
 
 
 def _rank_sections(
@@ -879,13 +1100,13 @@ def _team_label(events: Iterable[Any], team_getter: Callable[[Any], str | None])
     return " / ".join(teams[:2])
 
 
+
 def _generic_venue_index(
     events: Iterable[Any],
     now: datetime,
     *,
     venue_getter: Callable[[Any], str],
     team_getter: Callable[[Any], str | None],
-    section_getter: Callable[[Any], Iterable[str]],
     endpoint: str,
 ) -> list[dict[str, Any]]:
     grouped: dict[str, list[Any]] = defaultdict(list)
@@ -896,12 +1117,6 @@ def _generic_venue_index(
 
     result = []
     for venue, venue_events in grouped.items():
-        sections = {
-            _clean(section)
-            for event in venue_events
-            for section in section_getter(event)
-            if _clean(section) and not is_parking_section(section)
-        }
         team_label = _team_label(venue_events, team_getter)
         completed_count = sum(_event_completed(event, now) for event in venue_events)
         result.append(
@@ -910,7 +1125,6 @@ def _generic_venue_index(
                 "game_count": len(venue_events),
                 "completed_count": completed_count,
                 "upcoming_count": len(venue_events) - completed_count,
-                "section_count": len(sections),
                 "team_label": team_label,
                 "url": url_for(endpoint, venue=venue),
             }
@@ -922,6 +1136,7 @@ def _generic_venue_index(
             row["venue"].casefold(),
         ),
     )
+
 
 
 def _page_config(
@@ -978,19 +1193,37 @@ def _nfl_page_config() -> dict[str, Any]:
     )
 
 
+
 def build_nfl_stadium_context(selected_venue: str = "") -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     model = CreateNFLModel()
     config = _nfl_page_config()
     try:
         with model.getSession()() as session:
-            events = session.query(NFLEvent).order_by(NFLEvent.event_date).all()
-            events = [
+            directory_events = (
+                session.query(NFLEvent)
+                .options(
+                    load_only(
+                        NFLEvent.id,
+                        NFLEvent.title,
+                        NFLEvent.event_date,
+                        NFLEvent.source_url,
+                        NFLEvent.venue,
+                        NFLEvent.home_team,
+                        NFLEvent.canonical_venue,
+                        NFLEvent.provider_venue,
+                        NFLEvent.country,
+                    )
+                )
+                .order_by(NFLEvent.event_date)
+                .all()
+            )
+            directory_events = [
                 event
-                for event in events
+                for event in directory_events
                 if _is_us_event(event) and _clean(nfl_display_venue(event))
             ]
-            stadiums = _stadium_index(events, now)
+            stadiums = _stadium_index(directory_events, now)
 
             selected = _clean(selected_venue)
             if not selected:
@@ -1002,10 +1235,12 @@ def build_nfl_stadium_context(selected_venue: str = "") -> dict[str, Any]:
                     "error": None,
                 }
 
-            selected_events = [
-                event for event in events if _clean(nfl_display_venue(event)) == selected
+            selected_ids = [
+                event.id
+                for event in directory_events
+                if _clean(nfl_display_venue(event)) == selected
             ]
-            if not selected_events:
+            if not selected_ids:
                 return {
                     **config,
                     "stadiums": stadiums,
@@ -1014,9 +1249,31 @@ def build_nfl_stadium_context(selected_venue: str = "") -> dict[str, Any]:
                     "error": f"{selected} is not in the tracked NFL stadium history.",
                 }
 
-            rows = _snapshot_rows(session, [event.id for event in selected_events])
-            sections, captures_by_event = _section_insights(selected_events, rows, now)
-            analyzed_area_count = _supported_area_count(selected_events, rows, "nfl")
+            selected_events = (
+                session.query(NFLEvent)
+                .options(defer(NFLEvent.map_geometry))
+                .filter(NFLEvent.id.in_(selected_ids))
+                .order_by(NFLEvent.event_date)
+                .all()
+            )
+            sections, capture_counts, analyzed_area_count = (
+                _aggregated_section_insights_for(
+                    session,
+                    selected_events,
+                    now,
+                    iteration_model=NFLIteration,
+                    ticket_model=NFLTicket,
+                    currency="USD",
+                    sport_key="nfl",
+                    detail_url_builder=lambda event, section: url_for(
+                        "nfl_stadium.nfl_section",
+                        venue=_clean(nfl_display_venue(event)),
+                        section=section,
+                    ),
+                    secondary_url_builder=None,
+                    event_label_builder=format_nfl_title,
+                )
+            )
     finally:
         model.engine.dispose()
 
@@ -1028,28 +1285,25 @@ def build_nfl_stadium_context(selected_venue: str = "") -> dict[str, Any]:
         is_completed = _event_completed(event, now)
         team = _clean(nfl_event_home_team(event)) or selected
         map_url = url_for("nfl.nfl_map", team=team, game=str(event.id))
-        public_sections = _public_sections(
-            getattr(event, "sections", None) or []
-        )
+        public_sections = _public_sections(event.sections or [])
         game = {
             "id": event.id,
             "label": format_nfl_title(event),
             "status": "Completed" if is_completed else "Upcoming",
             "status_key": "completed" if is_completed else "upcoming",
-            "snapshot_count": len(captures_by_event.get(event.id, set())),
+            "snapshot_count": capture_counts.get(event.id, 0),
             "section_count": len(public_sections),
             "sections": public_sections,
             "map_url": map_url,
             "direct_url": map_url,
             "base_url": "",
-            "source_url": getattr(event, "source_url", ""),
+            "source_url": event.source_url or "",
         }
         (completed if is_completed else upcoming).append((event_date, game))
 
     upcoming.sort(key=lambda item: item[0])
     completed.sort(key=lambda item: item[0], reverse=True)
     games = [game for _, game in upcoming + completed]
-
     return {
         **config,
         "stadiums": stadiums,
@@ -1079,6 +1333,7 @@ def build_nfl_stadium_context(selected_venue: str = "") -> dict[str, Any]:
             "those per-game maximum drawdowns."
         ),
     }
+
 
 
 def _mapped_mlb_team_for_venue(venue: Any) -> str | None:
@@ -1165,23 +1420,35 @@ def _is_public_mlb_event(event: Event) -> bool:
     )
 
 
+
 def build_mlb_stadium_context(selected_venue: str = "") -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     model = CreateModel()
     config = _mlb_page_config()
     try:
         with model.getSession()() as session:
-            events = [
-                event
-                for event in session.query(Event).order_by(Event.event_date).all()
-                if _is_public_mlb_event(event)
+            directory_events = (
+                session.query(Event)
+                .options(
+                    load_only(
+                        Event.id,
+                        Event.title,
+                        Event.event_date,
+                        Event.URL,
+                        Event.Place,
+                    )
+                )
+                .order_by(Event.event_date)
+                .all()
+            )
+            directory_events = [
+                event for event in directory_events if _is_public_mlb_event(event)
             ]
             stadiums = _generic_venue_index(
-                events,
+                directory_events,
                 now,
                 venue_getter=lambda event: _clean(event.Place),
                 team_getter=mlb_event_home_team,
-                section_getter=lambda event: event.event_sections or [],
                 endpoint="nfl_stadium.mlb_stadium",
             )
 
@@ -1195,8 +1462,10 @@ def build_mlb_stadium_context(selected_venue: str = "") -> dict[str, Any]:
                     "error": None,
                 }
 
-            selected_events = [event for event in events if _clean(event.Place) == selected]
-            if not selected_events:
+            selected_ids = [
+                event.id for event in directory_events if _clean(event.Place) == selected
+            ]
+            if not selected_ids:
                 return {
                     **config,
                     "stadiums": stadiums,
@@ -1205,31 +1474,34 @@ def build_mlb_stadium_context(selected_venue: str = "") -> dict[str, Any]:
                     "error": f"{selected} is not in the tracked MLB stadium history.",
                 }
 
-            rows = _snapshot_rows_for(
-                session,
-                [event.id for event in selected_events],
-                Iteration,
-                Ticket,
+            selected_events = (
+                session.query(Event)
+                .filter(Event.id.in_(selected_ids))
+                .order_by(Event.event_date)
+                .all()
             )
-            sections, captures_by_event = _section_insights_for(
-                selected_events,
-                rows,
-                now,
-                currency="USD",
-                sport_key="mlb",
-                detail_url_builder=lambda _event, section: url_for(
-                    "nfl_stadium.mlb_section",
-                    venue=selected,
-                    section=section,
-                ),
-                secondary_url_builder=lambda _event, section: url_for(
-                    "predict",
-                    event=selected,
-                    section=section,
-                ),
-                event_label_builder=format_mlb_title,
+            sections, capture_counts, analyzed_area_count = (
+                _aggregated_section_insights_for(
+                    session,
+                    selected_events,
+                    now,
+                    iteration_model=Iteration,
+                    ticket_model=Ticket,
+                    currency="USD",
+                    sport_key="mlb",
+                    detail_url_builder=lambda _event, section: url_for(
+                        "nfl_stadium.mlb_section",
+                        venue=selected,
+                        section=section,
+                    ),
+                    secondary_url_builder=lambda _event, section: url_for(
+                        "predict",
+                        event=selected,
+                        section=section,
+                    ),
+                    event_label_builder=format_mlb_title,
+                )
             )
-            analyzed_area_count = _supported_area_count(selected_events, rows, "mlb")
     finally:
         model.engine.dispose()
 
@@ -1245,7 +1517,7 @@ def build_mlb_stadium_context(selected_venue: str = "") -> dict[str, Any]:
             "label": format_mlb_title(event),
             "status": "Completed" if is_completed else "Upcoming",
             "status_key": "completed" if is_completed else "upcoming",
-            "snapshot_count": len(captures_by_event.get(event.id, set())),
+            "snapshot_count": capture_counts.get(event.id, 0),
             "section_count": len(public_sections),
             "sections": public_sections,
             "direct_url": "",
@@ -1263,7 +1535,6 @@ def build_mlb_stadium_context(selected_venue: str = "") -> dict[str, Any]:
     upcoming.sort(key=lambda item: item[0])
     completed.sort(key=lambda item: item[0], reverse=True)
     games = [game for _, game in upcoming + completed]
-
     return {
         **config,
         "stadiums": stadiums,
@@ -1295,6 +1566,7 @@ def build_mlb_stadium_context(selected_venue: str = "") -> dict[str, Any]:
     }
 
 
+
 def _nhl_page_config(currency: str = "USD") -> dict[str, Any]:
     return _page_config(
         sport_key="nhl",
@@ -1313,22 +1585,41 @@ def _nhl_page_config(currency: str = "USD") -> dict[str, Any]:
     )
 
 
+
 def build_nhl_arena_context(selected_venue: str = "") -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     model = CreateNHLModel()
     try:
         with model.getSession()() as session:
-            events = [
+            directory_events = (
+                session.query(NHLEvent)
+                .options(
+                    load_only(
+                        NHLEvent.id,
+                        NHLEvent.title,
+                        NHLEvent.event_date,
+                        NHLEvent.source_url,
+                        NHLEvent.venue,
+                        NHLEvent.home_team,
+                        NHLEvent.canonical_venue,
+                        NHLEvent.provider_venue,
+                        NHLEvent.country,
+                        NHLEvent.currency,
+                    )
+                )
+                .order_by(NHLEvent.event_date)
+                .all()
+            )
+            directory_events = [
                 event
-                for event in session.query(NHLEvent).order_by(NHLEvent.event_date).all()
+                for event in directory_events
                 if _is_supported_nhl_event(event) and _clean(nhl_display_venue(event))
             ]
             stadiums = _generic_venue_index(
-                events,
+                directory_events,
                 now,
                 venue_getter=nhl_display_venue,
                 team_getter=nhl_event_home_team,
-                section_getter=lambda event: event.sections or [],
                 endpoint="nfl_stadium.nhl_arena",
             )
 
@@ -1342,10 +1633,12 @@ def build_nhl_arena_context(selected_venue: str = "") -> dict[str, Any]:
                     "error": None,
                 }
 
-            selected_events = [
-                event for event in events if _clean(nhl_display_venue(event)) == selected
+            selected_ids = [
+                event.id
+                for event in directory_events
+                if _clean(nhl_display_venue(event)) == selected
             ]
-            if not selected_events:
+            if not selected_ids:
                 return {
                     **_nhl_page_config(),
                     "stadiums": stadiums,
@@ -1354,6 +1647,13 @@ def build_nhl_arena_context(selected_venue: str = "") -> dict[str, Any]:
                     "error": f"{selected} is not in the tracked NHL arena history.",
                 }
 
+            selected_events = (
+                session.query(NHLEvent)
+                .options(defer(NHLEvent.map_geometry))
+                .filter(NHLEvent.id.in_(selected_ids))
+                .order_by(NHLEvent.event_date)
+                .all()
+            )
             currency_counts = Counter(
                 (_clean(event.currency).upper() or "USD") for event in selected_events
             )
@@ -1371,27 +1671,24 @@ def build_nhl_arena_context(selected_venue: str = "") -> dict[str, Any]:
                     f"from section averages because its stored currency differs from {analysis_currency}."
                 )
 
-            rows = _snapshot_rows_for(
-                session,
-                [event.id for event in analysis_events],
-                NHLIteration,
-                NHLTicket,
+            sections, capture_counts, analyzed_area_count = (
+                _aggregated_section_insights_for(
+                    session,
+                    analysis_events,
+                    now,
+                    iteration_model=NHLIteration,
+                    ticket_model=NHLTicket,
+                    currency=analysis_currency,
+                    sport_key="nhl",
+                    detail_url_builder=lambda _event, section: url_for(
+                        "nfl_stadium.nhl_section",
+                        venue=selected,
+                        section=section,
+                    ),
+                    secondary_url_builder=None,
+                    event_label_builder=format_nhl_title,
+                )
             )
-            sections, captures_by_event = _section_insights_for(
-                analysis_events,
-                rows,
-                now,
-                currency=analysis_currency,
-                sport_key="nhl",
-                detail_url_builder=lambda _event, section: url_for(
-                    "nfl_stadium.nhl_section",
-                    venue=selected,
-                    section=section,
-                ),
-                secondary_url_builder=None,
-                event_label_builder=format_nhl_title,
-            )
-            analyzed_area_count = _supported_area_count(analysis_events, rows, "nhl")
     finally:
         model.engine.dispose()
 
@@ -1409,7 +1706,7 @@ def build_nhl_arena_context(selected_venue: str = "") -> dict[str, Any]:
             "label": format_nhl_title(event),
             "status": "Completed" if is_completed else "Upcoming",
             "status_key": "completed" if is_completed else "upcoming",
-            "snapshot_count": len(captures_by_event.get(event.id, set())),
+            "snapshot_count": capture_counts.get(event.id, 0),
             "section_count": len(public_sections),
             "sections": public_sections,
             "direct_url": map_url,
@@ -1422,7 +1719,6 @@ def build_nhl_arena_context(selected_venue: str = "") -> dict[str, Any]:
     upcoming.sort(key=lambda item: item[0])
     completed.sort(key=lambda item: item[0], reverse=True)
     games = [game for _, game in upcoming + completed]
-
     return {
         **config,
         "stadiums": stadiums,
@@ -1452,6 +1748,7 @@ def build_nhl_arena_context(selected_venue: str = "") -> dict[str, Any]:
             "those per-game maximum drawdowns."
         ),
     }
+
 
 
 def _resolve_section(
@@ -1969,15 +2266,45 @@ def _build_section_detail_context(
     }
 
 
+def _event_contains_section(
+    event: Any,
+    requested_section: str,
+    section_getter: Callable[[Any], Iterable[str]],
+) -> bool:
+    requested = _normalize(requested_section)
+    return bool(requested) and any(
+        _normalize(section) == requested for section in section_getter(event)
+    )
+
+
+def _minimal_section_base_context(
+    config: dict[str, Any],
+    selected_venue: str,
+    selected_team_label: str,
+    sections: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        **config,
+        "selected_venue": selected_venue,
+        "selected_team_label": selected_team_label,
+        "error": None,
+        "all_sections": sections,
+        "stadiums": [],
+        "stadium_count": 0,
+    }
+
+
+
 def build_nfl_section_context(
     selected_venue: str,
     requested_section: str,
 ) -> dict[str, Any]:
-    base_context = build_nfl_stadium_context(selected_venue)
-    if base_context.get("error") or not base_context.get("selected_venue"):
+    selected = _clean(selected_venue)
+    config = _nfl_page_config()
+    if not selected or not _clean(requested_section):
         return _section_error_context(
-            base_context,
-            base_context.get("error") or "Choose an NFL team and section.",
+            {**config, "selected_venue": selected, "error": None},
+            "Choose an NFL team and section.",
             requested_section,
         )
 
@@ -1985,13 +2312,73 @@ def build_nfl_section_context(
     model = CreateNFLModel()
     try:
         with model.getSession()() as session:
+            events = (
+                session.query(NFLEvent)
+                .options(defer(NFLEvent.map_geometry))
+                .filter(
+                    or_(
+                        NFLEvent.canonical_venue == selected,
+                        NFLEvent.provider_venue == selected,
+                        NFLEvent.venue == selected,
+                    )
+                )
+                .order_by(NFLEvent.event_date)
+                .all()
+            )
             events = [
                 event
-                for event in session.query(NFLEvent).order_by(NFLEvent.event_date).all()
-                if _is_us_event(event)
-                and _clean(nfl_display_venue(event)) == base_context["selected_venue"]
+                for event in events
+                if _is_us_event(event) and _clean(nfl_display_venue(event)) == selected
             ]
-            rows = _snapshot_rows(session, [event.id for event in events])
+            if not events:
+                return _section_error_context(
+                    {**config, "selected_venue": "", "error": None},
+                    f"{selected} is not in the tracked NFL stadium history.",
+                    requested_section,
+                )
+
+            rows = _snapshot_rows_for(
+                session,
+                [event.id for event in events],
+                NFLIteration,
+                NFLTicket,
+                sections=[requested_section],
+            )
+            sections, _captures = _section_insights_for(
+                events,
+                rows,
+                now,
+                currency="USD",
+                sport_key="nfl",
+                detail_url_builder=lambda event, section: url_for(
+                    "nfl_stadium.nfl_section",
+                    venue=_clean(nfl_display_venue(event)),
+                    section=section,
+                ),
+                secondary_url_builder=None,
+                event_label_builder=format_nfl_title,
+            )
+            base_context = _minimal_section_base_context(
+                config,
+                selected,
+                _team_label(events, nfl_event_home_team) or "NFL home team",
+                sections,
+            )
+
+            geometry_by_id: dict[int, Any] = {}
+            geometry_candidates = [
+                event
+                for event in events
+                if _event_contains_section(event, requested_section, lambda item: item.sections or [])
+            ]
+            if geometry_candidates:
+                representative = max(
+                    geometry_candidates,
+                    key=lambda event: event_datetime_eastern(event.event_date),
+                )
+                geometry_by_id[representative.id] = session.execute(
+                    select(NFLEvent.map_geometry).where(NFLEvent.id == representative.id)
+                ).scalar_one_or_none()
     finally:
         model.engine.dispose()
 
@@ -2005,18 +2392,18 @@ def build_nfl_section_context(
         currency="USD",
         report_endpoint="nfl_stadium.nfl_stadium",
         section_getter=lambda event: event.sections or [],
-        geometry_getter=lambda event: event.map_geometry,
+        geometry_getter=lambda event: geometry_by_id.get(event.id),
         event_label_builder=format_nfl_title,
         game_url_builder=lambda event, section: url_for(
             "nfl.nfl_graph",
-            team=_clean(nfl_event_home_team(event)) or base_context["selected_venue"],
+            team=_clean(nfl_event_home_team(event)) or selected,
             game=str(event.id),
             section=section,
             display="money",
         ),
         map_url_builder=lambda event, section: url_for(
             "nfl.nfl_map",
-            team=_clean(nfl_event_home_team(event)) or base_context["selected_venue"],
+            team=_clean(nfl_event_home_team(event)) or selected,
             game=str(event.id),
             section=section,
         ),
@@ -2024,15 +2411,18 @@ def build_nfl_section_context(
     )
 
 
+
+
 def build_mlb_section_context(
     selected_venue: str,
     requested_section: str,
 ) -> dict[str, Any]:
-    base_context = build_mlb_stadium_context(selected_venue)
-    if base_context.get("error") or not base_context.get("selected_venue"):
+    selected = _clean(selected_venue)
+    config = _mlb_page_config()
+    if not selected or not _clean(requested_section):
         return _section_error_context(
-            base_context,
-            base_context.get("error") or "Choose an MLB team and section.",
+            {**config, "selected_venue": selected, "error": None},
+            "Choose an MLB team and section.",
             requested_section,
         )
 
@@ -2040,17 +2430,48 @@ def build_mlb_section_context(
     model = CreateModel()
     try:
         with model.getSession()() as session:
-            events = [
-                event
-                for event in session.query(Event).order_by(Event.event_date).all()
-                if _is_public_mlb_event(event)
-                and _clean(event.Place) == base_context["selected_venue"]
-            ]
+            events = (
+                session.query(Event)
+                .filter(Event.Place == selected)
+                .order_by(Event.event_date)
+                .all()
+            )
+            events = [event for event in events if _is_public_mlb_event(event)]
+            if not events:
+                return _section_error_context(
+                    {**config, "selected_venue": "", "error": None},
+                    f"{selected} is not in the tracked MLB stadium history.",
+                    requested_section,
+                )
+
             rows = _snapshot_rows_for(
                 session,
                 [event.id for event in events],
                 Iteration,
                 Ticket,
+                sections=[requested_section],
+            )
+            sections, _captures = _section_insights_for(
+                events,
+                rows,
+                now,
+                currency="USD",
+                sport_key="mlb",
+                detail_url_builder=lambda _event, section: url_for(
+                    "nfl_stadium.mlb_section",
+                    venue=selected,
+                    section=section,
+                ),
+                secondary_url_builder=lambda _event, section: url_for(
+                    "predict", event=selected, section=section
+                ),
+                event_label_builder=format_mlb_title,
+            )
+            base_context = _minimal_section_base_context(
+                config,
+                selected,
+                _team_label(events, mlb_event_home_team) or mlb_team_for_venue(selected),
+                sections,
             )
     finally:
         model.engine.dispose()
@@ -2069,7 +2490,7 @@ def build_mlb_section_context(
         event_label_builder=format_mlb_title,
         game_url_builder=lambda event, section: url_for(
             "graph",
-            event=base_context["selected_venue"],
+            event=selected,
             game=str(event.id),
             section=section,
             mode="single",
@@ -2078,43 +2499,116 @@ def build_mlb_section_context(
         map_url_builder=None,
         source_url_getter=lambda event: event.URL or "",
         buying_window_url_builder=lambda section: url_for(
-            "predict",
-            event=base_context["selected_venue"],
-            section=section,
+            "predict", event=selected, section=section
         ),
     )
+
+
 
 
 def build_nhl_section_context(
     selected_venue: str,
     requested_section: str,
 ) -> dict[str, Any]:
-    base_context = build_nhl_arena_context(selected_venue)
-    if base_context.get("error") or not base_context.get("selected_venue"):
+    selected = _clean(selected_venue)
+    if not selected or not _clean(requested_section):
+        config = _nhl_page_config()
         return _section_error_context(
-            base_context,
-            base_context.get("error") or "Choose an NHL team and section.",
+            {**config, "selected_venue": selected, "error": None},
+            "Choose an NHL team and section.",
             requested_section,
         )
 
-    currency = base_context.get("currency_label") or "USD"
     now = datetime.now(timezone.utc)
     model = CreateNHLModel()
     try:
         with model.getSession()() as session:
+            all_events = (
+                session.query(NHLEvent)
+                .options(defer(NHLEvent.map_geometry))
+                .filter(
+                    or_(
+                        NHLEvent.canonical_venue == selected,
+                        NHLEvent.provider_venue == selected,
+                        NHLEvent.venue == selected,
+                    )
+                )
+                .order_by(NHLEvent.event_date)
+                .all()
+            )
+            all_events = [
+                event
+                for event in all_events
+                if _is_supported_nhl_event(event)
+                and _clean(nhl_display_venue(event)) == selected
+            ]
+            if not all_events:
+                config = _nhl_page_config()
+                return _section_error_context(
+                    {**config, "selected_venue": "", "error": None},
+                    f"{selected} is not in the tracked NHL arena history.",
+                    requested_section,
+                )
+
+            currency_counts = Counter(
+                (_clean(event.currency).upper() or "USD") for event in all_events
+            )
+            currency = currency_counts.most_common(1)[0][0]
             events = [
                 event
-                for event in session.query(NHLEvent).order_by(NHLEvent.event_date).all()
-                if _is_supported_nhl_event(event)
-                and _clean(nhl_display_venue(event)) == base_context["selected_venue"]
-                and (_clean(event.currency).upper() or "USD") == currency
+                for event in all_events
+                if (_clean(event.currency).upper() or "USD") == currency
             ]
+            config = _nhl_page_config(currency)
+            omitted = len(all_events) - len(events)
+            if omitted:
+                config["currency_warning"] = (
+                    f"{omitted} game{'s were' if omitted != 1 else ' was'} omitted "
+                    f"from section averages because its stored currency differs from {currency}."
+                )
+
             rows = _snapshot_rows_for(
                 session,
                 [event.id for event in events],
                 NHLIteration,
                 NHLTicket,
+                sections=[requested_section],
             )
+            sections, _captures = _section_insights_for(
+                events,
+                rows,
+                now,
+                currency=currency,
+                sport_key="nhl",
+                detail_url_builder=lambda _event, section: url_for(
+                    "nfl_stadium.nhl_section",
+                    venue=selected,
+                    section=section,
+                ),
+                secondary_url_builder=None,
+                event_label_builder=format_nhl_title,
+            )
+            base_context = _minimal_section_base_context(
+                config,
+                selected,
+                _team_label(all_events, nhl_event_home_team) or "NHL home team",
+                sections,
+            )
+
+            geometry_by_id: dict[int, Any] = {}
+            geometry_candidates = [
+                event
+                for event in events
+                if _event_contains_section(event, requested_section, lambda item: item.sections or [])
+            ]
+            if geometry_candidates:
+                representative = max(
+                    geometry_candidates,
+                    key=lambda event: event_datetime_eastern(event.event_date),
+                )
+                geometry_by_id[representative.id] = session.execute(
+                    select(NHLEvent.map_geometry).where(NHLEvent.id == representative.id)
+                ).scalar_one_or_none()
     finally:
         model.engine.dispose()
 
@@ -2128,22 +2622,66 @@ def build_nhl_section_context(
         currency=currency,
         report_endpoint="nfl_stadium.nhl_arena",
         section_getter=lambda event: event.sections or [],
-        geometry_getter=lambda event: event.map_geometry,
+        geometry_getter=lambda event: geometry_by_id.get(event.id),
         event_label_builder=format_nhl_title,
         game_url_builder=lambda event, section: url_for(
             "nhl.nhl_graph",
-            team=_clean(nhl_event_home_team(event)) or base_context["selected_venue"],
+            team=_clean(nhl_event_home_team(event)) or selected,
             game=str(event.id),
             section=section,
             display="money",
         ),
         map_url_builder=lambda event, section: url_for(
             "nhl.nhl_map",
-            team=_clean(nhl_event_home_team(event)) or base_context["selected_venue"],
+            team=_clean(nhl_event_home_team(event)) or selected,
             game=str(event.id),
             section=section,
         ),
         source_url_getter=lambda event: event.source_url or "",
+    )
+
+
+
+def _sport_database_version(sport_key: str) -> str:
+    paths = {
+        "mlb": database_path,
+        "nfl": nfl_database_path,
+        "nhl": nhl_database_path,
+    }
+    return file_version(paths[sport_key]())
+
+
+def _cached_venue_context(sport_key: str, selected_venue: str) -> dict[str, Any]:
+    builders: dict[str, Callable[[str], dict[str, Any]]] = {
+        "mlb": build_mlb_stadium_context,
+        "nfl": build_nfl_stadium_context,
+        "nhl": build_nhl_arena_context,
+    }
+    version = _sport_database_version(sport_key)
+    return page_cache.get_or_create(
+        cache_key("venue", sport_key, version, selected_venue),
+        lambda: builders[sport_key](selected_venue),
+        ttl_seconds=PAGE_CACHE_TTL_SECONDS,
+        tags=(sport_key,),
+    )
+
+
+def _cached_section_context(
+    sport_key: str,
+    selected_venue: str,
+    requested_section: str,
+) -> dict[str, Any]:
+    builders: dict[str, Callable[[str, str], dict[str, Any]]] = {
+        "mlb": build_mlb_section_context,
+        "nfl": build_nfl_section_context,
+        "nhl": build_nhl_section_context,
+    }
+    version = _sport_database_version(sport_key)
+    return page_cache.get_or_create(
+        cache_key("section", sport_key, version, selected_venue, requested_section),
+        lambda: builders[sport_key](selected_venue, requested_section),
+        ttl_seconds=PAGE_CACHE_TTL_SECONDS,
+        tags=(sport_key,),
     )
 
 
@@ -2157,25 +2695,26 @@ def inject_team_display_helpers() -> dict[str, Any]:
 
 @nfl_stadium_blueprint.get("/nfl/stadium")
 def nfl_stadium():
-    context = build_nfl_stadium_context(request.args.get("venue", ""))
+    context = _cached_venue_context("nfl", request.args.get("venue", ""))
     return render_template("nfl_stadium.html", **context)
 
 
 @nfl_stadium_blueprint.get("/baseball/stadium")
 def mlb_stadium():
-    context = build_mlb_stadium_context(request.args.get("venue", ""))
+    context = _cached_venue_context("mlb", request.args.get("venue", ""))
     return render_template("nfl_stadium.html", **context)
 
 
 @nfl_stadium_blueprint.get("/nhl/arena")
 def nhl_arena():
-    context = build_nhl_arena_context(request.args.get("venue", ""))
+    context = _cached_venue_context("nhl", request.args.get("venue", ""))
     return render_template("nfl_stadium.html", **context)
 
 
 @nfl_stadium_blueprint.get("/nfl/stadium/section")
 def nfl_section():
-    context = build_nfl_section_context(
+    context = _cached_section_context(
+        "nfl",
         request.args.get("venue") or request.args.get("team") or "",
         request.args.get("section", ""),
     )
@@ -2184,7 +2723,8 @@ def nfl_section():
 
 @nfl_stadium_blueprint.get("/baseball/stadium/section")
 def mlb_section():
-    context = build_mlb_section_context(
+    context = _cached_section_context(
+        "mlb",
         request.args.get("venue") or request.args.get("team") or "",
         request.args.get("section", ""),
     )
@@ -2193,7 +2733,8 @@ def mlb_section():
 
 @nfl_stadium_blueprint.get("/nhl/arena/section")
 def nhl_section():
-    context = build_nhl_section_context(
+    context = _cached_section_context(
+        "nhl",
         request.args.get("venue") or request.args.get("team") or "",
         request.args.get("section", ""),
     )

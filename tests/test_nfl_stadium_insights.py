@@ -424,7 +424,7 @@ class NFLStadiumInsightTests(unittest.TestCase):
 
     @patch("Flask_App.nfl_stadium_blueprint.render_template")
     @patch(
-        "Flask_App.nfl_stadium_blueprint.build_nfl_stadium_context"
+        "Flask_App.nfl_stadium_blueprint._cached_venue_context"
     )
     def test_stadium_route_uses_selected_venue(
         self,
@@ -447,7 +447,7 @@ class NFLStadiumInsightTests(unittest.TestCase):
             response = nfl_stadium()
 
         self.assertEqual(response, "dashboard")
-        build_context.assert_called_once_with("MetLife Stadium")
+        build_context.assert_called_once_with("nfl", "MetLife Stadium")
         render.assert_called_once_with(
             "nfl_stadium.html",
             stadiums=[],

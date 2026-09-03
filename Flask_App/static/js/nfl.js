@@ -9,7 +9,7 @@ function isParkingOption(value) {
     || normalized.includes('park and ride');
 }
 
-function replaceNflOptions(select, values, placeholder) {
+function replaceNflOptions(select, values = [], placeholder) {
   select.innerHTML = '';
   const empty = document.createElement('option');
   empty.value = '';
@@ -26,6 +26,24 @@ function replaceNflOptions(select, values, placeholder) {
   select.disabled = visibleValues.length === 0;
 }
 
+const nflOptionsCache = new Map();
+async function loadNflOptions(team) {
+  if (!team) return { games: [], sections_by_game: {} };
+  if (!nflOptionsCache.has(team)) {
+    const requestPromise = fetch(`${nflOptionsUrl}?team=${encodeURIComponent(team)}`, {
+      headers: { Accept: 'application/json' },
+    }).then(async (response) => {
+      if (!response.ok) throw new Error(`Options request failed (${response.status})`);
+      return response.json();
+    }).catch((error) => {
+      nflOptionsCache.delete(team);
+      throw error;
+    });
+    nflOptionsCache.set(team, requestPromise);
+  }
+  return nflOptionsCache.get(team);
+}
+
 const nflForm = document.querySelector('.nfl-selection-form');
 if (nflForm) {
   const teamSelect = nflForm.querySelector('.place-select');
@@ -33,24 +51,42 @@ if (nflForm) {
   const sectionSelect = nflForm.querySelector('.section-select');
   const submit = nflForm.querySelector('.submit-analysis');
   const mapButton = nflForm.querySelector('[data-map-launch]');
+  let currentOptions = { games: [], sections_by_game: {} };
 
   const updateActions = () => {
     submit.disabled = !(teamSelect.value && gameSelect.value && sectionSelect.value);
-    if (mapButton) {
-      mapButton.disabled = !(teamSelect.value && gameSelect.value);
-    }
+    if (mapButton) mapButton.disabled = !(teamSelect.value && gameSelect.value);
   };
 
-  teamSelect.addEventListener('change', () => {
-    replaceNflOptions(gameSelect, nflGamesData[teamSelect.value] || [], 'Select a game');
+  teamSelect.addEventListener('change', async () => {
+    const team = teamSelect.value;
+    currentOptions = { games: [], sections_by_game: {} };
+    replaceNflOptions(gameSelect, [], team ? 'Loading games…' : 'Select a game');
     replaceNflOptions(sectionSelect, [], 'Select a section');
+    gameSelect.disabled = true;
+    sectionSelect.disabled = true;
     updateActions();
+    if (!team) return;
+
+    nflForm.setAttribute('aria-busy', 'true');
+    try {
+      const options = await loadNflOptions(team);
+      if (teamSelect.value !== team) return;
+      currentOptions = options;
+      replaceNflOptions(gameSelect, options.games || [], 'Select a game');
+    } catch (_error) {
+      if (teamSelect.value === team) {
+        replaceNflOptions(gameSelect, [], 'Unable to load games');
+        gameSelect.disabled = true;
+      }
+    } finally {
+      nflForm.removeAttribute('aria-busy');
+      updateActions();
+    }
   });
 
   gameSelect.addEventListener('change', () => {
-    const sections =
-      (nflGameSectionsData[teamSelect.value] &&
-        nflGameSectionsData[teamSelect.value][gameSelect.value]) || [];
+    const sections = (currentOptions.sections_by_game || {})[gameSelect.value] || [];
     replaceNflOptions(sectionSelect, sections, 'Select a section');
     updateActions();
   });

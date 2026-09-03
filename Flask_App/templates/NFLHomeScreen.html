@@ -11,16 +11,6 @@
 {% endblock %}
 
 {% block content %}
-  {% set visible_sections = namespace(names=[]) %}
-  {% for by_game in game_sections_dict.values() %}
-    {% for sections in by_game.values() %}
-      {% for section in sections %}
-        {% if not is_parking_section(section) and section not in visible_sections.names %}
-          {% set visible_sections.names = visible_sections.names + [section] %}
-        {% endif %}
-      {% endfor %}
-    {% endfor %}
-  {% endfor %}
 <div class="nfl-page">
   <section class="nfl-hero nfl-hero--stadium-first nfl-hero--compact">
     <div class="nfl-hero__copy">
@@ -124,12 +114,11 @@
 </div>
 
 <script>
-  const nflGamesData = {{ games_dict | tojson }};
-  const nflGameSectionsData = {{ game_sections_dict | tojson }};
+  const nflOptionsUrl = {{ url_for('nfl.nfl_options') | tojson }};
 </script>
 {% endblock %}
 
 {% block scripts %}
-  <script src="{{ url_for('static', filename='js/nfl.js') }}?v=4"></script>
+  <script src="{{ url_for('static', filename='js/nfl.js') }}?v=5"></script>
   <script src="{{ url_for('static', filename='js/nfl-stadium.js') }}?v=2"></script>
 {% endblock %}

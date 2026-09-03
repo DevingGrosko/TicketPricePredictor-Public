@@ -189,7 +189,16 @@ class FlaskProductionStartupTests(unittest.TestCase):
                 nfl_page = client.get("/nfl")
                 assert nfl_page.status_code == 200
                 assert b"NFL market tracker" in nfl_page.data
-                assert b"Dallas Cowboys" in nfl_page.data
+                assert b"New York Giants" in nfl_page.data
+
+                nfl_options = client.get(
+                    "/api/nfl/options?team=New%20York%20Giants"
+                )
+                assert nfl_options.status_code == 200
+                nfl_options_data = nfl_options.get_json()
+                assert nfl_options_data["games"]
+                assert "Dallas Cowboys" in nfl_options_data["games"][0]["label"]
+                assert "Section 0" in nfl_options_data["sections_by_game"][str(nfl_event_id)]
 
                 nfl_map = client.get(
                     f"/nfl/map?team=New%20York%20Giants&game={nfl_event_id}"
@@ -209,6 +218,15 @@ class FlaskProductionStartupTests(unittest.TestCase):
                 assert nhl_page.status_code == 200
                 assert b"NHL market tracker" in nhl_page.data
                 assert b"Toronto Maple Leafs" in nhl_page.data
+
+                nhl_options = client.get(
+                    "/api/nhl/options?team=Toronto%20Maple%20Leafs"
+                )
+                assert nhl_options.status_code == 200
+                nhl_options_data = nhl_options.get_json()
+                assert nhl_options_data["games"]
+                assert "Boston Bruins" in nhl_options_data["games"][0]["label"]
+                assert "Section 100" in nhl_options_data["sections_by_game"][str(nhl_event_id)]
 
                 nhl_map = client.get(
                     f"/nhl/map?team=Toronto%20Maple%20Leafs&game={nhl_event_id}"

@@ -1,0 +1,126 @@
+name: Apply page performance optimization
+
+on:
+  push:
+    branches:
+      - perf/cache-and-query-aggregation
+    paths:
+      - ".github/workflows/apply-performance-optimization.yml"
+      - ".github/performance-optimization/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-page-performance-optimization
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: perf/cache-and-query-aggregation
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Reconstruct and apply the reviewed patch
+        run: |
+          cat \
+            .github/performance-optimization/part00 \
+            .github/performance-optimization/part01 \
+            .github/performance-optimization/part02a \
+            .github/performance-optimization/part02b \
+            .github/performance-optimization/part02c \
+            .github/performance-optimization/part02d \
+            | base64 --decode | gzip --decompress > /tmp/performance-optimization.patch
+          git apply --check /tmp/performance-optimization.patch
+          git apply /tmp/performance-optimization.patch
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("tests/test_flask_production_startup.py")
+          text = path.read_text()
+
+          nfl_old = '                assert b"Dallas Cowboys" in nfl_page.data\n'
+          nfl_new = '''                assert b"New York Giants" in nfl_page.data
+
+                          nfl_options = client.get(
+                              "/api/nfl/options?team=New%20York%20Giants"
+                          )
+                          assert nfl_options.status_code == 200
+                          nfl_options_data = nfl_options.get_json()
+                          assert nfl_options_data["games"]
+                          assert "Dallas Cowboys" in nfl_options_data["games"][0]["label"]
+                          assert "Section 0" in nfl_options_data["sections_by_game"][str(nfl_event_id)]
+          '''
+          if nfl_old not in text:
+              raise RuntimeError("NFL startup assertion was not found")
+          text = text.replace(nfl_old, nfl_new, 1)
+
+          nhl_old = '                assert b"Toronto Maple Leafs" in nhl_page.data\n'
+          nhl_new = '''                assert b"Toronto Maple Leafs" in nhl_page.data
+
+                          nhl_options = client.get(
+                              "/api/nhl/options?team=Toronto%20Maple%20Leafs"
+                          )
+                          assert nhl_options.status_code == 200
+                          nhl_options_data = nhl_options.get_json()
+                          assert nhl_options_data["games"]
+                          assert "Boston Bruins" in nhl_options_data["games"][0]["label"]
+                          assert "Section 100" in nhl_options_data["sections_by_game"][str(nhl_event_id)]
+          '''
+          if nhl_old not in text:
+              raise RuntimeError("NHL startup assertion was not found")
+          path.write_text(text.replace(nhl_old, nhl_new, 1))
+          PY
+          rm -rf .github/performance-optimization
+          git diff --check
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate application and tests
+        env:
+          DATABASE_PATH: ${{ runner.temp }}/performance-validation/baseball.db
+          CONCERT_DATABASE_PATH: ${{ runner.temp }}/performance-validation/concerts.db
+          NFL_DATABASE_PATH: ${{ runner.temp }}/performance-validation/nfl.db
+          NHL_DATABASE_PATH: ${{ runner.temp }}/performance-validation/nhl.db
+          FLASK_SECRET_KEY: performance-validation-key
+          COLLECTOR_INGEST_TOKEN: performance-validation-token
+        run: |
+          mkdir -p "$(dirname "$DATABASE_PATH")"
+          python -m py_compile \
+            models.py \
+            graph_builder.py \
+            Flask_App/performance_cache.py \
+            Flask_App/flask_app.py \
+            Flask_App/nfl_blueprint.py \
+            Flask_App/nfl_stadium_blueprint.py \
+            Flask_App/nhl_blueprint.py
+          node --check Flask_App/static/js/script.js
+          node --check Flask_App/static/js/nfl.js
+          node --check Flask_App/static/js/nhl.js
+          python - <<'PY'
+          from pathlib import Path
+          from jinja2 import Environment
+          environment = Environment()
+          for template in Path('Flask_App/templates').glob('*.html'):
+              environment.parse(template.read_text())
+          PY
+          python -m unittest discover -s tests -v
+
+      - name: Commit the validated implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Cache page contexts and aggregate ticket histories in SQLite"
+          git push origin HEAD:perf/cache-and-query-aggregation
