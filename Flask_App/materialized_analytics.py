@@ -325,6 +325,10 @@ def refresh_event_summary(
     if captured_at_column is None or section_column is None:
         raise RuntimeError("Snapshot tables are missing captured_at or section columns.")
 
+    event_utc = event_datetime_utc(event_date).replace(tzinfo=None)
+    maximum_lead_hours = max(
+        upper for _lower, upper, _short, _label in TIMELINE_BUCKETS[sport_key]
+    )
     statement = (
         select(
             iteration.c.id.label("iteration_id"),
@@ -333,11 +337,19 @@ def refresh_event_summary(
             ticket.c.price.label("price"),
         )
         .select_from(ticket.join(iteration, ticket.c.iteration_id == iteration.c.id))
-        .where(iteration.c.event_id == event_id, ticket.c.price > 0)
+        .where(
+            iteration.c.event_id == event_id,
+            ticket.c.price > 0,
+            # Old databases can contain observations from before the current
+            # analysis horizon. They can never enter a displayed time bucket,
+            # so excluding them in SQL avoids transferring and normalizing a
+            # potentially very large amount of irrelevant history.
+            captured_at_column >= event_utc - timedelta(hours=maximum_lead_hours),
+            captured_at_column < event_utc,
+        )
     )
 
     if len(selected_slots) < len(TIMELINE_BUCKETS[sport_key]):
-        event_utc = event_datetime_utc(event_date).replace(tzinfo=None)
         conditions = []
         for slot in selected_slots:
             lower, upper, _short, _label = TIMELINE_BUCKETS[sport_key][slot]
@@ -352,14 +364,21 @@ def refresh_event_summary(
     per_capture: dict[
         tuple[int, str, int], tuple[float, str, datetime]
     ] = {}
-    for row in session.execute(statement):
+    identity_cache: dict[str, Any] = {}
+    result = session.execute(statement.execution_options(stream_results=True))
+    for row in result.yield_per(10_000):
         captured = _row_value(row, "captured_at")
         if captured is None:
             continue
         slot = timeline_bucket_slot(sport_key, event_date, captured)
         if slot is None or slot not in selected_slots:
             continue
-        identity = section_identity(sport_key, venue, _row_value(row, "section"))
+        raw_section = _clean(_row_value(row, "section"))
+        if raw_section not in identity_cache:
+            identity_cache[raw_section] = section_identity(
+                sport_key, venue, raw_section
+            )
+        identity = identity_cache[raw_section]
         if identity is None:
             continue
         try:
