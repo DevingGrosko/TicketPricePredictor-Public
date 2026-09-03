@@ -107,6 +107,7 @@ _MLB_VENUE_TEAMS = {
     "coors field": "Colorado Rockies",
     "daikin park": "Houston Astros",
     "dodger stadium": "Los Angeles Dodgers",
+    "dodgers stadium": "Los Angeles Dodgers",
     "fenway park": "Boston Red Sox",
     "george m steinbrenner field": "Tampa Bay Rays",
     "globe life field": "Texas Rangers",
@@ -1011,8 +1012,27 @@ def build_nfl_stadium_context(selected_venue: str = "") -> dict[str, Any]:
     }
 
 
+def _mapped_mlb_team_for_venue(venue: Any) -> str | None:
+    normalized = _normalize(venue)
+    if not normalized:
+        return None
+
+    mapped = _MLB_VENUE_TEAMS.get(normalized)
+    if mapped:
+        return mapped
+
+    # Provider venue metadata sometimes appends a city/state suffix. Match a
+    # known stadium at either edge without accepting arbitrary partial words.
+    for venue_name, team in _MLB_VENUE_TEAMS.items():
+        if normalized.startswith(f"{venue_name} ") or normalized.endswith(
+            f" {venue_name}"
+        ):
+            return team
+    return None
+
+
 def mlb_team_for_venue(venue: Any) -> str:
-    return _MLB_VENUE_TEAMS.get(_normalize(venue), "MLB home team")
+    return _mapped_mlb_team_for_venue(venue) or "MLB home team"
 
 
 def _mlb_team_from_fragment(fragment: str) -> str | None:
@@ -1028,7 +1048,7 @@ def _mlb_team_from_fragment(fragment: str) -> str | None:
 
 def mlb_event_home_team(event: Event) -> str:
     # Venue ownership is more reliable than provider title order for MLB.
-    mapped = _MLB_VENUE_TEAMS.get(_normalize(getattr(event, "Place", "")))
+    mapped = _mapped_mlb_team_for_venue(getattr(event, "Place", ""))
     if mapped:
         return mapped
 

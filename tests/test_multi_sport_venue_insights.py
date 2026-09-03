@@ -174,6 +174,20 @@ class MLBVenueInsightTests(unittest.TestCase):
         )
         self.assertEqual(mlb_team_for_venue("Nationals Park"), "Washington Nationals")
         self.assertEqual(mlb_event_home_team(event), "Washington Nationals")
+        self.assertEqual(mlb_team_for_venue("Dodgers Stadium"), "Los Angeles Dodgers")
+        self.assertEqual(
+            mlb_team_for_venue("Dodger Stadium, Los Angeles, CA"),
+            "Los Angeles Dodgers",
+        )
+
+        dodgers_event = Event(
+            title="Provider event without a parseable matchup",
+            event_date=datetime(2026, 9, 1),
+            event_sections=[],
+            URL="https://example.com/--sports-mlb-baseball/production/2",
+            Place="Dodgers Stadium",
+        )
+        self.assertEqual(mlb_event_home_team(dodgers_event), "Los Angeles Dodgers")
 
 
 class NHLVenueInsightTests(unittest.TestCase):
