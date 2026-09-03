@@ -1,0 +1,75 @@
+name: Verify lazy section APIs
+
+on:
+  push:
+    branches:
+      - diagnose/page-performance-2026-09-03
+    paths:
+      - ".github/workflows/verify-lazy-section-apis.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: diagnose/page-performance-2026-09-03
+
+      - name: Verify live landing-page section endpoints
+        run: |
+          python - <<'PY'
+          import json
+          import re
+          from urllib.parse import urlencode
+          from urllib.request import Request, urlopen
+
+          base = "https://bunnyjeff.pythonanywhere.com"
+
+          def get(path):
+              request = Request(base + path, headers={"Accept-Encoding": "identity"})
+              with urlopen(request, timeout=35) as response:
+                  assert response.status == 200, (path, response.status)
+                  return response.read().decode("utf-8")
+
+          cases = [
+              ("mlb", "/", "gamesData", "/api/baseball/sections", "place"),
+              ("nfl", "/nfl", "nflGamesData", "/api/nfl/sections", "team"),
+              ("nhl", "/nhl", "nhlGamesData", "/api/nhl/sections", "team"),
+          ]
+          report = []
+          for league, page, variable, endpoint, selection_key in cases:
+              html = get(page)
+              match = re.search(
+                  rf"const\s+{re.escape(variable)}\s*=\s*(\{{.*?\}});",
+                  html,
+                  flags=re.S,
+              )
+              assert match, f"{variable} not found"
+              data = json.loads(match.group(1))
+              selection, games = next(
+                  (name, rows) for name, rows in data.items() if rows
+              )
+              game = games[0]["value"]
+              payload = json.loads(
+                  get(endpoint + "?" + urlencode({selection_key: selection, "game": game}))
+              )
+              sections = payload.get("sections") or []
+              assert sections, (league, selection, game)
+              report.append(
+                  f"{league.upper()}: {selection} game {game} returned {len(sections)} sections"
+              )
+
+          from pathlib import Path
+          Path("audits/lazy-section-api-verification.txt").write_text("\n".join(report) + "\n")
+          PY
+
+      - name: Commit verification report
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add audits/lazy-section-api-verification.txt
+          git commit -m "Verify lazy section APIs in production"
+          git push origin HEAD:diagnose/page-performance-2026-09-03
