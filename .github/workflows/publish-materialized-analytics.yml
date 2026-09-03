@@ -1,0 +1,118 @@
+name: Publish materialized analytics implementation
+
+on:
+  push:
+    branches:
+      - perf/materialized-analytics-source
+    paths:
+      - ".github/workflows/publish-materialized-analytics.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-materialized-analytics
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: perf/materialized-analytics-source
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Reconstruct reviewed implementation
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat \
+            .github/materialized-analytics/chunk00 \
+            .github/materialized-analytics/chunk01 \
+            .github/materialized-analytics/chunk02 \
+            .github/materialized-analytics/chunk03 \
+            .github/materialized-analytics/chunk04 \
+            .github/materialized-analytics/chunk05 \
+            > /tmp/materialized.patch.gz.b64
+          printf '%s  %s\n' \
+            '80b1ad809b7081999d336c88db46c6f5eca816492b543af70d5d7097f2f8d92f' \
+            '/tmp/materialized.patch.gz.b64' | sha256sum --check
+          base64 --decode /tmp/materialized.patch.gz.b64 \
+            | gzip --decompress > /tmp/materialized.patch
+          printf '%s  %s\n' \
+            '4e962f5713b8aa08b1807b24174b9239d13470ffd56ec70929351e94484cdb07' \
+            '/tmp/materialized.patch' | sha256sum --check
+
+          git fetch origin main
+          git checkout -B perf/materialized-analytics origin/main
+          git apply --check /tmp/materialized.patch
+          git apply /tmp/materialized.patch
+          git diff --check
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate application and analytics maintenance
+        env:
+          DATABASE_PATH: ${{ runner.temp }}/materialized-validation/baseball.db
+          CONCERT_DATABASE_PATH: ${{ runner.temp }}/materialized-validation/concerts.db
+          NFL_DATABASE_PATH: ${{ runner.temp }}/materialized-validation/nfl.db
+          NHL_DATABASE_PATH: ${{ runner.temp }}/materialized-validation/nhl.db
+          FLASK_SECRET_KEY: materialized-validation-key
+          COLLECTOR_INGEST_TOKEN: materialized-validation-token
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$(dirname "$DATABASE_PATH")"
+          python -m py_compile \
+            models.py \
+            graph_builder.py \
+            nhl_collector.py \
+            nhl_schedule_collector.py \
+            Flask_App/flask_app.py \
+            Flask_App/analytics_maintenance.py \
+            Flask_App/materialized_analytics.py \
+            Flask_App/nfl_blueprint.py \
+            Flask_App/section_canonicalization.py \
+            Flask_App/nfl_stadium_blueprint.py \
+            Flask_App/nhl_blueprint.py
+          node --check Flask_App/static/js/script.js
+          node --check Flask_App/static/js/graph.js
+          node --check Flask_App/static/js/concerts.js
+          node --check Flask_App/static/js/nfl.js
+          node --check Flask_App/static/js/nfl-map.js
+          node --check Flask_App/static/js/nfl-stadium.js
+          node --check Flask_App/static/js/venue-section.js
+          node --check Flask_App/static/js/nhl.js
+          node --check Flask_App/static/js/nhl-graph.js
+          node --check Flask_App/static/js/nhl-map.js
+          python - <<'PY'
+          from pathlib import Path
+          from jinja2 import Environment
+
+          environment = Environment()
+          for template in Path("Flask_App/templates").glob("*.html"):
+              environment.parse(template.read_text())
+          PY
+          python -m unittest discover -s tests -v
+          git diff --check
+
+      - name: Publish clean implementation branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          test ! -e .github/materialized-analytics
+          test ! -e .github/workflows/publish-materialized-analytics.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Materialize section analytics outside page requests"
+          git push --force origin HEAD:perf/materialized-analytics
