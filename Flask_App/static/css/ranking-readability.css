@@ -1,0 +1,132 @@
+/* Readability overrides for the compact team-report rankings. */
+
+.nfl-dashboard-section--compact .nfl-dashboard-section__heading {
+  margin-bottom: 24px;
+}
+
+.nfl-dashboard-section--compact .nfl-ranking-card > header {
+  padding: 24px 24px 17px;
+  align-items: center;
+}
+
+.nfl-dashboard-section--compact .nfl-ranking-card h3 {
+  margin: 0;
+  font-size: 26px;
+}
+
+.nfl-dashboard-section--compact .nfl-ranking-card ol {
+  padding: 0 16px 16px;
+  gap: 9px;
+}
+
+.nfl-dashboard-section--compact .nfl-ranking-card li,
+.nfl-dashboard-section--compact .nfl-ranking-card--drops .nfl-drop-profile-row {
+  min-height: 82px;
+  padding: 15px 14px;
+  gap: 13px;
+}
+
+.nfl-dashboard-section--compact .nfl-rank-number {
+  width: 30px;
+  height: 30px;
+  font-size: 11px;
+}
+
+.nfl-dashboard-section--compact .nfl-rank-copy {
+  gap: 5px;
+}
+
+.nfl-dashboard-section--compact .nfl-rank-copy strong {
+  font-size: 14px;
+  line-height: 1.25;
+}
+
+.nfl-dashboard-section--compact .nfl-rank-copy small,
+.nfl-dashboard-section--compact .nfl-rank-value small {
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.nfl-dashboard-section--compact .nfl-rank-value {
+  min-width: 94px;
+  gap: 5px;
+}
+
+.nfl-dashboard-section--compact .nfl-rank-value strong {
+  font-size: 22px;
+}
+
+.nfl-dashboard-section--compact .nfl-ranking-card li > a {
+  padding: 8px 4px 8px 8px;
+  font-size: 10.5px;
+}
+
+.nfl-dashboard-section--compact .nfl-drop-profile-copy {
+  gap: 4px;
+}
+
+.nfl-dashboard-section--compact .nfl-drop-profile-facts {
+  margin-top: 0;
+  display: block;
+}
+
+.nfl-dashboard-section--compact .nfl-drop-profile-facts span {
+  color: #91a6bd;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.nfl-dashboard-section--compact .nfl-drop-profile-value {
+  min-width: 92px;
+  gap: 5px;
+}
+
+.nfl-dashboard-section--compact .nfl-drop-profile-value small {
+  color: #829b90;
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.nfl-dashboard-section--compact .nfl-report-lookup h3 {
+  margin: 0;
+  font-size: 22px;
+}
+
+.nfl-dashboard-section--compact .nfl-report-lookup select {
+  font-size: 12px;
+}
+
+.nfl-dashboard-section--compact .nfl-report-lookup__link {
+  font-size: 11px;
+}
+
+@media (max-width: 760px) {
+  .nfl-dashboard-section--compact .nfl-ranking-card li,
+  .nfl-dashboard-section--compact .nfl-ranking-card--drops .nfl-drop-profile-row {
+    grid-template-columns: 30px minmax(0, 1fr) auto;
+  }
+
+  .nfl-dashboard-section--compact .nfl-ranking-card li > a,
+  .nfl-dashboard-section--compact .nfl-drop-profile-row > a {
+    grid-column: 2 / -1;
+    justify-self: start;
+    padding-top: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .nfl-dashboard-section--compact .nfl-ranking-card li,
+  .nfl-dashboard-section--compact .nfl-ranking-card--drops .nfl-drop-profile-row {
+    grid-template-columns: 28px minmax(0, 1fr);
+  }
+
+  .nfl-dashboard-section--compact .nfl-rank-value,
+  .nfl-dashboard-section--compact .nfl-drop-profile-value,
+  .nfl-dashboard-section--compact .nfl-ranking-card li > a,
+  .nfl-dashboard-section--compact .nfl-drop-profile-row > a {
+    grid-column: 2;
+    justify-self: start;
+    text-align: left;
+  }
+}
