@@ -100,6 +100,54 @@ class MaterializedAnalyticsTests(unittest.TestCase):
             engine.dispose()
             directory.cleanup()
 
+    def test_full_refresh_ignores_observations_outside_the_analysis_horizon(self):
+        directory, engine, Session = self._database()
+        try:
+            event_date = datetime(2026, 9, 10, 23, tzinfo=timezone.utc)
+            with Session() as session:
+                event = self._event(event_date)
+                outside = Iteration(
+                    event=event,
+                    captured_at=captured_datetime_for_storage(
+                        event_date - timedelta(hours=240)
+                    ),
+                )
+                outside.tickets = [
+                    Ticket(section="INFIELD BOX 119", price=999, ticketsPerSection=1)
+                ]
+                inside = Iteration(
+                    event=event,
+                    captured_at=captured_datetime_for_storage(
+                        event_date - timedelta(hours=48)
+                    ),
+                )
+                inside.tickets = [
+                    Ticket(section="INFIELD BOX 119", price=100, ticketsPerSection=1)
+                ]
+                session.add(event)
+                session.flush()
+
+                result = refresh_event_summary(
+                    session,
+                    sport_key="mlb",
+                    event_id=event.id,
+                    event_date=event.event_date,
+                    venue=event.Place,
+                    iteration_model=Iteration,
+                    ticket_model=Ticket,
+                    mark_complete=True,
+                )
+                session.commit()
+
+                summaries = read_summary_rows(session, [event.id])
+                self.assertEqual(result.row_count, 1)
+                self.assertEqual(len(summaries), 1)
+                self.assertEqual(float(summaries[0].price), 100.0)
+                self.assertEqual(int(summaries[0].observation_count), 1)
+        finally:
+            engine.dispose()
+            directory.cleanup()
+
     def test_incremental_refresh_updates_only_the_affected_window(self):
         directory, engine, Session = self._database()
         try:
