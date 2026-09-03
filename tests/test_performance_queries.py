@@ -16,6 +16,10 @@ from models import (
     captured_datetime_for_storage,
     event_datetime_for_storage,
 )
+from Flask_App.materialized_analytics import (
+    ensure_summary_schema,
+    refresh_event_summary,
+)
 from Flask_App.nfl_stadium_blueprint import (
     _aggregated_section_insights_for,
     _bucket_summary_rows_for,
@@ -62,6 +66,7 @@ class DatabaseAggregationTests(unittest.TestCase):
             db_path = Path(directory) / "baseball.db"
             engine = create_engine(f"sqlite:///{db_path}")
             Base.metadata.create_all(engine)
+            ensure_summary_schema(engine)
             Session = sessionmaker(bind=engine, expire_on_commit=False)
             now = datetime.now(timezone.utc).replace(microsecond=0)
             with Session() as session:
@@ -76,6 +81,19 @@ class DatabaseAggregationTests(unittest.TestCase):
                 session.commit()
 
                 events = session.query(Event).order_by(Event.id).all()
+                for event in events:
+                    refresh_event_summary(
+                        session,
+                        sport_key="mlb",
+                        event_id=event.id,
+                        event_date=event.event_date,
+                        venue=event.Place,
+                        iteration_model=Iteration,
+                        ticket_model=Ticket,
+                        mark_complete=True,
+                    )
+                session.commit()
+
                 raw_rows = _snapshot_rows_for(
                     session,
                     [event.id for event in events],

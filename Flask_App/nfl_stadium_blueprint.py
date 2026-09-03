@@ -14,7 +14,7 @@ from statistics import mean, median
 from typing import Any, Callable, Iterable
 
 from flask import Blueprint, render_template, request, url_for
-from sqlalchemy import DateTime, Integer, and_, cast, func, literal, or_, select, union_all
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import defer, load_only
 
 from models import (
@@ -54,6 +54,11 @@ from Flask_App.nhl_blueprint import (
 )
 
 from Flask_App.section_canonicalization import section_identity
+from Flask_App.materialized_analytics import (
+    TIMELINE_BUCKETS,
+    read_summary_rows,
+    venue_revision,
+)
 from Flask_App.performance_cache import (
     PAGE_CACHE_TTL_SECONDS,
     cache_key,
@@ -68,37 +73,7 @@ LOW_SAMPLE_GAMES = 3
 MATERIAL_DROP_PERCENT = 20.0
 MLB_URL_MARKER = "--sports-mlb-baseball/"
 
-_TIMELINE_BUCKETS = {
-    "mlb": (
-        (60.0, 72.0, "72h", "60–72 hours before"),
-        (48.0, 60.0, "60h", "48–60 hours before"),
-        (36.0, 48.0, "48h", "36–48 hours before"),
-        (24.0, 36.0, "36h", "24–36 hours before"),
-        (12.0, 24.0, "24h", "12–24 hours before"),
-        (6.0, 12.0, "12h", "6–12 hours before"),
-        (0.0, 6.0, "Game", "Final 6 hours"),
-    ),
-    "nfl": (
-        (504.0, 720.0, "30d", "21–30 days before"),
-        (336.0, 504.0, "21d", "14–21 days before"),
-        (168.0, 336.0, "14d", "7–14 days before"),
-        (72.0, 168.0, "7d", "3–7 days before"),
-        (24.0, 72.0, "3d", "1–3 days before"),
-        (12.0, 24.0, "24h", "12–24 hours before"),
-        (6.0, 12.0, "12h", "6–12 hours before"),
-        (0.0, 6.0, "Game", "Final 6 hours"),
-    ),
-    "nhl": (
-        (504.0, 720.0, "30d", "21–30 days before"),
-        (336.0, 504.0, "21d", "14–21 days before"),
-        (168.0, 336.0, "14d", "7–14 days before"),
-        (72.0, 168.0, "7d", "3–7 days before"),
-        (24.0, 72.0, "3d", "1–3 days before"),
-        (12.0, 24.0, "24h", "12–24 hours before"),
-        (6.0, 12.0, "12h", "6–12 hours before"),
-        (0.0, 6.0, "Game", "Final 6 hours"),
-    ),
-}
+_TIMELINE_BUCKETS = TIMELINE_BUCKETS
 
 _EVENT_MOMENT_LABELS = {
     "mlb": "first pitch",
@@ -428,103 +403,31 @@ def _bucket_summary_rows_for(
     *,
     sections: Iterable[str] | None = None,
 ) -> list[Any]:
-    """Return one exact median price per game, section, and time window.
+    """Read precomputed game/section/time-window medians.
 
-    SQLite performs the expensive filtering, sorting, and median selection. The
-    web process therefore receives thousands of bucket summaries rather than
-    hundreds of thousands of raw ticket observations.
+    The iteration and ticket model parameters remain for caller compatibility;
+    user-facing requests no longer scan or sort raw ticket observations.
     """
 
-    iteration = iteration_model.__table__
-    ticket = ticket_model.__table__
-    iteration_id = _column(iteration, "id")
-    iteration_event_id = _column(iteration, "event_id")
-    captured_at = _column(iteration, "captured_at", "created_at")
-    ticket_iteration_id = _column(ticket, "iteration_id")
-    ticket_section = _column(ticket, "section", "section_name")
-    ticket_price = _column(ticket, "price")
-    selected_sections = sorted(
-        {_clean(section).casefold() for section in sections or [] if _clean(section)}
+    del iteration_model, ticket_model
+    event_rows = list(events)
+    section_keys: set[str] = set()
+    if sections:
+        venues = {
+            _event_venue_for_sport(event, sport_key)
+            for event in event_rows
+            if _event_venue_for_sport(event, sport_key)
+        }
+        for venue in venues:
+            for section in sections:
+                identity = section_identity(sport_key, venue, section)
+                if identity is not None:
+                    section_keys.add(identity.key)
+    return read_summary_rows(
+        session,
+        [int(event.id) for event in event_rows],
+        section_keys=section_keys or None,
     )
-
-    output: list[Any] = []
-    for event_chunk in _event_chunks(events):
-        boundaries = []
-        for event in event_chunk:
-            event_utc = event_datetime_utc(event.event_date).replace(tzinfo=None)
-            for slot, (lower, upper, _short, _label) in enumerate(
-                _TIMELINE_BUCKETS[sport_key]
-            ):
-                boundaries.append(
-                    select(
-                        literal(int(event.id)).label("event_id"),
-                        literal(slot).label("slot"),
-                        literal(
-                            event_utc - timedelta(hours=upper),
-                            type_=DateTime(),
-                        ).label("starts_at"),
-                        literal(
-                            event_utc - timedelta(hours=lower),
-                            type_=DateTime(),
-                        ).label("ends_at"),
-                    )
-                )
-        if not boundaries:
-            continue
-
-        bucket_bounds = union_all(*boundaries).subquery("bucket_bounds")
-        raw_statement = (
-            select(
-                iteration_event_id.label("event_id"),
-                ticket_section.label("section"),
-                ticket_price.label("price"),
-                bucket_bounds.c.slot.label("slot"),
-            )
-            .select_from(
-                bucket_bounds.join(
-                    iteration,
-                    and_(
-                        iteration_event_id == bucket_bounds.c.event_id,
-                        captured_at >= bucket_bounds.c.starts_at,
-                        captured_at < bucket_bounds.c.ends_at,
-                    ),
-                ).join(ticket, ticket_iteration_id == iteration_id)
-            )
-            .where(ticket_price > 0)
-        )
-        if selected_sections:
-            raw_statement = raw_statement.where(
-                func.lower(ticket_section).in_(selected_sections)
-            )
-        raw = raw_statement.subquery("bucket_raw")
-        partition = [raw.c.event_id, raw.c.section, raw.c.slot]
-        ranked = select(
-            raw,
-            func.row_number()
-            .over(partition_by=partition, order_by=raw.c.price)
-            .label("price_rank"),
-            func.count().over(partition_by=partition).label("observation_count"),
-        ).subquery("bucket_ranked")
-        lower_rank = cast((ranked.c.observation_count + 1) / 2, Integer)
-        upper_rank = cast((ranked.c.observation_count + 2) / 2, Integer)
-        median_statement = (
-            select(
-                ranked.c.event_id,
-                ranked.c.section,
-                ranked.c.slot,
-                func.avg(ranked.c.price).label("price"),
-                func.max(ranked.c.observation_count).label("observation_count"),
-            )
-            .where(
-                or_(
-                    ranked.c.price_rank == lower_rank,
-                    ranked.c.price_rank == upper_rank,
-                )
-            )
-            .group_by(ranked.c.event_id, ranked.c.section, ranked.c.slot)
-        )
-        output.extend(session.execute(median_statement).all())
-    return output
 
 
 def _event_venue_for_sport(event: Any, sport_key: str) -> str:
@@ -772,6 +675,77 @@ def _typical_drawdown_window_labels(
 
 
 
+def _section_label_quality(value: str) -> tuple[int, int, str]:
+    label = _clean(value)
+    letters = "".join(character for character in label if character.isalpha())
+    mixed_case = bool(letters) and not (letters.islower() or letters.isupper())
+    return int(mixed_case), len(label), label.casefold()
+
+
+def _preferred_section_label(
+    candidates: Iterable[tuple[datetime, str]],
+) -> str:
+    rows = [
+        (event_date, _clean(label))
+        for event_date, label in candidates
+        if _clean(label)
+    ]
+    if not rows:
+        return "Unknown section"
+    latest_date = max(event_date for event_date, _label in rows)
+    latest_labels = [label for event_date, label in rows if event_date == latest_date]
+    return max(latest_labels, key=_section_label_quality)
+
+
+def _prepared_summary_rows(
+    events: list[Any],
+    rows: Iterable[Any],
+    sport_key: str,
+) -> dict[tuple[str, int], list[dict[str, Any]]]:
+    event_by_id = {int(event.id): event for event in events}
+    prepared: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        try:
+            event_id = int(_row_value(row, "event_id"))
+        except (TypeError, ValueError):
+            continue
+        event = event_by_id.get(event_id)
+        if event is None:
+            continue
+        section_name = _clean(_row_value(row, "section"))
+        section_key = _clean(_row_value(row, "section_key"))
+        if not section_key:
+            identity = section_identity(
+                sport_key,
+                _event_venue_for_sport(event, sport_key),
+                section_name,
+            )
+            section_key = identity.key if identity is not None else ""
+        if not section_key or not section_name or is_parking_section(section_name):
+            continue
+        try:
+            slot = int(_row_value(row, "slot"))
+            price = float(_row_value(row, "price"))
+            observation_count = int(_row_value(row, "observation_count") or 1)
+        except (TypeError, ValueError):
+            continue
+        if not 0 <= slot < len(_TIMELINE_BUCKETS[sport_key]) or price <= 0:
+            continue
+        lower, upper, _short, _label = _TIMELINE_BUCKETS[sport_key][slot]
+        prepared[(section_key, event_id)].append(
+            {
+                "slot": slot,
+                "lead_time": (lower + upper) / 2,
+                "price": price,
+                "observation_count": observation_count,
+                "section_name": section_name,
+                "first_captured_at": _row_value(row, "first_captured_at"),
+                "last_captured_at": _row_value(row, "last_captured_at"),
+            }
+        )
+    return prepared
+
+
 def _section_insights_for(
     events: list[Any],
     rows: Iterable[Any],
@@ -783,35 +757,56 @@ def _section_insights_for(
     secondary_url_builder: Callable[[Any, str], str | None] | None,
     event_label_builder: Callable[[Any], str],
 ) -> tuple[list[dict[str, Any]], dict[int, set[datetime]]]:
-    """Compatibility path for focused raw-row calculations."""
+    """Compatibility path for focused raw-row calculations in tests/tools."""
 
-    event_by_id = {event.id: event for event in events}
-    histories: dict[tuple[str, int], list[tuple[datetime, float]]] = defaultdict(list)
+    event_by_id = {int(event.id): event for event in events}
+    per_capture: dict[tuple[str, int, datetime], tuple[float, str]] = {}
     captures_by_event: dict[int, set[datetime]] = defaultdict(set)
     for row in rows:
         values = row._mapping if hasattr(row, "_mapping") else row
-        event_id = int(values["event_id"])
-        section = _clean(values["section"])
-        captured = values["captured_at"]
         try:
+            event_id = int(values["event_id"])
             price = float(values["price"])
-        except (TypeError, ValueError):
+            section = _clean(values["section"])
+            captured = values["captured_at"]
+        except (KeyError, TypeError, ValueError):
             continue
-        if not section or is_parking_section(section) or price <= 0 or captured is None:
+        event = event_by_id.get(event_id)
+        if event is None or not section or price <= 0 or captured is None:
+            continue
+        identity = section_identity(
+            sport_key,
+            _event_venue_for_sport(event, sport_key),
+            section,
+        )
+        if identity is None:
             continue
         if captured.tzinfo is None:
             captured = captured.replace(tzinfo=timezone.utc)
-        histories[(section, event_id)].append((captured, price))
+        key = (identity.key, event_id, captured)
+        current = per_capture.get(key)
+        if current is None or price < current[0]:
+            per_capture[key] = (price, identity.raw_label)
         captures_by_event[event_id].add(captured)
+
+    histories: dict[tuple[str, int], list[tuple[datetime, float, str]]] = defaultdict(list)
+    for (section_key, event_id, captured), (price, label) in per_capture.items():
+        histories[(section_key, event_id)].append((captured, price, label))
 
     prepared: dict[tuple[str, int], list[dict[str, Any]]] = {}
     for key, points in histories.items():
         event = event_by_id.get(key[1])
         if event is None:
             continue
-        buckets = _bucketed_game_prices(event, points, sport_key)
+        ordered = sorted(points, key=lambda item: item[0])
+        buckets = _bucketed_game_prices(
+            event,
+            [(captured, price) for captured, price, _label in ordered],
+            sport_key,
+        )
         if buckets:
-            prepared[key] = buckets
+            label = ordered[-1][2]
+            prepared[key] = [{**point, "section_name": label} for point in buckets]
 
     insights, _analyzed = _finalize_section_insights(
         events,
@@ -846,23 +841,7 @@ def _aggregated_section_insights_for(
         ticket_model,
         sport_key,
     )
-    prepared: dict[tuple[str, int], list[dict[str, Any]]] = defaultdict(list)
-    for row in bucket_rows:
-        values = row._mapping if hasattr(row, "_mapping") else row
-        section = _clean(values["section"])
-        if not section or is_parking_section(section):
-            continue
-        slot = int(values["slot"])
-        lower, upper, _short, _label = _TIMELINE_BUCKETS[sport_key][slot]
-        prepared[(section, int(values["event_id"]))].append(
-            {
-                "slot": slot,
-                "lead_time": (lower + upper) / 2,
-                "price": float(values["price"]),
-                "observation_count": int(values["observation_count"]),
-            }
-        )
-
+    prepared = _prepared_summary_rows(events, bucket_rows, sport_key)
     insights, analyzed_area_count = _finalize_section_insights(
         events,
         prepared,
@@ -892,54 +871,52 @@ def _finalize_section_insights(
     secondary_url_builder: Callable[[Any, str], str | None] | None,
     event_label_builder: Callable[[Any], str],
 ) -> tuple[list[dict[str, Any]], int]:
-    event_by_id = {event.id: event for event in events}
-    completed_ids = {event.id for event in events if _event_completed(event, now)}
+    event_by_id = {int(event.id): event for event in events}
+    completed_ids = {int(event.id) for event in events if _event_completed(event, now)}
     bucket_values_by_section: dict[str, dict[int, list[float]]] = defaultdict(
         lambda: defaultdict(list)
     )
     game_ids_by_section: dict[str, set[int]] = defaultdict(set)
-    canonical_game_ids: dict[str, set[int]] = defaultdict(set)
     per_game_drops: dict[str, list[dict[str, Any]]] = defaultdict(list)
     per_game_first_to_last: dict[str, list[dict[str, Any]]] = defaultdict(list)
     observation_count: dict[str, int] = defaultdict(int)
     latest_event_by_section: dict[str, Any] = {}
+    display_candidates: dict[str, list[tuple[datetime, str]]] = defaultdict(list)
 
-    for (section, event_id), bucket_points in prepared.items():
-        event = event_by_id.get(event_id)
+    for (section_key, event_id), bucket_points in prepared.items():
+        event = event_by_id.get(int(event_id))
         if event is None or not bucket_points:
             continue
         ordered = sorted(bucket_points, key=lambda point: int(point["slot"]))
-        game_ids_by_section[section].add(event_id)
-        observation_count[section] += sum(
+        game_ids_by_section[section_key].add(int(event_id))
+        observation_count[section_key] += sum(
             int(point.get("observation_count") or 1) for point in ordered
         )
-        identity = section_identity(
-            sport_key,
-            _event_venue_for_sport(event, sport_key),
-            section,
-        )
-        if identity is not None:
-            canonical_game_ids[identity.key].add(event_id)
         for point in ordered:
-            bucket_values_by_section[section][int(point["slot"])].append(
+            bucket_values_by_section[section_key][int(point["slot"])].append(
                 float(point["price"])
             )
+            section_name = _clean(point.get("section_name"))
+            if section_name:
+                display_candidates[section_key].append(
+                    (event_datetime_eastern(event.event_date), section_name)
+                )
 
-        latest_event = latest_event_by_section.get(section)
+        latest_event = latest_event_by_section.get(section_key)
         if latest_event is None or event.event_date > latest_event.event_date:
-            latest_event_by_section[section] = event
+            latest_event_by_section[section_key] = event
 
-        if event_id in completed_ids:
+        if int(event_id) in completed_ids:
             drawdown = _maximum_bucket_drawdown(ordered, sport_key=sport_key)
             if drawdown is not None:
-                per_game_drops[section].append(drawdown)
+                per_game_drops[section_key].append(drawdown)
             first_to_last = _first_to_last_bucket_change(ordered)
             if first_to_last is not None:
-                per_game_first_to_last[section].append(first_to_last)
+                per_game_first_to_last[section_key].append(first_to_last)
 
     insights = []
-    for section, bucket_values in bucket_values_by_section.items():
-        game_count = len(game_ids_by_section[section])
+    for section_key, bucket_values in bucket_values_by_section.items():
+        game_count = len(game_ids_by_section[section_key])
         timeline_points, balanced_price, available_bucket_count, minimum_games = (
             _aggregate_bucket_points(
                 bucket_values,
@@ -951,7 +928,8 @@ def _finalize_section_insights(
         if balanced_price is None:
             continue
 
-        drop_rows = per_game_drops.get(section, [])
+        section = _preferred_section_label(display_candidates[section_key])
+        drop_rows = per_game_drops.get(section_key, [])
         typical_percent_drop = (
             float(median(row["percent"] for row in drop_rows)) if drop_rows else None
         )
@@ -968,7 +946,7 @@ def _finalize_section_insights(
             drop_rows, sport_key
         )
 
-        first_to_last_rows = per_game_first_to_last.get(section, [])
+        first_to_last_rows = per_game_first_to_last.get(section_key, [])
         average_first_to_last_percent = (
             float(mean(row["percent"] for row in first_to_last_rows))
             if first_to_last_rows
@@ -985,11 +963,15 @@ def _finalize_section_insights(
         elif average_first_to_last_percent is not None and average_first_to_last_percent < -0.05:
             first_to_last_direction = "up"
 
-        direction = "down" if typical_percent_drop and typical_percent_drop > 0.05 else "flat"
+        direction = (
+            "down"
+            if typical_percent_drop is not None and typical_percent_drop > 0.05
+            else "flat"
+        )
         direction_label = (
             "Typical maximum decline" if direction == "down" else "No typical decline"
         )
-        latest_event = latest_event_by_section.get(section)
+        latest_event = latest_event_by_section.get(section_key)
         detail_url = detail_url_builder(latest_event, section) if latest_event is not None else None
         secondary_url = (
             secondary_url_builder(latest_event, section)
@@ -1000,6 +982,7 @@ def _finalize_section_insights(
         dollar_label = _currency_price_change(typical_dollar_drop, currency)
         insights.append(
             {
+                "section_key": section_key,
                 "name": section,
                 "average_price": round(balanced_price, 2),
                 "average_price_label": _currency_money(balanced_price, currency),
@@ -1009,7 +992,7 @@ def _finalize_section_insights(
                 "available_price_bucket_count": available_bucket_count,
                 "price_bucket_game_threshold": minimum_games,
                 "game_count": game_count,
-                "observation_count": observation_count[section],
+                "observation_count": observation_count[section_key],
                 "drop_game_count": len(drop_rows),
                 "typical_max_drop_percent": (
                     round(typical_percent_drop, 2) if typical_percent_drop is not None else None
@@ -1066,10 +1049,9 @@ def _finalize_section_insights(
 
     insights.sort(key=lambda row: (row["average_price"], row["name"].casefold()))
     analyzed_area_count = sum(
-        len(game_ids) >= LOW_SAMPLE_GAMES for game_ids in canonical_game_ids.values()
+        len(game_ids) >= LOW_SAMPLE_GAMES for game_ids in game_ids_by_section.values()
     )
     return insights, analyzed_area_count
-
 
 
 def _rank_sections(
@@ -1754,6 +1736,9 @@ def build_nhl_arena_context(selected_venue: str = "") -> dict[str, Any]:
 def _resolve_section(
     sections: Iterable[dict[str, Any]],
     requested: str,
+    *,
+    sport_key: str = "",
+    venue: str = "",
 ) -> dict[str, Any] | None:
     requested_clean = _clean(requested)
     if not requested_clean or is_parking_section(requested_clean):
@@ -1763,6 +1748,17 @@ def _resolve_section(
     for row in rows:
         if _clean(row.get("name")) == requested_clean:
             return row
+
+    if sport_key and venue:
+        identity = section_identity(sport_key, venue, requested_clean)
+        if identity is not None:
+            matches = [
+                row
+                for row in rows
+                if _clean(row.get("section_key")) == identity.key
+            ]
+            if len(matches) == 1:
+                return matches[0]
 
     normalized = _normalize(requested_clean)
     matches = [row for row in rows if _normalize(row.get("name")) == normalized]
@@ -1790,42 +1786,6 @@ def _lead_time_label(hours: float) -> str:
     return f"{rendered}h"
 
 
-def _selected_section_histories(
-    events: Iterable[Any],
-    rows: Iterable[Any],
-    section_name: str,
-) -> dict[int, list[tuple[datetime, float, float]]]:
-    event_by_id = {event.id: event for event in events}
-    normalized_section = _normalize(section_name)
-    histories: dict[int, list[tuple[datetime, float, float]]] = defaultdict(list)
-
-    for row in rows:
-        values = row._mapping if hasattr(row, "_mapping") else row
-        event_id = int(values["event_id"])
-        event = event_by_id.get(event_id)
-        if event is None or _normalize(values["section"]) != normalized_section:
-            continue
-
-        captured = values["captured_at"]
-        if captured is None:
-            continue
-        try:
-            price = float(values["price"])
-        except (TypeError, ValueError):
-            continue
-        if price <= 0:
-            continue
-
-        lead_time = hours_before_event(event.event_date, captured)
-        if lead_time <= 0:
-            continue
-        histories[event_id].append((captured, lead_time, price))
-
-    for event_id in histories:
-        histories[event_id].sort(key=lambda item: item[0])
-    return histories
-
-
 def _section_timeline_context(
     events: list[Any],
     rows: Iterable[Any],
@@ -1839,30 +1799,84 @@ def _section_timeline_context(
     map_url_builder: Callable[[Any, str], str | None] | None,
     source_url_getter: Callable[[Any], str],
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    bucket_game_values: dict[int, list[float]] = defaultdict(list)
-    histories = _selected_section_histories(events, rows, section_name)
-    event_by_id = {event.id: event for event in events}
-    game_rows: list[tuple[datetime, dict[str, Any]]] = []
+    """Build one section page entirely from materialized bucket summaries."""
 
-    for event_id, history in histories.items():
-        event = event_by_id[event_id]
-        bucket_points = _bucketed_game_prices(
-            event,
-            [(captured, price) for captured, _lead_time, price in history],
-            sport_key,
+    event_by_id = {int(event.id): event for event in events}
+    requested_keys = {
+        identity.key
+        for event in events
+        if (
+            identity := section_identity(
+                sport_key,
+                _event_venue_for_sport(event, sport_key),
+                section_name,
+            )
         )
-        if not bucket_points:
+        is not None
+    }
+    points_by_event: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for row in rows:
+        try:
+            event_id = int(_row_value(row, "event_id"))
+            slot = int(_row_value(row, "slot"))
+            price = float(_row_value(row, "price"))
+        except (TypeError, ValueError):
             continue
-        for point in bucket_points:
-            bucket_game_values[point["slot"]].append(point["price"])
-
-        drawdown = _maximum_bucket_drawdown(
-            bucket_points,
-            sport_key=sport_key,
+        event = event_by_id.get(event_id)
+        if event is None or price <= 0 or not 0 <= slot < len(_TIMELINE_BUCKETS[sport_key]):
+            continue
+        row_key = _clean(_row_value(row, "section_key"))
+        if requested_keys and row_key not in requested_keys:
+            continue
+        lower, upper, _short, _label = _TIMELINE_BUCKETS[sport_key][slot]
+        points_by_event[event_id].append(
+            {
+                "slot": slot,
+                "lead_time": (lower + upper) / 2,
+                "price": price,
+                "observation_count": int(_row_value(row, "observation_count") or 1),
+                "section_name": _clean(_row_value(row, "section")) or section_name,
+                "first_captured_at": _row_value(row, "first_captured_at"),
+                "last_captured_at": _row_value(row, "last_captured_at"),
+            }
         )
-        balanced_game_price = mean(point["price"] for point in bucket_points)
-        first_time, first_lead, _first_price = history[0]
-        last_time, last_lead, last_price = history[-1]
+
+    bucket_game_values: dict[int, list[float]] = defaultdict(list)
+    game_rows: list[tuple[datetime, dict[str, Any]]] = []
+    for event_id, bucket_points in points_by_event.items():
+        event = event_by_id[event_id]
+        ordered = sorted(bucket_points, key=lambda point: int(point["slot"]))
+        if not ordered:
+            continue
+        for point in ordered:
+            bucket_game_values[int(point["slot"])].append(float(point["price"]))
+
+        drawdown = _maximum_bucket_drawdown(ordered, sport_key=sport_key)
+        balanced_game_price = mean(float(point["price"]) for point in ordered)
+        first_times = [
+            point["first_captured_at"]
+            for point in ordered
+            if point.get("first_captured_at") is not None
+        ]
+        last_times = [
+            point["last_captured_at"]
+            for point in ordered
+            if point.get("last_captured_at") is not None
+        ]
+        first_time = min(first_times) if first_times else None
+        last_time = max(last_times) if last_times else None
+        first_lead = (
+            hours_before_event(event.event_date, first_time)
+            if first_time is not None
+            else float(ordered[0]["lead_time"])
+        )
+        last_lead = (
+            hours_before_event(event.event_date, last_time)
+            if last_time is not None
+            else float(ordered[-1]["lead_time"])
+        )
+        last_price = float(ordered[-1]["price"])
+        game_section_name = ordered[-1].get("section_name") or section_name
         event_date = event_datetime_eastern(event.event_date)
         completed = _event_completed(event, now)
         game_rows.append(
@@ -1875,8 +1889,7 @@ def _section_timeline_context(
                     "status_key": "completed" if completed else "upcoming",
                     "average_price": round(balanced_game_price, 2),
                     "average_price_label": _currency_money(
-                        balanced_game_price,
-                        currency,
+                        balanced_game_price, currency
                     ),
                     "latest_price_label": _currency_money(last_price, currency),
                     "movement_label": _currency_price_change(
@@ -1893,15 +1906,18 @@ def _section_timeline_context(
                     "max_drop_percent_label": _percent_change(
                         drawdown["percent"] if drawdown is not None else None
                     ),
-                    "bucket_count": len(bucket_points),
-                    "observation_count": len(history),
+                    "bucket_count": len(ordered),
+                    "observation_count": sum(
+                        int(point.get("observation_count") or 1)
+                        for point in ordered
+                    ),
                     "coverage_label": (
                         f"{_lead_time_label(first_lead)} to "
                         f"{_lead_time_label(last_lead)} before"
                     ),
-                    "game_url": game_url_builder(event, section_name),
+                    "game_url": game_url_builder(event, game_section_name),
                     "map_url": (
-                        map_url_builder(event, section_name)
+                        map_url_builder(event, game_section_name)
                         if map_url_builder is not None
                         else None
                     ),
@@ -1917,7 +1933,7 @@ def _section_timeline_context(
             bucket_game_values,
             sport_key=sport_key,
             currency=currency,
-            total_game_count=len(histories),
+            total_game_count=len(points_by_event),
         )
     )
     timeline_drawdown = _maximum_bucket_drawdown(
@@ -1941,7 +1957,9 @@ def _section_timeline_context(
         from_label = _TIMELINE_BUCKETS[sport_key][
             timeline_drawdown["peak_slot"]
         ][3]
-        to_label = _TIMELINE_BUCKETS[sport_key][timeline_drawdown["low_slot"]][3]
+        to_label = _TIMELINE_BUCKETS[sport_key][
+            timeline_drawdown["low_slot"]
+        ][3]
 
     upcoming = sorted(
         [row for row in game_rows if row[1]["status_key"] == "upcoming"],
@@ -1977,14 +1995,23 @@ def _section_timeline_context(
     )
 
 
-def _event_section_name(event: Any, section_getter: Callable[[Any], Iterable[str]], requested: str) -> str | None:
-    normalized = _normalize(requested)
-    matches = [
-        section
-        for section in _public_sections(section_getter(event))
-        if _normalize(section) == normalized
-    ]
-    return matches[0] if len(matches) == 1 else None
+def _event_section_name(
+    event: Any,
+    section_getter: Callable[[Any], Iterable[str]],
+    requested: str,
+    *,
+    sport_key: str,
+    venue: str,
+) -> str | None:
+    requested_identity = section_identity(sport_key, venue, requested)
+    if requested_identity is None:
+        return None
+    matches = []
+    for section in _public_sections(section_getter(event)):
+        identity = section_identity(sport_key, venue, section)
+        if identity is not None and identity.key == requested_identity.key:
+            matches.append(section)
+    return matches[0] if matches else None
 
 
 def _section_map_context(
@@ -2001,10 +2028,15 @@ def _section_map_context(
     source_url_getter: Callable[[Any], str],
 ) -> dict[str, Any]:
     candidates: list[tuple[int, int, int, datetime, Any, str, Any]] = []
-    selected_normalized = _normalize(section_name)
 
     for event in events:
-        matched_name = _event_section_name(event, section_getter, section_name)
+        matched_name = _event_section_name(
+            event,
+            section_getter,
+            section_name,
+            sport_key=sport_key,
+            venue=venue,
+        )
         if not matched_name:
             continue
 
@@ -2024,7 +2056,7 @@ def _section_map_context(
             selected_has_shape = bool(
                 sanitized_geometry
                 and any(
-                    _normalize(row.get("name")) == selected_normalized
+                    _normalize(row.get("name")) == _normalize(matched_name)
                     and bool(row.get("shapes"))
                     for row in sanitized_geometry.get("sections", [])
                 )
@@ -2060,7 +2092,11 @@ def _section_map_context(
         selected_has_provider_shape = bool(selected_shape_score)
         provider_usable = bool(provider_score)
 
-    averages_by_name = {_normalize(row["name"]): row for row in section_rows}
+    averages_by_key = {
+        _clean(row.get("section_key")): row
+        for row in section_rows
+        if _clean(row.get("section_key"))
+    }
     if representative_event is not None:
         visible_sections = _public_sections(section_getter(representative_event))
     else:
@@ -2068,7 +2104,10 @@ def _section_map_context(
 
     map_sections = []
     for name in visible_sections:
-        aggregate = averages_by_name.get(_normalize(name))
+        identity = section_identity(sport_key, venue, name)
+        aggregate = (
+            averages_by_key.get(identity.key) if identity is not None else None
+        )
         map_sections.append(
             {
                 "name": name,
@@ -2192,6 +2231,8 @@ def _build_section_detail_context(
     section_summary = _resolve_section(
         base_context.get("all_sections", []),
         requested_section,
+        sport_key=sport_key,
+        venue=base_context.get("selected_venue", ""),
     )
     if section_summary is None:
         return _section_error_context(
@@ -2270,10 +2311,17 @@ def _event_contains_section(
     event: Any,
     requested_section: str,
     section_getter: Callable[[Any], Iterable[str]],
+    *,
+    sport_key: str,
+    venue: str,
 ) -> bool:
-    requested = _normalize(requested_section)
-    return bool(requested) and any(
-        _normalize(section) == requested for section in section_getter(event)
+    requested = section_identity(sport_key, venue, requested_section)
+    if requested is None:
+        return False
+    return any(
+        identity is not None and identity.key == requested.key
+        for section in section_getter(event)
+        if (identity := section_identity(sport_key, venue, section)) is not None
     )
 
 
@@ -2337,16 +2385,16 @@ def build_nfl_section_context(
                     requested_section,
                 )
 
-            rows = _snapshot_rows_for(
+            requested_identity = section_identity("nfl", selected, requested_section)
+            rows = read_summary_rows(
                 session,
                 [event.id for event in events],
-                NFLIteration,
-                NFLTicket,
-                sections=[requested_section],
+                section_keys=(requested_identity.key,) if requested_identity else (),
             )
-            sections, _captures = _section_insights_for(
+            prepared = _prepared_summary_rows(events, rows, "nfl")
+            sections, _analyzed = _finalize_section_insights(
                 events,
-                rows,
+                prepared,
                 now,
                 currency="USD",
                 sport_key="nfl",
@@ -2369,7 +2417,13 @@ def build_nfl_section_context(
             geometry_candidates = [
                 event
                 for event in events
-                if _event_contains_section(event, requested_section, lambda item: item.sections or [])
+                if _event_contains_section(
+                    event,
+                    requested_section,
+                    lambda item: item.sections or [],
+                    sport_key="nfl",
+                    venue=selected,
+                )
             ]
             if geometry_candidates:
                 representative = max(
@@ -2444,16 +2498,16 @@ def build_mlb_section_context(
                     requested_section,
                 )
 
-            rows = _snapshot_rows_for(
+            requested_identity = section_identity("mlb", selected, requested_section)
+            rows = read_summary_rows(
                 session,
                 [event.id for event in events],
-                Iteration,
-                Ticket,
-                sections=[requested_section],
+                section_keys=(requested_identity.key,) if requested_identity else (),
             )
-            sections, _captures = _section_insights_for(
+            prepared = _prepared_summary_rows(events, rows, "mlb")
+            sections, _analyzed = _finalize_section_insights(
                 events,
-                rows,
+                prepared,
                 now,
                 currency="USD",
                 sport_key="mlb",
@@ -2567,16 +2621,16 @@ def build_nhl_section_context(
                     f"from section averages because its stored currency differs from {currency}."
                 )
 
-            rows = _snapshot_rows_for(
+            requested_identity = section_identity("nhl", selected, requested_section)
+            rows = read_summary_rows(
                 session,
                 [event.id for event in events],
-                NHLIteration,
-                NHLTicket,
-                sections=[requested_section],
+                section_keys=(requested_identity.key,) if requested_identity else (),
             )
-            sections, _captures = _section_insights_for(
+            prepared = _prepared_summary_rows(events, rows, "nhl")
+            sections, _analyzed = _finalize_section_insights(
                 events,
-                rows,
+                prepared,
                 now,
                 currency=currency,
                 sport_key="nhl",
@@ -2599,7 +2653,13 @@ def build_nhl_section_context(
             geometry_candidates = [
                 event
                 for event in events
-                if _event_contains_section(event, requested_section, lambda item: item.sections or [])
+                if _event_contains_section(
+                    event,
+                    requested_section,
+                    lambda item: item.sections or [],
+                    sport_key="nhl",
+                    venue=selected,
+                )
             ]
             if geometry_candidates:
                 representative = max(
@@ -2651,18 +2711,37 @@ def _sport_database_version(sport_key: str) -> str:
     return file_version(paths[sport_key]())
 
 
+def _sport_venue_revision(sport_key: str, venue: str) -> int:
+    models = {
+        "mlb": CreateModel,
+        "nfl": CreateNFLModel,
+        "nhl": CreateNHLModel,
+    }
+    model = models[sport_key]()
+    try:
+        with model.getSession()() as session:
+            return venue_revision(session, venue)
+    finally:
+        model.engine.dispose()
+
+
 def _cached_venue_context(sport_key: str, selected_venue: str) -> dict[str, Any]:
     builders: dict[str, Callable[[str], dict[str, Any]]] = {
         "mlb": build_mlb_stadium_context,
         "nfl": build_nfl_stadium_context,
         "nhl": build_nhl_arena_context,
     }
-    version = _sport_database_version(sport_key)
+    selected = _clean(selected_venue)
+    version: Any = (
+        _sport_venue_revision(sport_key, selected)
+        if selected
+        else _sport_database_version(sport_key)
+    )
     return page_cache.get_or_create(
-        cache_key("venue", sport_key, version, selected_venue),
-        lambda: builders[sport_key](selected_venue),
+        cache_key("venue-summary-v2", sport_key, version, selected),
+        lambda: builders[sport_key](selected),
         ttl_seconds=PAGE_CACHE_TTL_SECONDS,
-        tags=(sport_key,),
+        tags=(sport_key, f"{sport_key}:{selected.casefold()}" if selected else sport_key),
     )
 
 
@@ -2676,12 +2755,23 @@ def _cached_section_context(
         "nfl": build_nfl_section_context,
         "nhl": build_nhl_section_context,
     }
-    version = _sport_database_version(sport_key)
+    selected = _clean(selected_venue)
+    version: Any = (
+        _sport_venue_revision(sport_key, selected)
+        if selected
+        else _sport_database_version(sport_key)
+    )
     return page_cache.get_or_create(
-        cache_key("section", sport_key, version, selected_venue, requested_section),
-        lambda: builders[sport_key](selected_venue, requested_section),
+        cache_key(
+            "section-summary-v2",
+            sport_key,
+            version,
+            selected,
+            requested_section,
+        ),
+        lambda: builders[sport_key](selected, requested_section),
         ttl_seconds=PAGE_CACHE_TTL_SECONDS,
-        tags=(sport_key,),
+        tags=(sport_key, f"{sport_key}:{selected.casefold()}" if selected else sport_key),
     )
 
 

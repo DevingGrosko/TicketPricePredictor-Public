@@ -17,6 +17,7 @@ from models import (
     captured_datetime_for_storage,
     event_datetime_for_storage,
 )
+from Flask_App.materialized_analytics import refresh_event_summary
 from Flask_App.nfl_stadium_blueprint import (
     build_mlb_section_context,
     build_mlb_stadium_context,
@@ -76,6 +77,17 @@ class MLBVenueInsightTests(unittest.TestCase):
             for section, price in final.items()
         ]
         session.add(event)
+        session.flush()
+        refresh_event_summary(
+            session,
+            sport_key="mlb",
+            event_id=event.id,
+            event_date=event.event_date,
+            venue=event.Place,
+            iteration_model=Iteration,
+            ticket_model=Ticket,
+            mark_complete=True,
+        )
 
     def test_mlb_context_is_team_first_and_ranks_sections(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -231,6 +243,17 @@ class NHLVenueInsightTests(unittest.TestCase):
             for section, price in final.items()
         ]
         session.add(event)
+        session.flush()
+        refresh_event_summary(
+            session,
+            sport_key="nhl",
+            event_id=event.id,
+            event_date=event.event_date,
+            venue=event.canonical_venue or event.venue,
+            iteration_model=NHLIteration,
+            ticket_model=NHLTicket,
+            mark_complete=True,
+        )
 
     def test_nhl_context_is_team_first_and_currency_aware(self):
         with tempfile.TemporaryDirectory() as directory:

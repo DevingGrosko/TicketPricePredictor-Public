@@ -58,10 +58,14 @@ from Flask_App.performance_cache import (
     PAGE_CACHE_TTL_SECONDS,
     cache_key,
     file_version,
-    invalidate_sport_cache,
     page_cache,
 )
 from Flask_App.section_canonicalization import is_excluded_ticket_area
+from Flask_App.materialized_analytics import (
+    ensure_summary_schema,
+    refresh_event_summary_safely,
+    timeline_bucket_slot,
+)
 
 # Inlined for the restricted PythonAnywhere deployment.
 EASTERN = ZoneInfo("America/New_York")
@@ -895,6 +899,7 @@ class CreateNFLModel:
         )
         NFLBase.metadata.create_all(self.engine)
         _ensure_nfl_schema(self.engine, self.db_path)
+        ensure_summary_schema(self.engine)
         self.SessionLocal = sessionmaker(
             bind=self.engine, autoflush=False, expire_on_commit=False
         )
@@ -1088,6 +1093,13 @@ def store_nfl_snapshot(
     schedule_metadata: dict[str, Any] | None = None,
     map_geometry: dict[str, Any] | None = None,
 ) -> tuple[int, int, bool]:
+    """Store raw NFL data first, then refresh only its affected time window.
+
+    Materialized analytics are derived data. A refresh failure must never make a
+    valid raw snapshot disappear, so the summary update uses a second, nonfatal
+    transaction and can be repaired by the maintenance backfill.
+    """
+
     model = CreateNFLModel(db_path)
     stored_event_date = event_datetime_for_storage(event_date)
     stored_captured_at = captured_datetime_for_storage(hourly_capture_slot(captured_at))
@@ -1102,7 +1114,8 @@ def store_nfl_snapshot(
     )
 
     try:
-        with model.getSession()() as session:
+        SessionLocal = model.getSession()
+        with SessionLocal() as session:
             event = (
                 session.query(NFLEvent)
                 .filter(
@@ -1166,6 +1179,17 @@ def store_nfl_snapshot(
                 )
                 for row in snapshot.sections
             )
+            session.flush()
+            event_id = int(event.id)
+            iteration_id = int(iteration.id)
+            summary_event_date = event.event_date
+            summary_venue = (
+                event.canonical_venue or event.provider_venue or event.venue
+            )
+            slot = timeline_bucket_slot(
+                "nfl", summary_event_date, iteration.captured_at
+            )
+
             try:
                 session.commit()
             except IntegrityError:
@@ -1187,10 +1211,21 @@ def store_nfl_snapshot(
                     .one()
                 )
                 return event.id, existing.id, False
-            return event.id, iteration.id, True
+
+        if slot is not None:
+            refresh_event_summary_safely(
+                SessionLocal,
+                sport_key="nfl",
+                event_id=event_id,
+                event_date=summary_event_date,
+                venue=summary_venue,
+                iteration_model=NFLIteration,
+                ticket_model=NFLTicket,
+                bucket_slots=(slot,),
+            )
+        return event_id, iteration_id, True
     finally:
         model.engine.dispose()
-
 
 def create_nfl_daily_backup(
     now: datetime | None = None,
@@ -1326,7 +1361,6 @@ def ingest_nfl_snapshot():
                 schedule_metadata=schedule_metadata,
                 map_geometry=map_geometry,
             )
-            invalidate_sport_cache("nfl")
     except (KeyError, TypeError, ValueError) as exc:
         return jsonify({"status": "error", "error": str(exc)}), 400
 

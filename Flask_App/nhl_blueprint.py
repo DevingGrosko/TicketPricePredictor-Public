@@ -50,10 +50,14 @@ from Flask_App.performance_cache import (
     PAGE_CACHE_TTL_SECONDS,
     cache_key,
     file_version,
-    invalidate_sport_cache,
     page_cache,
 )
 from Flask_App.section_canonicalization import is_excluded_ticket_area
+from Flask_App.materialized_analytics import (
+    ensure_summary_schema,
+    refresh_event_summary_safely,
+    timeline_bucket_slot,
+)
 from Flask_App.nfl_blueprint import (
     EASTERN,
     canonical_venue_name,
@@ -334,6 +338,7 @@ class CreateNHLModel:
         )
         NHLBase.metadata.create_all(self.engine)
         _ensure_nhl_schema(self.engine, self.db_path)
+        ensure_summary_schema(self.engine)
         self.SessionLocal = sessionmaker(
             bind=self.engine,
             autoflush=False,
@@ -551,6 +556,12 @@ def store_nhl_snapshot(
     map_geometry: dict[str, Any] | None = None,
     currency: str = "USD",
 ) -> tuple[int, int, bool]:
+    """Store raw NHL data before updating its materialized time window.
+
+    The analytics refresh is a separate, nonfatal transaction. If it fails,
+    raw history remains durable and the maintenance backfill repairs it later.
+    """
+
     model = CreateNHLModel(db_path)
     stored_event_date = event_datetime_for_storage(event_date)
     stored_captured_at = captured_datetime_for_storage(
@@ -568,7 +579,8 @@ def store_nhl_snapshot(
     )
 
     try:
-        with model.getSession()() as session:
+        SessionLocal = model.getSession()
+        with SessionLocal() as session:
             event = (
                 session.query(NHLEvent)
                 .filter(
@@ -633,6 +645,17 @@ def store_nhl_snapshot(
                 )
                 for row in snapshot.sections
             )
+            session.flush()
+            event_id = int(event.id)
+            iteration_id = int(iteration.id)
+            summary_event_date = event.event_date
+            summary_venue = (
+                event.canonical_venue or event.provider_venue or event.venue
+            )
+            slot = timeline_bucket_slot(
+                "nhl", summary_event_date, iteration.captured_at
+            )
+
             try:
                 session.commit()
             except IntegrityError:
@@ -654,10 +677,21 @@ def store_nhl_snapshot(
                     .one()
                 )
                 return event.id, existing.id, False
-            return event.id, iteration.id, True
+
+        if slot is not None:
+            refresh_event_summary_safely(
+                SessionLocal,
+                sport_key="nhl",
+                event_id=event_id,
+                event_date=summary_event_date,
+                venue=summary_venue,
+                iteration_model=NHLIteration,
+                ticket_model=NHLTicket,
+                bucket_slots=(slot,),
+            )
+        return event_id, iteration_id, True
     finally:
         model.engine.dispose()
-
 
 def create_nhl_daily_backup(
     now: datetime | None = None,
@@ -942,7 +976,6 @@ def ingest_nhl_snapshot():
                 map_geometry=map_geometry,
                 currency=currency,
             )
-            invalidate_sport_cache("nhl")
     except (KeyError, TypeError, ValueError) as exc:
         return jsonify({"status": "error", "error": str(exc)}), 400
 

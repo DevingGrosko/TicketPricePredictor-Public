@@ -10,6 +10,7 @@ from flask import Flask
 
 from collector import EventSnapshot, SectionSnapshot
 from models import captured_datetime_for_storage, event_datetime_for_storage
+from Flask_App.materialized_analytics import read_summary_rows
 from Flask_App.nhl_blueprint import (
     CreateNHLModel,
     NHLEvent,
@@ -48,6 +49,40 @@ class NHLBlueprintTests(unittest.TestCase):
                 for index in range(10)
             ),
         )
+
+    def test_store_updates_materialized_summary_after_raw_commit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db_path = Path(directory) / "NHL-collection.db"
+            event_date = datetime.now(timezone.utc).replace(
+                minute=0, second=0, microsecond=0
+            ) + timedelta(days=2)
+            captured_at = event_date - timedelta(hours=24)
+            event_id, _iteration_id, stored = store_nhl_snapshot(
+                "https://www.vividseats.com/game/production/9399999",
+                event_date,
+                self._snapshot("9399999"),
+                captured_at,
+                db_path=db_path,
+                schedule_metadata={
+                    "schedule_id": "2026029999",
+                    "away_team": "Boston Bruins",
+                    "home_team": "Toronto Maple Leafs",
+                    "canonical_venue": "Scotiabank Arena",
+                    "venue_timezone": "America/Toronto",
+                    "country": "Canada",
+                    "game_type": 2,
+                    "season": 20262027,
+                },
+                currency="USD",
+            )
+            self.assertTrue(stored)
+            model = CreateNHLModel(db_path)
+            try:
+                with model.getSession()() as session:
+                    summaries = read_summary_rows(session, [event_id])
+                    self.assertEqual(len(summaries), 10)
+            finally:
+                model.engine.dispose()
 
     def test_metadata_accepts_canada_and_rejects_overseas_venues(self):
         metadata = normalize_nhl_schedule_metadata(

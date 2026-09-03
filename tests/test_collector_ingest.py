@@ -19,7 +19,8 @@ graph_builder_stub.ConcertGraphBuilder = object
 sys.modules.setdefault("graph_builder", graph_builder_stub)
 
 from Flask_App.flask_app import app
-from models import Base, Iteration, Ticket
+from models import Base, Event, Iteration, Ticket
+from Flask_App.materialized_analytics import read_summary_rows
 
 
 class CollectorIngestTests(unittest.TestCase):
@@ -86,12 +87,16 @@ class CollectorIngestTests(unittest.TestCase):
 
         self.assertEqual(first.status_code, 201)
         self.assertEqual(first.get_json()["status"], "stored")
+        self.assertEqual(first.get_json()["analytics"], "updated")
         self.assertEqual(second.status_code, 200)
         self.assertEqual(second.get_json()["status"], "duplicate")
         Session = sessionmaker(bind=self.engine)
         with Session() as session:
             self.assertEqual(session.query(Iteration).count(), 1)
             self.assertEqual(session.query(Ticket).count(), 10)
+            event_id = session.query(Event.id).scalar()
+            summaries = read_summary_rows(session, [event_id])
+            self.assertEqual(len(summaries), 10)
         backup.assert_called_once()
         audit.assert_called_once()
 
@@ -118,6 +123,22 @@ class CollectorIngestTests(unittest.TestCase):
         self.assertEqual(response.get_json()["status"], "stored")
         backup.assert_called_once()
         audit.assert_called_once()
+
+    def test_backfill_endpoint_is_authenticated_and_bounded(self):
+        unauthorized = self.client.post(
+            "/api/analytics/backfill", json={"sport": "mlb", "limit": 1}
+        )
+        self.assertEqual(unauthorized.status_code, 401)
+
+        authorized = self.client.post(
+            "/api/analytics/backfill",
+            json={"sport": "mlb", "limit": 1},
+            headers={"Authorization": "Bearer test-ingest-token"},
+        )
+        self.assertEqual(authorized.status_code, 200, authorized.get_data(as_text=True))
+        payload = authorized.get_json()
+        self.assertEqual(payload["sport"], "mlb")
+        self.assertTrue(payload["complete"])
 
     @patch("Flask_App.flask_app.write_capture_audit")
     @patch("Flask_App.flask_app.create_daily_backup")
