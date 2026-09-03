@@ -20,7 +20,7 @@ jobs:
           ref: main
           fetch-depth: 1
 
-      - name: Package repository
+      - name: Package current main repository
         run: zip -qr "$RUNNER_TEMP/TicketPricePredictor-Public-main.zip" . -x '.git/*'
 
       - uses: actions/upload-artifact@v7
