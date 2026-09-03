@@ -1,0 +1,1 @@
+Validation is enforced by the repository's full unit-test suite and PythonAnywhere deployment workflow. The canonicalization tests cover conservative alias folding, Fenway's audited rename, descriptor-preserving numeric collisions, access-only exclusions, same-capture minimum-price selection, cross-game history recovery, raw-row immutability, and tracked-area presentation labels.
