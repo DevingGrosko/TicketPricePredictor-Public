@@ -1,0 +1,178 @@
+name: Audit public section labels
+
+on:
+  push:
+    branches:
+      - audit/public-section-labels-2026-09-03
+    paths:
+      - ".github/workflows/audit-public-section-labels.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Read the public MLB, NFL, and NHL section inventories
+        run: |
+          python - <<'PY'
+          from collections import defaultdict
+          from datetime import datetime, timezone
+          import html
+          import json
+          from pathlib import Path
+          import re
+          import time
+          from urllib.request import Request, urlopen
+
+          BASE = "https://bunnyjeff.pythonanywhere.com"
+
+          def fetch_text(path):
+              last_error = None
+              for attempt in range(1, 6):
+                  try:
+                      request = Request(
+                          BASE + path,
+                          headers={
+                              "Accept": "text/html",
+                              "User-Agent": "TicketSignal-section-label-audit/1.0",
+                          },
+                      )
+                      with urlopen(request, timeout=180) as response:
+                          body = response.read().decode("utf-8")
+                          if response.status != 200:
+                              raise RuntimeError(f"HTTP {response.status}")
+                          return body
+                  except Exception as exc:
+                      last_error = exc
+                      if attempt < 5:
+                          time.sleep(attempt * 3)
+              raise RuntimeError(f"Could not read {path}: {last_error}")
+
+          def extract_json_assignment(page, variable):
+              match = re.search(rf"const\s+{re.escape(variable)}\s*=\s*", page)
+              if match is None:
+                  raise RuntimeError(f"Missing JavaScript variable {variable}")
+              tail = html.unescape(page[match.end():])
+              value, _ = json.JSONDecoder().raw_decode(tail)
+              return value
+
+          def clean(value):
+              return " ".join(str(value or "").split())
+
+          def is_parking(value):
+              normalized = re.sub(r"[^a-z0-9]+", " ", clean(value).casefold()).strip()
+              return bool(
+                  re.search(r"\bparking\b", normalized)
+                  or re.match(r"^(?:lot|garage)\b", normalized)
+                  or "park and ride" in normalized
+              )
+
+          inventory = {
+              "generated_at": datetime.now(timezone.utc).isoformat(),
+              "source": BASE,
+              "sports": {},
+          }
+
+          def finalize(sport, venues):
+              rows = []
+              for venue, data in sorted(venues.items(), key=lambda item: item[0].casefold()):
+                  label_games = defaultdict(set)
+                  games = []
+                  for game_id, game in sorted(data["games"].items()):
+                      sections = sorted(
+                          {clean(section) for section in game["sections"] if clean(section) and not is_parking(section)},
+                          key=str.casefold,
+                      )
+                      for section in sections:
+                          label_games[section].add(game_id)
+                      games.append(
+                          {
+                              "id": game_id,
+                              "team": game["team"],
+                              "sections": sections,
+                          }
+                      )
+                  labels = [
+                      {
+                          "label": label,
+                          "event_count": len(event_ids),
+                          "event_ids": sorted(event_ids),
+                      }
+                      for label, event_ids in sorted(label_games.items(), key=lambda item: item[0].casefold())
+                  ]
+                  rows.append(
+                      {
+                          "venue": venue,
+                          "team_label": " / ".join(sorted(data["teams"])),
+                          "event_count": len(games),
+                          "raw_section_count": len(labels),
+                          "labels": labels,
+                          "games": games,
+                      }
+                  )
+              inventory["sports"][sport] = rows
+
+          mlb_page = fetch_text("/")
+          mlb_sections = extract_json_assignment(mlb_page, "gameSectionsData")
+          mlb_venues = defaultdict(lambda: {"teams": set(), "games": {}})
+          for venue, by_game in mlb_sections.items():
+              venue = clean(venue)
+              for game_id, sections in by_game.items():
+                  mlb_venues[venue]["games"][str(game_id)] = {
+                      "team": "",
+                      "sections": sections,
+                  }
+          finalize("mlb", mlb_venues)
+
+          for sport, path, games_name, sections_name in (
+              ("nfl", "/nfl", "nflGamesData", "nflGameSectionsData"),
+              ("nhl", "/nhl", "nhlGamesData", "nhlGameSectionsData"),
+          ):
+              page = fetch_text(path)
+              games_data = extract_json_assignment(page, games_name)
+              sections_data = extract_json_assignment(page, sections_name)
+              venues = defaultdict(lambda: {"teams": set(), "games": {}})
+              for team, games in games_data.items():
+                  for game in games:
+                      game_id = str(game.get("value") or "")
+                      venue = clean(game.get("venue"))
+                      if not game_id or not venue:
+                          continue
+                      venues[venue]["teams"].add(clean(team))
+                      venues[venue]["games"][game_id] = {
+                          "team": clean(team),
+                          "sections": sections_data.get(team, {}).get(game_id, []),
+                      }
+              finalize(sport, venues)
+
+          output = Path("public_section_label_inventory.json")
+          output.write_text(json.dumps(inventory, indent=2) + "\n", encoding="utf-8")
+          print(
+              json.dumps(
+                  {
+                      sport: {
+                          "venues": len(rows),
+                          "games": sum(row["event_count"] for row in rows),
+                          "raw_labels": sum(row["raw_section_count"] for row in rows),
+                      }
+                      for sport, rows in inventory["sports"].items()
+                  },
+                  indent=2,
+              )
+          )
+          PY
+
+      - name: Validate export
+        run: python -m json.tool public_section_label_inventory.json >/dev/null
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: public-section-label-inventory
+          path: public_section_label_inventory.json
+          retention-days: 3
