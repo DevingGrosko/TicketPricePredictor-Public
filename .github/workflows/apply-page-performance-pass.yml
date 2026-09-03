@@ -1,0 +1,75 @@
+name: Apply page performance pass
+
+on:
+  push:
+    branches:
+      - feature/page-performance-pass
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/page-performance-pass
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Apply reviewed performance changes
+        run: |
+          python -m py_compile tools/apply_page_performance_pass.py
+          python tools/apply_page_performance_pass.py
+          git diff --check
+          node --check Flask_App/static/js/script.js
+          node --check Flask_App/static/js/nfl.js
+          node --check Flask_App/static/js/nhl.js
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run full validation
+        env:
+          DATABASE_PATH: ${{ runner.temp }}/performance-pass/baseball.db
+          CONCERT_DATABASE_PATH: ${{ runner.temp }}/performance-pass/concerts.db
+          NFL_DATABASE_PATH: ${{ runner.temp }}/performance-pass/nfl.db
+          NHL_DATABASE_PATH: ${{ runner.temp }}/performance-pass/nhl.db
+          FLASK_SECRET_KEY: performance-pass-validation
+          COLLECTOR_INGEST_TOKEN: performance-pass-token
+        run: |
+          mkdir -p "$(dirname "$DATABASE_PATH")"
+          python -m py_compile \
+            models.py \
+            Flask_App/flask_app.py \
+            Flask_App/performance_cache.py \
+            Flask_App/nfl_blueprint.py \
+            Flask_App/nhl_blueprint.py \
+            Flask_App/nfl_stadium_blueprint.py
+          python -m unittest discover -s tests -v
+
+      - name: Commit validated application changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            models.py \
+            Flask_App/flask_app.py \
+            Flask_App/performance_cache.py \
+            Flask_App/nfl_blueprint.py \
+            Flask_App/nhl_blueprint.py \
+            Flask_App/nfl_stadium_blueprint.py \
+            Flask_App/templates/HomeScreen.html \
+            Flask_App/templates/NFLHomeScreen.html \
+            Flask_App/templates/NHLHomeScreen.html \
+            Flask_App/static/js/script.js \
+            Flask_App/static/js/nfl.js \
+            Flask_App/static/js/nhl.js \
+            tests/test_performance_pass.py
+          git commit -m "Speed up cached venue and section reports"
+          git push origin HEAD:feature/page-performance-pass
