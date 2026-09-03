@@ -1,0 +1,1 @@
+Remove before merge: audits/DO_NOT_ADD_MORE_MARKERS.txt, audits/last-marker-before-pr.txt, audits/pr-next.txt, audits/no-more-files.txt, audits/why-am-i-doing-this.txt, audits/section-canonicalization-ready.txt, audits/section-canonicalization-scope.txt. Keep the implementation notes and release notes.
