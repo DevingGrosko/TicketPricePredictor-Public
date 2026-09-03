@@ -33,6 +33,46 @@ jobs:
           base64 --decode /tmp/payload.b64 > /tmp/section-canonicalization.tar.gz
           echo "302580b7f9171200eabd062510e6d6a06b6859add0a557cdafa0e685e7695c77  /tmp/section-canonicalization.tar.gz" | sha256sum -c -
           tar -xzf /tmp/section-canonicalization.tar.gz -C .
+
+          # Another legacy test installs a graph_builder stub in sys.modules.
+          # Load the real file under a unique module name for this regression
+          # test so unittest discovery order cannot replace GraphBuilder.
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("tests/test_section_canonicalization.py")
+          text = path.read_text()
+          text = text.replace(
+              "from datetime import datetime, timedelta, timezone\n",
+              "from datetime import datetime, timedelta, timezone\nimport importlib.util\n",
+              1,
+          )
+          text = text.replace("from graph_builder import GraphBuilder\n", "", 1)
+          text = text.replace(
+              """                x, y = GraphBuilder().eachEventGraphList(
+                    "Infield Box 119",
+                    event_id,
+                )
+""",
+              """                module_path = Path(__file__).resolve().parents[1] / "graph_builder.py"
+                spec = importlib.util.spec_from_file_location(
+                    "graph_builder_canonicalization_test",
+                    module_path,
+                )
+                self.assertIsNotNone(spec)
+                self.assertIsNotNone(spec.loader)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                x, y = module.GraphBuilder().eachEventGraphList(
+                    "Infield Box 119",
+                    event_id,
+                )
+""",
+              1,
+          )
+          path.write_text(text)
+          PY
+
           rm -rf .github/section-canonicalization-payload
           rm -f .github/workflows/apply-section-canonicalization.yml
 
