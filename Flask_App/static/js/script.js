@@ -31,7 +31,7 @@ function isParkingOption(value) {
     || normalized.includes('park and ride');
 }
 
-function replaceOptions(select, values, placeholder) {
+function replaceOptions(select, values = [], placeholder) {
   select.innerHTML = '';
   const empty = document.createElement('option');
   empty.value = '';
@@ -48,32 +48,73 @@ function replaceOptions(select, values, placeholder) {
   select.disabled = visibleValues.length === 0;
 }
 
+function setLoading(select, label) {
+  replaceOptions(select, [], label);
+  select.disabled = true;
+}
+
 function updateSubmitState(form) {
   const requiredSelects = [...form.querySelectorAll('select')];
   form.querySelector('.submit-analysis').disabled = !requiredSelects.every((select) => select.value);
 }
 
+const baseballOptionsCache = new Map();
+async function loadBaseballOptions(place) {
+  if (!place) return { games: [], multi_sections: [], sections_by_game: {} };
+  if (!baseballOptionsCache.has(place)) {
+    const requestPromise = fetch(`${baseballOptionsUrl}?venue=${encodeURIComponent(place)}`, {
+      headers: { Accept: 'application/json' },
+    }).then(async (response) => {
+      if (!response.ok) throw new Error(`Options request failed (${response.status})`);
+      return response.json();
+    }).catch((error) => {
+      baseballOptionsCache.delete(place);
+      throw error;
+    });
+    baseballOptionsCache.set(place, requestPromise);
+  }
+  return baseballOptionsCache.get(place);
+}
+
+const formOptions = new WeakMap();
 document.querySelectorAll('.selection-form').forEach((form) => {
   const placeSelect = form.querySelector('.place-select');
   const gameSelect = form.querySelector('.game-select');
   const sectionSelect = form.querySelector('.section-select');
 
-  placeSelect.addEventListener('change', () => {
+  placeSelect.addEventListener('change', async () => {
     const place = placeSelect.value;
-    if (gameSelect) {
-      replaceOptions(gameSelect, gamesData[place] || [], 'Select a game');
-      replaceOptions(sectionSelect, [], 'Select a section');
-    } else {
-      replaceOptions(sectionSelect, placesData[place] || [], 'Select a section');
-    }
+    formOptions.delete(form);
+    if (gameSelect) setLoading(gameSelect, place ? 'Loading games…' : 'Select a game');
+    setLoading(sectionSelect, place ? 'Loading sections…' : 'Select a section');
     updateSubmitState(form);
+    if (!place) return;
+
+    form.setAttribute('aria-busy', 'true');
+    try {
+      const options = await loadBaseballOptions(place);
+      if (placeSelect.value !== place) return;
+      formOptions.set(form, options);
+      if (gameSelect) {
+        replaceOptions(gameSelect, options.games || [], 'Select a game');
+        replaceOptions(sectionSelect, [], 'Select a section');
+      } else {
+        replaceOptions(sectionSelect, options.multi_sections || [], 'Select a section');
+      }
+    } catch (_error) {
+      if (placeSelect.value !== place) return;
+      if (gameSelect) setLoading(gameSelect, 'Unable to load games');
+      setLoading(sectionSelect, 'Unable to load sections');
+    } finally {
+      form.removeAttribute('aria-busy');
+      updateSubmitState(form);
+    }
   });
 
   if (gameSelect) {
     gameSelect.addEventListener('change', () => {
-      const place = placeSelect.value;
-      const game = gameSelect.value;
-      const sections = (gameSectionsData[place] && gameSectionsData[place][game]) || placesData[place] || [];
+      const options = formOptions.get(form) || {};
+      const sections = (options.sections_by_game || {})[gameSelect.value] || [];
       replaceOptions(sectionSelect, sections, 'Select a section');
       updateSubmitState(form);
     });

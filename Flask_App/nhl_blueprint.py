@@ -28,7 +28,14 @@ from sqlalchemy import (
 )
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.mutable import MutableList
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    load_only,
+    mapped_column,
+    relationship,
+    sessionmaker,
+)
 
 from collector import snapshot_from_payload
 from graph_builder import GraphBuilder
@@ -38,6 +45,15 @@ from models import (
     event_datetime_for_storage,
     hours_before_event,
 )
+from Flask_App.performance_cache import (
+    OPTIONS_CACHE_TTL_SECONDS,
+    PAGE_CACHE_TTL_SECONDS,
+    cache_key,
+    file_version,
+    invalidate_sport_cache,
+    page_cache,
+)
+from Flask_App.section_canonicalization import is_excluded_ticket_area
 from Flask_App.nfl_blueprint import (
     EASTERN,
     canonical_venue_name,
@@ -379,6 +395,10 @@ def _clean_text(value: Any, maximum: int = 250) -> str:
 
 def _normalized_country(value: Any) -> str:
     return _clean_text(value).casefold().replace(".", "")
+
+
+def _country_is_supported(value: Any) -> bool:
+    return _normalized_country(value) in SUPPORTED_COUNTRY_MARKERS
 
 
 def normalize_nhl_schedule_metadata(
@@ -922,6 +942,7 @@ def ingest_nhl_snapshot():
                 map_geometry=map_geometry,
                 currency=currency,
             )
+            invalidate_sport_cache("nhl")
     except (KeyError, TypeError, ValueError) as exc:
         return jsonify({"status": "error", "error": str(exc)}), 400
 
@@ -1122,37 +1143,49 @@ def _event_is_completed(event: NHLEvent, now: datetime) -> bool:
     return event_datetime_eastern(event.event_date) <= now.astimezone(EASTERN)
 
 
+
 def _nhl_home_context() -> dict[str, Any]:
+    """Build the league landing page without loading section or map payloads."""
+
     model = CreateNHLModel()
     now = datetime.now(timezone.utc)
     try:
         with model.getSession()() as session:
             all_games = (
                 session.query(NHLEvent)
+                .options(
+                    load_only(
+                        NHLEvent.id,
+                        NHLEvent.title,
+                        NHLEvent.event_date,
+                        NHLEvent.venue,
+                        NHLEvent.home_team,
+                        NHLEvent.canonical_venue,
+                        NHLEvent.provider_venue,
+                        NHLEvent.country,
+                        NHLEvent.currency,
+                        NHLEvent.game_type,
+                        NHLEvent.compacted_at,
+                    )
+                )
                 .order_by(NHLEvent.event_date)
                 .all()
             )
-            upcoming_games = [
-                game for game in all_games if not _event_is_completed(game, now)
+            all_games = [
+                game for game in all_games if _country_is_supported(game.country)
             ]
-            completed_games = [
-                game for game in all_games if _event_is_completed(game, now)
-            ]
+            upcoming_games = [game for game in all_games if not _event_is_completed(game, now)]
+            completed_games = [game for game in all_games if _event_is_completed(game, now)]
             games = upcoming_games + list(reversed(completed_games))
 
             games_dict: dict[str, list[dict[str, str]]] = {}
-            game_sections_dict: dict[str, dict[str, list[str]]] = {}
             arena_game_counts: dict[str, int] = {}
             currencies: set[str] = set()
             for game in games:
                 home_team = nhl_event_home_team(game)
                 if home_team is None:
                     continue
-                status = (
-                    "Completed"
-                    if _event_is_completed(game, now)
-                    else "Upcoming"
-                )
+                status = "Completed" if _event_is_completed(game, now) else "Upcoming"
                 venue = nhl_display_venue(game)
                 games_dict.setdefault(home_team, []).append(
                     {
@@ -1166,41 +1199,22 @@ def _nhl_home_context() -> dict[str, Any]:
                         "currency": game.currency or "USD",
                     }
                 )
-                game_sections_dict.setdefault(home_team, {})[
-                    str(game.id)
-                ] = sorted(set(game.sections or []))
                 if venue:
-                    arena_game_counts[venue] = (
-                        arena_game_counts.get(venue, 0) + 1
-                    )
+                    arena_game_counts[venue] = arena_game_counts.get(venue, 0) + 1
                 currencies.add(game.currency or "USD")
 
             games_dict = dict(sorted(games_dict.items()))
-            game_sections_dict = {
-                team: game_sections_dict[team] for team in games_dict
-            }
             arena_game_counts = dict(sorted(arena_game_counts.items()))
-            game_count = sum(len(rows) for rows in games_dict.values())
-            section_count = len(
-                {
-                    section
-                    for by_game in game_sections_dict.values()
-                    for sections in by_game.values()
-                    for section in sections
-                }
-            )
-            compacted_count = sum(
-                game.compacted_at is not None for game in all_games
-            )
+            compacted_count = sum(game.compacted_at is not None for game in all_games)
     finally:
         model.engine.dispose()
 
     return {
         "games_dict": games_dict,
-        "game_sections_dict": game_sections_dict,
+        "game_sections_dict": {},
         "team_count": len(games_dict),
-        "game_count": game_count,
-        "section_count": section_count,
+        "game_count": sum(len(rows) for rows in games_dict.values()),
+        "section_count": 0,
         "arena_count": len(arena_game_counts),
         "arena_game_counts": arena_game_counts,
         "upcoming_count": len(upcoming_games),
@@ -1210,9 +1224,107 @@ def _nhl_home_context() -> dict[str, Any]:
     }
 
 
+def _cached_nhl_home_context() -> dict[str, Any]:
+    version = file_version(nhl_database_path())
+    return page_cache.get_or_create(
+        cache_key("home", "nhl", version),
+        _nhl_home_context,
+        ttl_seconds=PAGE_CACHE_TTL_SECONDS,
+        tags=("nhl",),
+    )
+
+
+def _public_nhl_sections(values: list[str]) -> list[str]:
+    return sorted(
+        {
+            _clean_text(value, maximum=180)
+            for value in values or []
+            if _clean_text(value, maximum=180)
+            and not is_excluded_ticket_area(value)
+        },
+        key=str.casefold,
+    )
+
+
+def _nhl_options_context(home_team: str) -> dict[str, Any]:
+    selected = _clean_text(home_team, maximum=180)
+    if not selected:
+        return {"games": [], "sections_by_game": {}}
+
+    model = CreateNHLModel()
+    now = datetime.now(timezone.utc)
+    try:
+        with model.getSession()() as session:
+            events = (
+                session.query(NHLEvent)
+                .options(
+                    load_only(
+                        NHLEvent.id,
+                        NHLEvent.title,
+                        NHLEvent.event_date,
+                        NHLEvent.sections,
+                        NHLEvent.venue,
+                        NHLEvent.home_team,
+                        NHLEvent.canonical_venue,
+                        NHLEvent.provider_venue,
+                        NHLEvent.country,
+                        NHLEvent.currency,
+                        NHLEvent.game_type,
+                    )
+                )
+                .filter(NHLEvent.home_team == selected)
+                .order_by(NHLEvent.event_date)
+                .all()
+            )
+            events = [
+                event
+                for event in events
+                if _country_is_supported(event.country)
+                and nhl_event_home_team(event) == selected
+            ]
+    finally:
+        model.engine.dispose()
+
+    upcoming = [event for event in events if not _event_is_completed(event, now)]
+    completed = [event for event in events if _event_is_completed(event, now)]
+    ordered = upcoming + list(reversed(completed))
+    games = []
+    sections_by_game = {}
+    for event in ordered:
+        status = "Completed" if _event_is_completed(event, now) else "Upcoming"
+        venue = nhl_display_venue(event)
+        games.append(
+            {
+                "value": str(event.id),
+                "label": (
+                    f"{status} · {game_type_label(event.game_type)} · "
+                    f"{format_nhl_title(event)} · {venue}"
+                ),
+            }
+        )
+        sections_by_game[str(event.id)] = _public_nhl_sections(event.sections)
+    return {"games": games, "sections_by_game": sections_by_game}
+
+
+def _cached_nhl_options(home_team: str) -> dict[str, Any]:
+    version = file_version(nhl_database_path())
+    return page_cache.get_or_create(
+        cache_key("options", "nhl", version, home_team),
+        lambda: _nhl_options_context(home_team),
+        ttl_seconds=OPTIONS_CACHE_TTL_SECONDS,
+        tags=("nhl",),
+    )
+
+
+
 @nhl_blueprint.get("/nhl")
 def nhl_home():
-    return render_template("NHLHomeScreen.html", **_nhl_home_context())
+    return render_template("NHLHomeScreen.html", **_cached_nhl_home_context())
+
+
+@nhl_blueprint.get("/api/nhl/options")
+def nhl_options():
+    return jsonify(_cached_nhl_options(request.args.get("team", "")))
 
 
 @nhl_blueprint.get("/nhl/map")

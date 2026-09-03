@@ -11,16 +11,6 @@
 {% endblock %}
 
 {% block content %}
-  {% set visible_sections = namespace(names=[]) %}
-  {% for by_game in game_sections_dict.values() %}
-    {% for sections in by_game.values() %}
-      {% for section in sections %}
-        {% if not is_parking_section(section) and section not in visible_sections.names %}
-          {% set visible_sections.names = visible_sections.names + [section] %}
-        {% endif %}
-      {% endfor %}
-    {% endfor %}
-  {% endfor %}
 <div class="nfl-page mlb-page">
   <section class="nfl-hero nfl-hero--stadium-first nfl-hero--compact mlb-hero">
     <div class="nfl-hero__copy">
@@ -39,7 +29,6 @@
       <dl class="nfl-metrics" aria-label="MLB database totals">
         <div><dt>{{ games_dict|length }}</dt><dd>Home teams</dd></div>
         <div><dt>{{ event_count }}</dt><dd>Games tracked</dd></div>
-        <div><dt>{{ visible_sections.names|length }}</dt><dd>Sections compared</dd></div>
       </dl>
     </div>
 
@@ -107,7 +96,7 @@
           <ul><li>Normalized percentage view</li><li>Switch to dollar pricing</li><li>Built from multiple events</li></ul>
         </div>
         <form class="selection-form" data-analysis="market">
-          <div class="field"><label for="market-place">1. Choose a team</label><select id="market-place" class="place-select"><option value="">Select a team</option>{% for place in event_dict %}<option value="{{ place }}">{{ mlb_team_for_venue(place) }} · {{ place }}</option>{% endfor %}</select></div>
+          <div class="field"><label for="market-place">1. Choose a team</label><select id="market-place" class="place-select"><option value="">Select a team</option>{% for place in games_dict %}<option value="{{ place }}">{{ mlb_team_for_venue(place) }} · {{ place }}</option>{% endfor %}</select></div>
           <div class="field"><label for="market-section">2. Choose a section</label><select id="market-section" class="section-select" disabled><option value="">Select a section</option></select></div>
           <button class="button button--primary submit-analysis" type="submit" disabled>View market trend <span>&#8594;</span></button>
           <p class="form-note"><span>&#9432;</span> Uses historical marketplace observations.</p>
@@ -137,7 +126,7 @@
           <ul><li>Based on observed history</li><li>Focused timing output</li><li>Sample size included</li></ul>
         </div>
         <form class="selection-form" data-analysis="timing">
-          <div class="field"><label for="timing-place">1. Choose a team</label><select id="timing-place" class="place-select"><option value="">Select a team</option>{% for place in event_dict %}<option value="{{ place }}">{{ mlb_team_for_venue(place) }} · {{ place }}</option>{% endfor %}</select></div>
+          <div class="field"><label for="timing-place">1. Choose a team</label><select id="timing-place" class="place-select"><option value="">Select a team</option>{% for place in games_dict %}<option value="{{ place }}">{{ mlb_team_for_venue(place) }} · {{ place }}</option>{% endfor %}</select></div>
           <div class="field"><label for="timing-section">2. Choose a section</label><select id="timing-section" class="section-select" disabled><option value="">Select a section</option></select></div>
           <button class="button button--primary submit-analysis" type="submit" disabled>Find buying window <span>&#8594;</span></button>
           <p class="form-note"><span>&#9432;</span> A historical signal, not a guaranteed future price.</p>
@@ -148,13 +137,11 @@
 </div>
 
 <script>
-  const placesData = {{ event_dict | tojson }};
-  const gamesData = {{ games_dict | tojson }};
-  const gameSectionsData = {{ game_sections_dict | tojson }};
+  const baseballOptionsUrl = {{ url_for('baseball_options') | tojson }};
 </script>
 {% endblock %}
 
 {% block scripts %}
-  <script src="{{ url_for('static', filename='js/script.js') }}?v=5"></script>
+  <script src="{{ url_for('static', filename='js/script.js') }}?v=6"></script>
   <script src="{{ url_for('static', filename='js/nfl-stadium.js') }}?v=2"></script>
 {% endblock %}

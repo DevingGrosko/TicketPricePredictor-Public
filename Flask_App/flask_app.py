@@ -6,6 +6,7 @@ import re
 
 from flask import Flask, jsonify, render_template, request
 from sqlalchemy import select
+from sqlalchemy.orm import load_only
 
 from collector import (
     create_daily_backup,
@@ -19,6 +20,7 @@ from models import (
     ConcertEvent,
     CreateConcertModel,
     CreateModel,
+    database_path,
     Event,
     Iteration,
     captured_datetime_for_storage,
@@ -29,6 +31,16 @@ from models import (
     store_concert_snapshot,
     write_concert_audit,
 )
+
+from Flask_App.performance_cache import (
+    OPTIONS_CACHE_TTL_SECONDS,
+    PAGE_CACHE_TTL_SECONDS,
+    cache_key,
+    file_version,
+    invalidate_sport_cache,
+    page_cache,
+)
+from Flask_App.section_canonicalization import is_excluded_ticket_area
 
 # Load .env only in local development. PythonAnywhere also keeps its values in
 # this file, and the storage layer reloads it before resolving database paths.
@@ -160,6 +172,7 @@ def ingest_collector_snapshot():
             iteration_id,
             captured_at=captured_at,
         )
+        invalidate_sport_cache("mlb")
     except (KeyError, TypeError, ValueError) as exc:
         return jsonify({"status": "error", "error": str(exc)}), 400
 
@@ -269,58 +282,137 @@ def find_event(place, identifier):
         )
 
 
+def _public_option_sections(values):
+    return sorted(
+        {
+            " ".join(str(value or "").split())
+            for value in values or []
+            if " ".join(str(value or "").split())
+            and not is_excluded_ticket_area(value)
+        },
+        key=str.casefold,
+    )
+
+
+def _baseball_home_context():
+    """Build the lightweight landing page without loading section inventories."""
+
+    model = CreateModel()
+    try:
+        with model.getSession()() as session:
+            data = [
+                event
+                for event in (
+                    session.query(Event)
+                    .options(
+                        load_only(
+                            Event.id,
+                            Event.title,
+                            Event.event_date,
+                            Event.URL,
+                            Event.Place,
+                        )
+                    )
+                    .order_by(Event.event_date)
+                    .all()
+                )
+                if is_baseball_event(event)
+                and event_has_complete_public_data(event)
+                and event.Place
+            ]
+
+            games_dict = {}
+            for event in data:
+                games_dict.setdefault(event.Place, []).append(
+                    {"value": str(event.id), "label": format_event_title(event)}
+                )
+            games_dict = dict(sorted(games_dict.items()))
+    finally:
+        model.engine.dispose()
+
+    return {
+        "event_dict": {place: [] for place in games_dict},
+        "games_dict": games_dict,
+        "game_sections_dict": {},
+        "venue_count": len(games_dict),
+        "event_count": len(data),
+        "section_count": 0,
+    }
+
+
+def _cached_baseball_home_context():
+    version = file_version(database_path())
+    return page_cache.get_or_create(
+        cache_key("home", "mlb", version),
+        _baseball_home_context,
+        ttl_seconds=PAGE_CACHE_TTL_SECONDS,
+        tags=("mlb",),
+    )
+
+
+def _baseball_options_context(place: str):
+    selected = " ".join(str(place or "").split())
+    if not selected:
+        return {"games": [], "multi_sections": [], "sections_by_game": {}}
+
+    model = CreateModel()
+    try:
+        with model.getSession()() as session:
+            events = (
+                session.query(Event)
+                .filter(Event.Place == selected)
+                .order_by(Event.event_date)
+                .all()
+            )
+            events = [
+                event
+                for event in events
+                if is_baseball_event(event) and event_has_complete_public_data(event)
+            ]
+    finally:
+        model.engine.dispose()
+
+    games = []
+    sections_by_game = {}
+    games_by_section = {}
+    for event in events:
+        sections = _public_option_sections(event.event_sections)
+        games.append({"value": str(event.id), "label": format_event_title(event)})
+        sections_by_game[str(event.id)] = sections
+        for section in sections:
+            games_by_section.setdefault(section, set()).add(event.id)
+
+    multi_sections = sorted(
+        (section for section, game_ids in games_by_section.items() if len(game_ids) > 1),
+        key=str.casefold,
+    )
+    return {
+        "games": games,
+        "multi_sections": multi_sections,
+        "sections_by_game": sections_by_game,
+    }
+
+
+def _cached_baseball_options(place: str):
+    version = file_version(database_path())
+    return page_cache.get_or_create(
+        cache_key("options", "mlb", version, place),
+        lambda: _baseball_options_context(place),
+        ttl_seconds=OPTIONS_CACHE_TTL_SECONDS,
+        tags=("mlb",),
+    )
+
+
 @app.route("/baseball", methods=["GET", "POST"])
 @app.route("/", methods=["GET", "POST"])
 def home():
-    SessionLocal = CreateModel().getSession()
-    with SessionLocal() as session:
-        data = [
-            event
-            for event in session.query(Event).order_by(Event.event_date).all()
-            if is_baseball_event(event) and event_has_complete_public_data(event)
-        ]
-        section_games = {}
-        game_sections_dict = {}
-        for event in data:
-            if not event.Place:
-                continue
-            sections = sorted(set(event.event_sections or []))
-            game_sections_dict.setdefault(event.Place, {})[str(event.id)] = sections
-            for section in sections:
-                section_games.setdefault((event.Place, section), set()).add(event.id)
+    return render_template("HomeScreen.html", **_cached_baseball_home_context())
 
-        event_dict = {}
-        for (place, section), game_ids in section_games.items():
-            if len(game_ids) > 1:
-                event_dict.setdefault(place, []).append(section)
-        event_dict = {
-            place: sorted(sections)
-            for place, sections in event_dict.items()
-        }
 
-        games_dict = {}
-        for event in data:
-            if not event.Place:
-                continue
-            games_dict.setdefault(event.Place, []).append(
-                {"value": str(event.id), "label": format_event_title(event)}
-            )
+@app.get("/api/baseball/options")
+def baseball_options():
+    return jsonify(_cached_baseball_options(request.args.get("venue", "")))
 
-        venue_count = len(event_dict)
-        event_count = len(data)
-        section_count = len(
-            {section for sections in event_dict.values() for section in sections}
-        )
-
-    return render_template(
-        "HomeScreen.html",
-        event_dict=event_dict,
-        games_dict=games_dict,
-        game_sections_dict=game_sections_dict,
-        venue_count=venue_count,
-        event_count=event_count,
-        section_count=section_count,
-    )
 
 
 @app.route("/graph", methods=["GET", "POST"])

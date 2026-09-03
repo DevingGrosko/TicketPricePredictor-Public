@@ -36,7 +36,14 @@ from sqlalchemy import (
 )
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.mutable import MutableList
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
+from sqlalchemy.orm import (
+    DeclarativeBase,
+    Mapped,
+    load_only,
+    mapped_column,
+    relationship,
+    sessionmaker,
+)
 
 from collector import snapshot_from_payload
 from graph_builder import GraphBuilder
@@ -46,6 +53,16 @@ from models import (
     event_datetime_for_storage,
     hours_before_event,
 )
+from Flask_App.performance_cache import (
+    OPTIONS_CACHE_TTL_SECONDS,
+    PAGE_CACHE_TTL_SECONDS,
+    cache_key,
+    file_version,
+    invalidate_sport_cache,
+    page_cache,
+)
+from Flask_App.section_canonicalization import is_excluded_ticket_area
+
 # Inlined for the restricted PythonAnywhere deployment.
 EASTERN = ZoneInfo("America/New_York")
 MAX_GEOMETRY_SECTIONS = 500
@@ -1309,6 +1326,7 @@ def ingest_nfl_snapshot():
                 schedule_metadata=schedule_metadata,
                 map_geometry=map_geometry,
             )
+            invalidate_sport_cache("nfl")
     except (KeyError, TypeError, ValueError) as exc:
         return jsonify({"status": "error", "error": str(exc)}), 400
 
@@ -1486,8 +1504,10 @@ def _event_is_completed(event: NFLEvent, now: datetime) -> bool:
     return event_datetime_eastern(event.event_date) <= now.astimezone(EASTERN)
 
 
+
 def _nfl_home_context() -> dict[str, Any]:
-    """Expose every tracked game through one persistent NFL history."""
+    """Expose the game directory without loading every section or map payload."""
+
     model = CreateNFLModel()
     now = datetime.now(timezone.utc)
     try:
@@ -1496,29 +1516,28 @@ def _nfl_home_context() -> dict[str, Any]:
                 game
                 for game in (
                     session.query(NFLEvent)
+                    .options(
+                        load_only(
+                            NFLEvent.id,
+                            NFLEvent.title,
+                            NFLEvent.event_date,
+                            NFLEvent.venue,
+                            NFLEvent.home_team,
+                            NFLEvent.canonical_venue,
+                            NFLEvent.provider_venue,
+                            NFLEvent.country,
+                        )
+                    )
                     .order_by(NFLEvent.event_date)
                     .all()
                 )
                 if not _country_is_explicitly_non_us(game.country)
             ]
-            upcoming_games = [
-                game
-                for game in all_games
-                if not _event_is_completed(game, now)
-            ]
-            completed_games = [
-                game
-                for game in all_games
-                if _event_is_completed(game, now)
-            ]
-            # Upcoming games stay chronological; completed games follow
-            # newest first. Both remain in the same selectable history.
+            upcoming_games = [game for game in all_games if not _event_is_completed(game, now)]
+            completed_games = [game for game in all_games if _event_is_completed(game, now)]
             games = upcoming_games + list(reversed(completed_games))
-            upcoming_count = len(upcoming_games)
-            completed_count = len(completed_games)
 
             games_dict: dict[str, list[dict[str, str]]] = {}
-            game_sections_dict: dict[str, dict[str, list[str]]] = {}
             stadium_game_counts: dict[str, int] = {}
             for game in games:
                 home_team = nfl_event_home_team(game)
@@ -1530,58 +1549,128 @@ def _nfl_home_context() -> dict[str, Any]:
                 games_dict.setdefault(home_team, []).append(
                     {
                         "value": str(game.id),
-                        "label": (
-                            f"{status} · {format_nfl_title(game)} · "
-                            f"{venue}"
-                        ),
+                        "label": f"{status} · {format_nfl_title(game)} · {venue}",
                         "status": status.casefold(),
                         "venue": venue,
                     }
                 )
-                game_sections_dict.setdefault(home_team, {})[
-                    str(game.id)
-                ] = sorted(set(game.sections or []))
                 if venue:
-                    stadium_game_counts[venue] = (
-                        stadium_game_counts.get(venue, 0) + 1
-                    )
+                    stadium_game_counts[venue] = stadium_game_counts.get(venue, 0) + 1
 
             games_dict = dict(sorted(games_dict.items()))
-            game_sections_dict = {
-                team: game_sections_dict[team] for team in games_dict
-            }
             stadium_game_counts = dict(sorted(stadium_game_counts.items()))
-            team_count = len(games_dict)
-            game_count = sum(
-                len(team_games) for team_games in games_dict.values()
-            )
-            section_count = len(
-                {
-                    section
-                    for by_game in game_sections_dict.values()
-                    for sections in by_game.values()
-                    for section in sections
-                }
-            )
     finally:
         model.engine.dispose()
 
     return {
         "games_dict": games_dict,
-        "game_sections_dict": game_sections_dict,
-        "team_count": team_count,
-        "game_count": game_count,
-        "section_count": section_count,
+        "game_sections_dict": {},
+        "team_count": len(games_dict),
+        "game_count": sum(len(rows) for rows in games_dict.values()),
+        "section_count": 0,
         "stadium_count": len(stadium_game_counts),
         "stadium_game_counts": stadium_game_counts,
-        "upcoming_count": upcoming_count,
-        "completed_count": completed_count,
+        "upcoming_count": len(upcoming_games),
+        "completed_count": len(completed_games),
     }
+
+
+def _cached_nfl_home_context() -> dict[str, Any]:
+    version = file_version(nfl_database_path())
+    return page_cache.get_or_create(
+        cache_key("home", "nfl", version),
+        _nfl_home_context,
+        ttl_seconds=PAGE_CACHE_TTL_SECONDS,
+        tags=("nfl",),
+    )
+
+
+def _public_nfl_sections(values: Iterable[str]) -> list[str]:
+    return sorted(
+        {
+            clean_text(value, maximum=180)
+            for value in values or []
+            if clean_text(value, maximum=180)
+            and not is_excluded_ticket_area(value)
+        },
+        key=str.casefold,
+    )
+
+
+def _nfl_options_context(home_team: str) -> dict[str, Any]:
+    selected = clean_text(home_team, maximum=180)
+    if not selected:
+        return {"games": [], "sections_by_game": {}}
+
+    model = CreateNFLModel()
+    now = datetime.now(timezone.utc)
+    try:
+        with model.getSession()() as session:
+            events = (
+                session.query(NFLEvent)
+                .options(
+                    load_only(
+                        NFLEvent.id,
+                        NFLEvent.title,
+                        NFLEvent.event_date,
+                        NFLEvent.sections,
+                        NFLEvent.venue,
+                        NFLEvent.home_team,
+                        NFLEvent.canonical_venue,
+                        NFLEvent.provider_venue,
+                        NFLEvent.country,
+                    )
+                )
+                .filter(NFLEvent.home_team == selected)
+                .order_by(NFLEvent.event_date)
+                .all()
+            )
+            events = [
+                event
+                for event in events
+                if not _country_is_explicitly_non_us(event.country)
+                and nfl_event_home_team(event) == selected
+            ]
+    finally:
+        model.engine.dispose()
+
+    upcoming = [event for event in events if not _event_is_completed(event, now)]
+    completed = [event for event in events if _event_is_completed(event, now)]
+    ordered = upcoming + list(reversed(completed))
+    games = []
+    sections_by_game = {}
+    for event in ordered:
+        status = "Completed" if _event_is_completed(event, now) else "Upcoming"
+        venue = nfl_display_venue(event)
+        games.append(
+            {
+                "value": str(event.id),
+                "label": f"{status} · {format_nfl_title(event)} · {venue}",
+            }
+        )
+        sections_by_game[str(event.id)] = _public_nfl_sections(event.sections)
+    return {"games": games, "sections_by_game": sections_by_game}
+
+
+def _cached_nfl_options(home_team: str) -> dict[str, Any]:
+    version = file_version(nfl_database_path())
+    return page_cache.get_or_create(
+        cache_key("options", "nfl", version, home_team),
+        lambda: _nfl_options_context(home_team),
+        ttl_seconds=OPTIONS_CACHE_TTL_SECONDS,
+        tags=("nfl",),
+    )
+
 
 
 @nfl_blueprint.get("/nfl")
 def nfl_home():
-    return render_template("NFLHomeScreen.html", **_nfl_home_context())
+    return render_template("NFLHomeScreen.html", **_cached_nfl_home_context())
+
+
+@nfl_blueprint.get("/api/nfl/options")
+def nfl_options():
+    return jsonify(_cached_nfl_options(request.args.get("team", "")))
 
 
 @nfl_blueprint.get("/nfl/archive")
