@@ -55,6 +55,17 @@ jobs:
           git checkout -B perf/materialized-analytics origin/main
           git apply --check /tmp/materialized.patch
           git apply /tmp/materialized.patch
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("Flask_App/materialized_analytics.py")
+          text = path.read_text()
+          old = "ensure_summary_schema(session.get_bind())"
+          new = "ensure_summary_schema(session.connection())"
+          if text.count(old) != 7:
+              raise RuntimeError("Expected seven session schema calls to update")
+          path.write_text(text.replace(old, new))
+          PY
           git diff --check
 
       - name: Install dependencies
