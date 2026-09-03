@@ -230,6 +230,11 @@ class CreateModel:
         if not db_path.exists():
             raise FileNotFoundError(f"Database file missing: {db_path}")
         _ensure_baseball_performance_indexes(self.engine, db_path)
+        # Imported lazily to avoid a module cycle: the analytics helper uses
+        # the shared timezone conversion functions defined above.
+        from Flask_App.materialized_analytics import ensure_summary_schema
+
+        ensure_summary_schema(self.engine)
 
         self.SessionLocal = sessionmaker(
             bind=self.engine,

@@ -23,6 +23,7 @@ from models import (
     database_path,
     Event,
     Iteration,
+    Ticket,
     captured_datetime_for_storage,
     clean_event_title,
     create_concert_daily_backup,
@@ -37,10 +38,14 @@ from Flask_App.performance_cache import (
     PAGE_CACHE_TTL_SECONDS,
     cache_key,
     file_version,
-    invalidate_sport_cache,
     page_cache,
 )
 from Flask_App.section_canonicalization import is_excluded_ticket_area
+from Flask_App.analytics_maintenance import backfill_sport
+from Flask_App.materialized_analytics import (
+    refresh_event_summary_safely,
+    timeline_bucket_slot,
+)
 
 # Load .env only in local development. PythonAnywhere also keeps its values in
 # this file, and the storage layer reloads it before resolving database paths.
@@ -85,6 +90,40 @@ def authorized_collector_request():
     return hmac.compare_digest(supplied, f"Bearer {configured}")
 
 
+@app.post("/api/analytics/backfill")
+def analytics_backfill():
+    """Refresh a bounded batch of materialized event summaries."""
+    if not authorized_collector_request():
+        return jsonify({"status": "error", "error": "unauthorized"}), 401
+
+    payload = request.get_json(silent=True)
+    if payload is None:
+        payload = {}
+    if not isinstance(payload, dict):
+        return jsonify({"status": "error", "error": "invalid JSON body"}), 400
+
+    sport = str(payload.get("sport") or request.args.get("sport") or "").casefold()
+    try:
+        limit = int(payload.get("limit") or request.args.get("limit") or 3)
+        result = backfill_sport(sport, limit=limit)
+    except ValueError as exc:
+        return jsonify({"status": "error", "error": str(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({"status": "busy", "error": str(exc)}), 409
+    except Exception as exc:
+        # This endpoint is collector-authenticated and exists specifically so
+        # deployment maintenance failures are visible and actionable.
+        return jsonify(
+            {
+                "status": "error",
+                "exception": type(exc).__name__,
+                "error": str(exc),
+            }
+        ), 500
+
+    return jsonify({"status": "ok", **result.as_dict()})
+
+
 def concert_snapshot_from_payload(payload):
     """Apply concert-specific validation without importing collector modules
     that PythonAnywhere's restricted deploy command does not synchronize.
@@ -101,6 +140,43 @@ def concert_snapshot_from_payload(payload):
     if not title:
         raise ValueError("Concert snapshot is missing its title.")
     return url, event_date, captured_at, replace(snapshot, title=title)
+
+
+def _refresh_mlb_materialized_summary(
+    *,
+    event_id: int,
+    event_date: datetime,
+    captured_at: datetime,
+    venue: str,
+) -> str:
+    """Update only the newly affected MLB time window after raw commit."""
+
+    slot = timeline_bucket_slot("mlb", event_date, captured_at)
+    if slot is None:
+        return "outside-analysis-window"
+
+    model = None
+    try:
+        model = CreateModel()
+        result = refresh_event_summary_safely(
+            model.getSession(),
+            sport_key="mlb",
+            event_id=event_id,
+            event_date=event_date,
+            venue=venue,
+            iteration_model=Iteration,
+            ticket_model=Ticket,
+            bucket_slots=(slot,),
+        )
+        return "updated" if result is not None else "deferred"
+    except Exception:
+        app.logger.exception(
+            "Deferred MLB materialized analytics refresh for event %s", event_id
+        )
+        return "deferred"
+    finally:
+        if model is not None:
+            model.engine.dispose()
 
 
 @app.post("/api/collector/snapshot")
@@ -172,7 +248,12 @@ def ingest_collector_snapshot():
             iteration_id,
             captured_at=captured_at,
         )
-        invalidate_sport_cache("mlb")
+        analytics_status = _refresh_mlb_materialized_summary(
+            event_id=event_id,
+            event_date=event_date,
+            captured_at=captured_at,
+            venue=snapshot.venue,
+        )
     except (KeyError, TypeError, ValueError) as exc:
         return jsonify({"status": "error", "error": str(exc)}), 400
 
@@ -184,6 +265,7 @@ def ingest_collector_snapshot():
             "iteration_id": iteration_id,
             "sections": len(snapshot.sections),
             "captured_at": captured_at.isoformat(),
+            "analytics": analytics_status,
         }
     ), 201
 

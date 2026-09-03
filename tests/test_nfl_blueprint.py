@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from flask import Flask
 
 from collector import EventSnapshot, SectionSnapshot, snapshot_to_payload
+from Flask_App.materialized_analytics import read_summary_rows
 from Flask_App.nfl_blueprint import (
     NFLBase,
     NFLEvent,
@@ -73,6 +74,8 @@ class NFLDatabaseIsolationTests(unittest.TestCase):
                     self.assertEqual(session.query(NFLEvent).count(), 1)
                     self.assertEqual(session.query(NFLIteration).count(), 1)
                     self.assertEqual(session.query(NFLTicket).count(), 10)
+                    summaries = read_summary_rows(session, [event_id])
+                    self.assertEqual(len(summaries), 10)
             finally:
                 model.engine.dispose()
 

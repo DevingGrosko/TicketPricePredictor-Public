@@ -64,6 +64,8 @@ jobs:
             nhl_collector.py \
             nhl_schedule_collector.py \
             Flask_App/flask_app.py \
+            Flask_App/analytics_maintenance.py \
+            Flask_App/materialized_analytics.py \
             Flask_App/nfl_blueprint.py \
             Flask_App/section_canonicalization.py \
             Flask_App/nfl_stadium_blueprint.py \
@@ -114,6 +116,39 @@ jobs:
             -o StrictHostKeyChecking=yes \
             bunnyjeff@ssh.pythonanywhere.com deploy
 
+      - name: Backfill materialized ticket analytics
+        timeout-minutes: 120
+        env:
+          COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
+        run: |
+          set -euo pipefail
+          base="https://bunnyjeff.pythonanywhere.com"
+          for sport in mlb nfl nhl; do
+            echo "Backfilling $sport materialized summaries"
+            complete=0
+            for attempt in $(seq 1 300); do
+              response="$(
+                curl -fsS --max-time 180 \
+                  -X POST \
+                  -H "Authorization: Bearer $COLLECTOR_INGEST_TOKEN" \
+                  -H 'Content-Type: application/json' \
+                  -d "{\"sport\":\"$sport\",\"limit\":5}" \
+                  "$base/api/analytics/backfill"
+              )"
+              echo "$response"
+              complete="$(
+                python -c 'import json, sys; print(1 if json.load(sys.stdin).get("complete") else 0)' <<< "$response"
+              )"
+              if [[ "$complete" == "1" ]]; then
+                break
+              fi
+            done
+            if [[ "$complete" != "1" ]]; then
+              echo "$sport backfill did not complete within 300 batches" >&2
+              exit 1
+            fi
+          done
+
       - name: Verify public pages and API startup
         run: |
           base="https://bunnyjeff.pythonanywhere.com"
@@ -127,9 +162,10 @@ jobs:
             nfl_api_status="$(curl -sS --max-time 15 -o /tmp/nfl-api.txt -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$base/api/nfl/snapshot" || true)"
             nhl_api_status="$(curl -sS --max-time 15 -o /tmp/nhl-api.txt -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$base/api/nhl/snapshot" || true)"
             concert_api_status="$(curl -sS --max-time 15 -o /tmp/concert-api.txt -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$base/api/concerts/snapshot" || true)"
+            analytics_api_status="$(curl -sS --max-time 15 -o /tmp/analytics-api.txt -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"sport":"mlb"}' "$base/api/analytics/backfill" || true)"
 
-            echo "Attempt $attempt: home=$home_status nfl=$nfl_status nfl_archive=$nfl_archive_status nhl=$nhl_status concerts=$concerts_status baseball_api=$baseball_api_status nfl_api=$nfl_api_status nhl_api=$nhl_api_status concert_api=$concert_api_status"
-            if [[ "$home_status" == "200" && "$nfl_status" == "200" && "$nfl_archive_status" == "200" && "$nhl_status" == "200" && "$concerts_status" == "200" && "$baseball_api_status" == "401" && "$nfl_api_status" == "401" && "$nhl_api_status" == "401" && "$concert_api_status" == "401" ]]; then
+            echo "Attempt $attempt: home=$home_status nfl=$nfl_status nfl_archive=$nfl_archive_status nhl=$nhl_status concerts=$concerts_status baseball_api=$baseball_api_status nfl_api=$nfl_api_status nhl_api=$nhl_api_status concert_api=$concert_api_status analytics_api=$analytics_api_status"
+            if [[ "$home_status" == "200" && "$nfl_status" == "200" && "$nfl_archive_status" == "200" && "$nhl_status" == "200" && "$concerts_status" == "200" && "$baseball_api_status" == "401" && "$nfl_api_status" == "401" && "$nhl_api_status" == "401" && "$concert_api_status" == "401" && "$analytics_api_status" == "401" ]]; then
               echo "PythonAnywhere startup verification passed."
               exit 0
             fi
@@ -154,6 +190,8 @@ jobs:
           cat /tmp/nhl-api.txt || true
           echo "Concert API response:"
           cat /tmp/concert-api.txt || true
+          echo "Analytics API response:"
+          cat /tmp/analytics-api.txt || true
           exit 1
 
       - name: Collect PythonAnywhere diagnostics
