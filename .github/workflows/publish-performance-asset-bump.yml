@@ -1,0 +1,41 @@
+name: Publish performance asset cache bust
+
+on:
+  push:
+    branches:
+      - ops/publish-performance-asset-bump
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Update asset versions on a clean branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B fix/performance-asset-versions origin/main
+          python - <<'PY'
+          from pathlib import Path
+          replacements = {
+              "Flask_App/templates/HomeScreen.html": ("js/script.js') }}?v=5", "js/script.js') }}?v=6"),
+              "Flask_App/templates/NFLHomeScreen.html": ("js/nfl.js') }}?v=4", "js/nfl.js') }}?v=5"),
+              "Flask_App/templates/NHLHomeScreen.html": ("js/nhl.js') }}?v=2", "js/nhl.js') }}?v=3"),
+          }
+          for filename, (old, new) in replacements.items():
+              path = Path(filename)
+              text = path.read_text()
+              if old not in text:
+                  raise SystemExit(f"Missing expected asset version in {filename}")
+              path.write_text(text.replace(old, new, 1))
+          PY
+          git add Flask_App/templates/HomeScreen.html Flask_App/templates/NFLHomeScreen.html Flask_App/templates/NHLHomeScreen.html
+          git commit -m "Bust caches for lazy section scripts"
+          git push --force origin HEAD:fix/performance-asset-versions
