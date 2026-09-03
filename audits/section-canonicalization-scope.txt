@@ -1,0 +1,1 @@
+Production scope: MLB, NFL, and NHL team-report rankings, timelines, section detail pages, venue directory counts, and team-card tracked-area counts. Raw collector storage is unchanged.
