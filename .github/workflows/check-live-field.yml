@@ -1,9 +1,12 @@
-name: Check live field page
+name: Check every live MLB field page
 
 on:
   push:
     branches:
       - diagnose/page-performance-2026-09-03
+    paths:
+      - ".github/workflows/check-live-field.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -11,17 +14,72 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
-      - name: Request representative MLB field page
+      - name: Crawl every MLB team report
         shell: bash
         run: |
-          set -u
-          url="https://bunnyjeff.pythonanywhere.com/baseball/stadium?venue=Fenway%20Park"
-          status="$(curl -L -sS --max-time 90 -D /tmp/headers.txt -o /tmp/body.html -w '%{http_code}' "$url" || true)"
-          echo "STATUS=$status"
-          echo "HEADERS"
-          cat /tmp/headers.txt || true
-          echo "BODY_START"
-          head -c 2000 /tmp/body.html || true
-          echo
-          test "$status" = "200"
+          python - <<'PY'
+          from __future__ import annotations
+
+          from html.parser import HTMLParser
+          import sys
+          import time
+          from urllib.parse import urljoin, urlparse, parse_qs
+          from urllib.request import Request, urlopen
+          from urllib.error import HTTPError, URLError
+
+          BASE = "https://bunnyjeff.pythonanywhere.com"
+
+          class LinkParser(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.links = []
+
+              def handle_starttag(self, tag, attrs):
+                  if tag != "a":
+                      return
+                  href = dict(attrs).get("href")
+                  if href and href.startswith("/baseball/stadium?venue="):
+                      self.links.append(urljoin(BASE, href))
+
+          def request(url: str, timeout: int = 120):
+              started = time.perf_counter()
+              req = Request(url, headers={"User-Agent": "TicketSignal-production-audit/1.0"})
+              try:
+                  with urlopen(req, timeout=timeout) as response:
+                      body = response.read()
+                      return response.status, time.perf_counter() - started, body
+              except HTTPError as exc:
+                  body = exc.read()
+                  return exc.code, time.perf_counter() - started, body
+              except (URLError, TimeoutError) as exc:
+                  return 0, time.perf_counter() - started, repr(exc).encode()
+
+          status, elapsed, body = request(BASE + "/", timeout=60)
+          print(f"HOME|{status}|{elapsed:.3f}|{len(body)}")
+          if status != 200:
+              print(body[:2000].decode("utf-8", "replace"))
+              sys.exit(1)
+
+          parser = LinkParser()
+          parser.feed(body.decode("utf-8", "replace"))
+          links = list(dict.fromkeys(parser.links))
+          print(f"FIELDS|{len(links)}")
+
+          failures = []
+          for index, url in enumerate(links, 1):
+              venue = parse_qs(urlparse(url).query).get("venue", [url])[0]
+              status, elapsed, body = request(url, timeout=150)
+              print(f"RESULT|{index}/{len(links)}|{venue}|{status}|{elapsed:.3f}|{len(body)}")
+              if status != 200:
+                  snippet = body[:2000].decode("utf-8", "replace").replace("\n", " ")
+                  print(f"BODY|{venue}|{snippet}")
+                  failures.append((venue, status, elapsed))
+
+          if failures:
+              print("FAILURES")
+              for venue, status, elapsed in failures:
+                  print(f"{venue}|{status}|{elapsed:.3f}")
+              sys.exit(1)
+          PY
