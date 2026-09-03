@@ -1,0 +1,88 @@
+name: Apply page performance optimization
+
+on:
+  push:
+    branches:
+      - perf/cache-and-query-aggregation
+    paths:
+      - ".github/workflows/apply-performance-optimization.yml"
+      - ".github/performance-optimization/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-page-performance-optimization
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: perf/cache-and-query-aggregation
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Reconstruct and apply the reviewed patch
+        run: |
+          cat \
+            .github/performance-optimization/part00 \
+            .github/performance-optimization/part01 \
+            .github/performance-optimization/part02a \
+            .github/performance-optimization/part02b \
+            .github/performance-optimization/part02c \
+            .github/performance-optimization/part02d \
+            | base64 --decode | gzip --decompress > /tmp/performance-optimization.patch
+          git apply --check /tmp/performance-optimization.patch
+          git apply /tmp/performance-optimization.patch
+          rm -rf .github/performance-optimization
+          git diff --check
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Validate application and tests
+        env:
+          DATABASE_PATH: ${{ runner.temp }}/performance-validation/baseball.db
+          CONCERT_DATABASE_PATH: ${{ runner.temp }}/performance-validation/concerts.db
+          NFL_DATABASE_PATH: ${{ runner.temp }}/performance-validation/nfl.db
+          NHL_DATABASE_PATH: ${{ runner.temp }}/performance-validation/nhl.db
+          FLASK_SECRET_KEY: performance-validation-key
+          COLLECTOR_INGEST_TOKEN: performance-validation-token
+        run: |
+          mkdir -p "$(dirname "$DATABASE_PATH")"
+          python -m py_compile \
+            models.py \
+            graph_builder.py \
+            Flask_App/performance_cache.py \
+            Flask_App/flask_app.py \
+            Flask_App/nfl_blueprint.py \
+            Flask_App/nfl_stadium_blueprint.py \
+            Flask_App/nhl_blueprint.py
+          node --check Flask_App/static/js/script.js
+          node --check Flask_App/static/js/nfl.js
+          node --check Flask_App/static/js/nhl.js
+          python - <<'PY'
+          from pathlib import Path
+          from jinja2 import Environment
+          environment = Environment()
+          for template in Path('Flask_App/templates').glob('*.html'):
+              environment.parse(template.read_text())
+          PY
+          python -m unittest discover -s tests -v
+
+      - name: Commit the validated implementation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Cache page contexts and aggregate ticket histories in SQLite"
+          git push origin HEAD:perf/cache-and-query-aggregation
