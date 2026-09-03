@@ -167,7 +167,7 @@ PYCODE
             nfl_api_status="$(curl -sS --max-time 15 -o /tmp/nfl-api.txt -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$base/api/nfl/snapshot" || true)"
             nhl_api_status="$(curl -sS --max-time 15 -o /tmp/nhl-api.txt -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$base/api/nhl/snapshot" || true)"
             concert_api_status="$(curl -sS --max-time 15 -o /tmp/concert-api.txt -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{}' "$base/api/concerts/snapshot" || true)"
-            analytics_api_status="$(curl -sS --max-time 15 -o /tmp/analytics-api.txt -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{\"sport\":\"mlb\"}' "$base/api/analytics/backfill" || true)"
+            analytics_api_status="$(curl -sS --max-time 15 -o /tmp/analytics-api.txt -w '%{http_code}' -X POST -H 'Content-Type: application/json' -d '{"sport":"mlb"}' "$base/api/analytics/backfill" || true)"
 
             echo "Attempt $attempt: home=$home_status nfl=$nfl_status nfl_archive=$nfl_archive_status nhl=$nhl_status concerts=$concerts_status baseball_api=$baseball_api_status nfl_api=$nfl_api_status nhl_api=$nhl_api_status concert_api=$concert_api_status analytics_api=$analytics_api_status"
             if [[ "$home_status" == "200" && "$nfl_status" == "200" && "$nfl_archive_status" == "200" && "$nhl_status" == "200" && "$concerts_status" == "200" && "$baseball_api_status" == "401" && "$nfl_api_status" == "401" && "$nhl_api_status" == "401" && "$concert_api_status" == "401" && "$analytics_api_status" == "401" ]]; then
