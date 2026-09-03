@@ -48,6 +48,8 @@ from Flask_App.nhl_blueprint import (
     nhl_event_home_team,
 )
 
+from Flask_App.section_canonicalization import section_identity
+
 
 nfl_stadium_blueprint = Blueprint("nfl_stadium", __name__)
 MIN_DROP_SPAN = timedelta(hours=6)
@@ -367,6 +369,70 @@ def _snapshot_rows_for(
         .order_by(iteration_event_id, captured_at)
     )
     return list(session.execute(statement).all())
+
+
+def _event_venue_for_sport(event: Any, sport_key: str) -> str:
+    if sport_key == "mlb":
+        return _clean(getattr(event, "Place", ""))
+    if sport_key == "nfl":
+        return _clean(nfl_display_venue(event))
+    if sport_key == "nhl":
+        return _clean(nhl_display_venue(event))
+    return ""
+
+
+def _row_value(row: Any, name: str) -> Any:
+    if hasattr(row, name):
+        return getattr(row, name)
+    mapping = getattr(row, "_mapping", None)
+    if mapping is not None:
+        try:
+            return mapping[name]
+        except (KeyError, TypeError):
+            return None
+    if isinstance(row, dict):
+        return row.get(name)
+    return None
+
+
+def _supported_area_count(
+    events: Iterable[Any],
+    rows: Iterable[Any],
+    sport_key: str,
+    minimum_games: int = LOW_SAMPLE_GAMES,
+) -> int:
+    """Count canonical ticket areas represented in enough distinct games."""
+
+    event_by_id = {int(event.id): event for event in events}
+    game_ids_by_area: dict[str, set[int]] = defaultdict(set)
+
+    for row in rows:
+        try:
+            event_id = int(_row_value(row, "event_id"))
+        except (TypeError, ValueError):
+            continue
+        event = event_by_id.get(event_id)
+        if event is None or _row_value(row, "captured_at") is None:
+            continue
+        try:
+            price = float(_row_value(row, "price"))
+        except (TypeError, ValueError):
+            continue
+        if price <= 0:
+            continue
+
+        identity = section_identity(
+            sport_key,
+            _event_venue_for_sport(event, sport_key),
+            _row_value(row, "section"),
+        )
+        if identity is not None:
+            game_ids_by_area[identity.key].add(event_id)
+
+    threshold = max(int(minimum_games), 1)
+    return sum(
+        len(game_ids) >= threshold for game_ids in game_ids_by_area.values()
+    )
 
 
 def _section_insights(
@@ -890,6 +956,7 @@ def _page_config(
         "currency_label": currency_label,
         "currency_warning": "",
         "selected_team_label": "",
+        "analyzed_area_count": 0,
     }
 
 
@@ -949,6 +1016,7 @@ def build_nfl_stadium_context(selected_venue: str = "") -> dict[str, Any]:
 
             rows = _snapshot_rows(session, [event.id for event in selected_events])
             sections, captures_by_event = _section_insights(selected_events, rows, now)
+            analyzed_area_count = _supported_area_count(selected_events, rows, "nfl")
     finally:
         model.engine.dispose()
 
@@ -993,6 +1061,7 @@ def build_nfl_stadium_context(selected_venue: str = "") -> dict[str, Any]:
         "completed_game_count": len(completed),
         "upcoming_game_count": len(upcoming),
         "section_count": len(sections),
+        "analyzed_area_count": analyzed_area_count,
         "observation_count": sum(row["observation_count"] for row in sections),
         "drop_section_count": sum(1 for row in sections if row["drop_game_count"]),
         "cheapest_sections": cheapest,
@@ -1160,6 +1229,7 @@ def build_mlb_stadium_context(selected_venue: str = "") -> dict[str, Any]:
                 ),
                 event_label_builder=format_mlb_title,
             )
+            analyzed_area_count = _supported_area_count(selected_events, rows, "mlb")
     finally:
         model.engine.dispose()
 
@@ -1205,6 +1275,7 @@ def build_mlb_stadium_context(selected_venue: str = "") -> dict[str, Any]:
         "completed_game_count": len(completed),
         "upcoming_game_count": len(upcoming),
         "section_count": len(sections),
+        "analyzed_area_count": analyzed_area_count,
         "observation_count": sum(row["observation_count"] for row in sections),
         "drop_section_count": sum(1 for row in sections if row["drop_game_count"]),
         "cheapest_sections": cheapest,
@@ -1320,6 +1391,7 @@ def build_nhl_arena_context(selected_venue: str = "") -> dict[str, Any]:
                 secondary_url_builder=None,
                 event_label_builder=format_nhl_title,
             )
+            analyzed_area_count = _supported_area_count(analysis_events, rows, "nhl")
     finally:
         model.engine.dispose()
 
@@ -1362,6 +1434,7 @@ def build_nhl_arena_context(selected_venue: str = "") -> dict[str, Any]:
         "completed_game_count": len(completed),
         "upcoming_game_count": len(upcoming),
         "section_count": len(sections),
+        "analyzed_area_count": analyzed_area_count,
         "observation_count": sum(row["observation_count"] for row in sections),
         "drop_section_count": sum(1 for row in sections if row["drop_game_count"]),
         "cheapest_sections": cheapest,

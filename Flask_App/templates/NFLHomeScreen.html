@@ -63,14 +63,10 @@
     <div class="nfl-stadium-card-grid" data-stadium-grid>
       {% for venue, tracked_games in stadium_game_counts.items() %}
         {% set team_ns = namespace(names=[]) %}
-        {% set section_ns = namespace(names=[]) %}
         {% for team, team_games in games_dict.items() %}
           {% for game in team_games %}
             {% if game.venue == venue %}
               {% if team not in team_ns.names %}{% set team_ns.names = team_ns.names + [team] %}{% endif %}
-              {% for section in game_sections_dict.get(team, {}).get(game.value, []) %}
-                {% if not is_parking_section(section) and section not in section_ns.names %}{% set section_ns.names = section_ns.names + [section] %}{% endif %}
-              {% endfor %}
             {% endif %}
           {% endfor %}
         {% endfor %}
@@ -80,7 +76,6 @@
           <h3>{{ team_label or 'NFL home team' }}</h3>
           <dl>
             <div><dt>{{ tracked_games }}</dt><dd>game{% if tracked_games != 1 %}s{% endif %}</dd></div>
-            <div><dt>{{ section_ns.names|length }}</dt><dd>sections</dd></div>
           </dl>
           <span class="nfl-stadium-card__action">Open team report <b aria-hidden="true">&#8594;</b></span>
         </a>
