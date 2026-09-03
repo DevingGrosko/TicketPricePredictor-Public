@@ -48,17 +48,9 @@ jobs:
 
           path = Path("tests/test_flask_production_startup.py")
           text = path.read_text()
-          old = '''                nfl_page = client.get("/nfl")
-                          assert nfl_page.status_code == 200
-                          assert b"NFL market tracker" in nfl_page.data
-                          assert b"Dallas Cowboys" in nfl_page.data
 
-                          nfl_map = client.get(
-          '''
-          new = '''                nfl_page = client.get("/nfl")
-                          assert nfl_page.status_code == 200
-                          assert b"NFL market tracker" in nfl_page.data
-                          assert b"New York Giants" in nfl_page.data
+          nfl_old = '                assert b"Dallas Cowboys" in nfl_page.data\n'
+          nfl_new = '''                assert b"New York Giants" in nfl_page.data
 
                           nfl_options = client.get(
                               "/api/nfl/options?team=New%20York%20Giants"
@@ -68,24 +60,13 @@ jobs:
                           assert nfl_options_data["games"]
                           assert "Dallas Cowboys" in nfl_options_data["games"][0]["label"]
                           assert "Section 0" in nfl_options_data["sections_by_game"][str(nfl_event_id)]
-
-                          nfl_map = client.get(
           '''
-          if old not in text:
-              raise RuntimeError("NFL lazy-options startup assertion block was not found")
-          text = text.replace(old, new, 1)
+          if nfl_old not in text:
+              raise RuntimeError("NFL startup assertion was not found")
+          text = text.replace(nfl_old, nfl_new, 1)
 
-          old = '''                nhl_page = client.get("/nhl")
-                          assert nhl_page.status_code == 200
-                          assert b"NHL market tracker" in nhl_page.data
-                          assert b"Toronto Maple Leafs" in nhl_page.data
-
-                          nhl_map = client.get(
-          '''
-          new = '''                nhl_page = client.get("/nhl")
-                          assert nhl_page.status_code == 200
-                          assert b"NHL market tracker" in nhl_page.data
-                          assert b"Toronto Maple Leafs" in nhl_page.data
+          nhl_old = '                assert b"Toronto Maple Leafs" in nhl_page.data\n'
+          nhl_new = '''                assert b"Toronto Maple Leafs" in nhl_page.data
 
                           nhl_options = client.get(
                               "/api/nhl/options?team=Toronto%20Maple%20Leafs"
@@ -95,12 +76,10 @@ jobs:
                           assert nhl_options_data["games"]
                           assert "Boston Bruins" in nhl_options_data["games"][0]["label"]
                           assert "Section 100" in nhl_options_data["sections_by_game"][str(nhl_event_id)]
-
-                          nhl_map = client.get(
           '''
-          if old not in text:
-              raise RuntimeError("NHL lazy-options startup assertion block was not found")
-          path.write_text(text.replace(old, new, 1))
+          if nhl_old not in text:
+              raise RuntimeError("NHL startup assertion was not found")
+          path.write_text(text.replace(nhl_old, nhl_new, 1))
           PY
           rm -rf .github/performance-optimization
           git diff --check
