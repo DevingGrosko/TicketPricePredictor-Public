@@ -1,0 +1,31 @@
+name: Quick live page benchmark
+
+on:
+  push:
+    branches:
+      - diagnose/page-performance-2026-09-03
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Measure representative pages once
+        shell: bash
+        run: |
+          set -u
+          base="https://bunnyjeff.pythonanywhere.com"
+          while IFS='|' read -r name path; do
+            metrics="$(curl -L -sS --max-time 45 -o /tmp/page.html -w '%{http_code}|%{time_starttransfer}|%{time_total}|%{size_download}' "${base}${path}" || true)"
+            echo "RESULT|${name}|${metrics}"
+          done <<'EOF'
+          MLB home|/
+          NFL home|/nfl
+          NHL home|/nhl
+          Fenway report|/baseball/stadium?venue=Fenway%20Park
+          Citi report|/baseball/stadium?venue=Citi%20Field
+          Fenway section|/baseball/stadium/section?venue=Fenway%20Park&section=Field%20Box%2010
+          SoFi section|/nfl/stadium/section?venue=SoFi%20Stadium&section=Section%20100
+          EOF
