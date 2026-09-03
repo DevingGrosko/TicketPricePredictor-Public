@@ -1,0 +1,42 @@
+name: Publish clean page performance branch
+
+on:
+  push:
+    branches:
+      - feature/page-performance-pass
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/page-performance-pass
+          fetch-depth: 0
+
+      - name: Build clean branch from main and validated application files
+        run: |
+          git fetch origin main feature/page-performance-pass
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B feature/page-performance-clean origin/main
+          git checkout origin/feature/page-performance-pass -- \
+            models.py \
+            Flask_App/flask_app.py \
+            Flask_App/performance_cache.py \
+            Flask_App/nfl_blueprint.py \
+            Flask_App/nhl_blueprint.py \
+            Flask_App/nfl_stadium_blueprint.py \
+            Flask_App/templates/HomeScreen.html \
+            Flask_App/templates/NFLHomeScreen.html \
+            Flask_App/templates/NHLHomeScreen.html \
+            Flask_App/static/js/script.js \
+            Flask_App/static/js/nfl.js \
+            Flask_App/static/js/nhl.js \
+            tests/test_performance_pass.py
+          git add -A
+          git commit -m "Speed up cached venue and section reports"
+          git push --force origin HEAD:feature/page-performance-clean
