@@ -1,0 +1,27 @@
+name: Check live field page
+
+on:
+  push:
+    branches:
+      - diagnose/page-performance-2026-09-03
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request representative MLB field page
+        shell: bash
+        run: |
+          set -u
+          url="https://bunnyjeff.pythonanywhere.com/baseball/stadium?venue=Fenway%20Park"
+          status="$(curl -L -sS --max-time 90 -D /tmp/headers.txt -o /tmp/body.html -w '%{http_code}' "$url" || true)"
+          echo "STATUS=$status"
+          echo "HEADERS"
+          cat /tmp/headers.txt || true
+          echo "BODY_START"
+          head -c 2000 /tmp/body.html || true
+          echo
+          test "$status" = "200"
