@@ -1,0 +1,69 @@
+name: Verify section canonicalization branch
+
+on:
+  push:
+    branches:
+      - feature/section-canonicalization
+    paths:
+      - ".github/workflows/verify-section-canonicalization-branch.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/section-canonicalization
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Require the completed implementation
+        run: |
+          test -f Flask_App/section_canonicalization.py
+          test -f tests/test_section_canonicalization.py
+          test ! -f tools/apply_section_canonicalization.py
+          test ! -f .github/workflows/apply-section-canonicalization.yml
+          grep -F 'rows = _canonicalize_snapshot_rows(events, rows, sport_key)' Flask_App/nfl_stadium_blueprint.py
+          grep -F 'canonical_section_key' Flask_App/templates/HomeScreen.html
+          grep -F 'tracked areas' Flask_App/templates/NFLHomeScreen.html
+          grep -F 'Flask_App/section_canonicalization.py' .github/workflows/deploy-pythonanywhere.yml
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run the complete test suite
+        env:
+          DATABASE_PATH: ${{ runner.temp }}/ticket-price-validation/baseball.db
+          CONCERT_DATABASE_PATH: ${{ runner.temp }}/ticket-price-validation/concerts.db
+          NFL_DATABASE_PATH: ${{ runner.temp }}/ticket-price-validation/nfl.db
+          NHL_DATABASE_PATH: ${{ runner.temp }}/ticket-price-validation/nhl.db
+          FLASK_SECRET_KEY: deployment-validation-key
+          COLLECTOR_INGEST_TOKEN: deployment-validation-token
+        run: |
+          mkdir -p "$(dirname "$DATABASE_PATH")"
+          python -m py_compile \
+            Flask_App/section_canonicalization.py \
+            Flask_App/nfl_stadium_blueprint.py
+          python -m unittest discover -s tests -v
+          git diff --check
+
+      - name: Remove verifier
+        run: |
+          rm -f .github/workflows/verify-section-canonicalization-branch.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Verify section canonicalization implementation"
+          git push origin HEAD:feature/section-canonicalization
