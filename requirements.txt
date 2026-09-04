@@ -1,5 +1,6 @@
 Flask>=3.0
 SQLAlchemy>=2.0
+PyMySQL>=1.1
 matplotlib>=3.8
 python-dotenv>=1.0
 numpy
