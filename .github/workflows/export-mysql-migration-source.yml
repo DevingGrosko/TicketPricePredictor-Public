@@ -1,0 +1,30 @@
+name: Export source for MySQL migration
+
+on:
+  push:
+    branches:
+      - feature/mysql-production-migration
+    paths:
+      - ".github/workflows/export-mysql-migration-source.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Package source
+        run: |
+          tar \
+            --exclude='.git' \
+            --exclude='__pycache__' \
+            --exclude='*.db' \
+            -czf /tmp/ticketsignal-source.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ticketsignal-source
+          path: /tmp/ticketsignal-source.tar.gz
+          retention-days: 1
