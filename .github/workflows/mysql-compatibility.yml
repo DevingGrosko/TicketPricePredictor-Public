@@ -1,0 +1,50 @@
+name: MySQL compatibility
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "Flask_App/database_runtime.py"
+      - "Flask_App/materialized_analytics.py"
+      - "Flask_App/nfl_blueprint.py"
+      - "Flask_App/nhl_blueprint.py"
+      - "models.py"
+      - "tools/migrate_sqlite_to_mysql.py"
+      - "tools/mysql_integration_check.py"
+      - "requirements.txt"
+      - ".github/workflows/mysql-compatibility.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mysql:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: bootstrap
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mariadb-admin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: Run MySQL schema and migration checks
+        env:
+          MYSQL_TEST_ADMIN_URL: mysql+pymysql://root:root@127.0.0.1:3306/mysql?charset=utf8mb4
+        run: python tools/mysql_integration_check.py

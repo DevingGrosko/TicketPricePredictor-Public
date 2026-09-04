@@ -1,0 +1,87 @@
+name: Validate and merge MySQL support
+
+on:
+  push:
+    branches:
+      - feature/mysql-production-migration
+    paths:
+      - ".github/workflows/validate-and-merge-mysql-support.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: bootstrap
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mariadb-admin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: feature/mysql-production-migration
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - run: python -m pip install -r requirements.txt
+
+      - name: Compile and run the complete SQLite regression suite
+        env:
+          DATABASE_PATH: ${{ runner.temp }}/mysql-release/baseball.db
+          CONCERT_DATABASE_PATH: ${{ runner.temp }}/mysql-release/concerts.db
+          NFL_DATABASE_PATH: ${{ runner.temp }}/mysql-release/nfl.db
+          NHL_DATABASE_PATH: ${{ runner.temp }}/mysql-release/nhl.db
+          FLASK_SECRET_KEY: mysql-release-validation
+          COLLECTOR_INGEST_TOKEN: mysql-release-validation-token
+        run: |
+          mkdir -p "$(dirname "$DATABASE_PATH")"
+          touch "$DATABASE_PATH"
+          python -m compileall -q Flask_App models.py tools
+          python -m unittest discover -s tests -v
+
+      - name: Validate MySQL schemas and migration copy
+        env:
+          MYSQL_TEST_ADMIN_URL: mysql+pymysql://root:root@127.0.0.1:3306/mysql?charset=utf8mb4
+        run: python tools/mysql_integration_check.py
+
+      - name: Exercise the Flask site with MySQL as active storage
+        env:
+          MYSQL_TEST_ADMIN_URL: mysql+pymysql://root:root@127.0.0.1:3306/mysql?charset=utf8mb4
+        run: python tools/mysql_web_smoke_check.py
+
+      - name: Remove one-time release files
+        run: |
+          git config user.name "DevingGrosko"
+          git config user.email "79125705+DevingGrosko@users.noreply.github.com"
+          git rm -f .github/workflows/validate-and-merge-mysql-support.yml MYSQL_MIGRATION_READY 2>/dev/null || true
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Remove one-time MySQL release workflow"
+            git push origin HEAD:feature/mysql-production-migration
+          fi
+
+      - name: Merge the validated pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          pr_number="$(gh pr list --head feature/mysql-production-migration --base main --state open --json number --jq '.[0].number')"
+          test -n "$pr_number"
+          gh pr merge "$pr_number" --repo DevingGrosko/TicketPricePredictor-Public --squash --delete-branch
