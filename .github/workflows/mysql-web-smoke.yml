@@ -1,0 +1,46 @@
+name: MySQL web smoke test
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "Flask_App/**"
+      - "models.py"
+      - "tools/mysql_web_smoke_check.py"
+      - "requirements.txt"
+      - ".github/workflows/mysql-web-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: root
+          MARIADB_DATABASE: bootstrap
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mariadb-admin ping -h 127.0.0.1 -uroot -proot"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=12
+
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+          cache: pip
+      - run: python -m pip install -r requirements.txt
+      - name: Start and exercise Flask with MySQL storage
+        env:
+          MYSQL_TEST_ADMIN_URL: mysql+pymysql://root:root@127.0.0.1:3306/mysql?charset=utf8mb4
+        run: python tools/mysql_web_smoke_check.py
