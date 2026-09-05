@@ -81,7 +81,7 @@ def main() -> int:
             "/nfl",
             "/nfl/stadium",
             "/nhl",
-            "/nhl/stadium",
+            "/nhl/arena",
             "/concerts",
         ):
             response = client.get(path)
