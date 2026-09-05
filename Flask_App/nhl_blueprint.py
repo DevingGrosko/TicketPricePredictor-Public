@@ -45,6 +45,12 @@ from models import (
     event_datetime_for_storage,
     hours_before_event,
 )
+from Flask_App.database_config import (
+    configured_backend,
+    create_ticket_engine,
+    dispose_ticket_engine,
+    is_sqlite_engine,
+)
 from Flask_App.performance_cache import (
     OPTIONS_CACHE_TTL_SECONDS,
     PAGE_CACHE_TTL_SECONDS,
@@ -243,6 +249,10 @@ def nhl_database_path() -> Path:
 
 
 def _ensure_nhl_schema(engine: Any, db_path: Path) -> None:
+    """Add nullable NHL metadata columns to an existing isolated SQLite DB."""
+
+    if not is_sqlite_engine(engine):
+        return
     key = str(db_path)
     with _SCHEMA_LOCK:
         if key in _SCHEMA_READY:
@@ -328,16 +338,18 @@ def _ensure_nhl_schema(engine: Any, db_path: Path) -> None:
 
 
 class CreateNHLModel:
+    """Open the configured NHL database, preserving explicit SQLite test files."""
+
     def __init__(self, db_path: str | Path | None = None):
         self.db_path = Path(db_path or nhl_database_path()).expanduser().resolve()
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.engine = create_engine(
-            f"sqlite:///{self.db_path}",
-            echo=False,
-            connect_args={"timeout": 30},
+        self.engine = create_ticket_engine(
+            "nhl",
+            sqlite_path=self.db_path,
+            force_sqlite=db_path is not None,
         )
-        NHLBase.metadata.create_all(self.engine)
-        _ensure_nhl_schema(self.engine, self.db_path)
+        if is_sqlite_engine(self.engine):
+            NHLBase.metadata.create_all(self.engine)
+            _ensure_nhl_schema(self.engine, self.db_path)
         ensure_summary_schema(self.engine)
         self.SessionLocal = sessionmaker(
             bind=self.engine,
@@ -691,7 +703,7 @@ def store_nhl_snapshot(
             )
         return event_id, iteration_id, True
     finally:
-        model.engine.dispose()
+        dispose_ticket_engine(model.engine)
 
 def create_nhl_daily_backup(
     now: datetime | None = None,
@@ -702,7 +714,7 @@ def create_nhl_daily_backup(
     source = Path(source or nhl_database_path()).expanduser().resolve()
     if not source.exists():
         model = CreateNHLModel(source)
-        model.engine.dispose()
+        dispose_ticket_engine(model.engine)
 
     backup_dir.mkdir(parents=True, exist_ok=True)
     local_now = now.astimezone(EASTERN)
@@ -893,7 +905,7 @@ def compact_completed_nhl_games(
                 if events:
                     session.commit()
         finally:
-            model.engine.dispose()
+            dispose_ticket_engine(model.engine)
     return report
 
 
@@ -940,7 +952,8 @@ def ingest_nhl_snapshot():
         ):
             raise ValueError("The NHL game is outside the 30-day capture window.")
 
-        create_nhl_daily_backup(now=now)
+        if configured_backend() == "sqlite":
+            create_nhl_daily_backup(now=now)
         try:
             compaction_report = {
                 "status": "completed",
@@ -1037,7 +1050,7 @@ def find_nhl_game(team_or_venue: str, identifier: str | None) -> NHLEvent | None
             }
             return event if team_or_venue in accepted else None
     finally:
-        model.engine.dispose()
+        dispose_ticket_engine(model.engine)
 
 
 def nhl_map_section_data(
@@ -1090,7 +1103,7 @@ def nhl_map_section_data(
                 latest.captured_at if latest else None,
             )
     finally:
-        model.engine.dispose()
+        dispose_ticket_engine(model.engine)
 
 
 def format_nhl_capture_label(value: datetime | None) -> str:
@@ -1149,7 +1162,7 @@ class NHLGraphBuilder:
                     for ticket in tickets
                 ]
         finally:
-            model.engine.dispose()
+            dispose_ticket_engine(model.engine)
 
         pairs = [
             pair
@@ -1240,7 +1253,7 @@ def _nhl_home_context() -> dict[str, Any]:
             arena_game_counts = dict(sorted(arena_game_counts.items()))
             compacted_count = sum(game.compacted_at is not None for game in all_games)
     finally:
-        model.engine.dispose()
+        dispose_ticket_engine(model.engine)
 
     return {
         "games_dict": games_dict,
@@ -1316,7 +1329,7 @@ def _nhl_options_context(home_team: str) -> dict[str, Any]:
                 and nhl_event_home_team(event) == selected
             ]
     finally:
-        model.engine.dispose()
+        dispose_ticket_engine(model.engine)
 
     upcoming = [event for event in events if not _event_is_completed(event, now)]
     completed = [event for event in events if _event_is_completed(event, now)]

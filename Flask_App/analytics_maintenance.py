@@ -15,6 +15,7 @@ from models import (
     Ticket,
     event_has_complete_public_data,
 )
+from Flask_App.database_config import dispose_ticket_engine
 from Flask_App.materialized_analytics import (
     refresh_event_summary,
     stale_event_ids,
@@ -229,5 +230,5 @@ def backfill_sport(sport: str, *, limit: int = 3) -> BackfillResult:
         )
     finally:
         if model is not None:
-            model.engine.dispose()
+            dispose_ticket_engine(model.engine)
         lock.release()

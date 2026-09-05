@@ -32,6 +32,8 @@ from sqlalchemy.orm import (
 )
 
 
+from Flask_App.database_config import create_ticket_engine, is_sqlite_engine
+
 PROJECT_DIR = Path(__file__).resolve().parent
 INCOMPLETE_PUBLIC_EVENT_DATES = frozenset(
     {
@@ -220,22 +222,23 @@ def _ensure_baseball_performance_indexes(engine, db_path: Path) -> None:
 
 
 class CreateModel:
-    def __init__(self):
-        db_path = database_path()
-        self.engine = create_engine(
-            f"sqlite:///{db_path}",
-            echo=False,
-            connect_args={"timeout": 30},
+    def __init__(self, db_path: str | Path | None = None):
+        self.db_path = Path(db_path or database_path()).expanduser().resolve()
+        self.engine = create_ticket_engine(
+            "mlb",
+            sqlite_path=self.db_path,
+            force_sqlite=db_path is not None,
         )
-        if not db_path.exists():
-            raise FileNotFoundError(f"Database file missing: {db_path}")
-        _ensure_baseball_performance_indexes(self.engine, db_path)
+        if is_sqlite_engine(self.engine):
+            if not self.db_path.exists():
+                raise FileNotFoundError(f"Database file missing: {self.db_path}")
+            _ensure_baseball_performance_indexes(self.engine, self.db_path)
+
         # Imported lazily to avoid a module cycle: the analytics helper uses
         # the shared timezone conversion functions defined above.
         from Flask_App.materialized_analytics import ensure_summary_schema
 
         ensure_summary_schema(self.engine)
-
         self.SessionLocal = sessionmaker(
             bind=self.engine,
             autoflush=False,
@@ -244,7 +247,6 @@ class CreateModel:
 
     def getSession(self):
         return self.SessionLocal
-
 
 # ---------------------------------------------------------------------------
 # Concert storage. These tables use a different DeclarativeBase and a different
