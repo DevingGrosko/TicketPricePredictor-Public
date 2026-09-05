@@ -49,6 +49,18 @@ def main() -> int:
         }
     )
 
+    # The production cutover creates a bounded, MySQL-safe copy of each
+    # application's ORM and analytics schema before inserting any rows. The
+    # web smoke test needs the same empty schema before exercising routes.
+    from Flask_App.database_config import create_mysql_engine
+    from Flask_App.mysql_cutover import _mysql_metadata
+
+    for sport in ("mlb", "nfl", "nhl"):
+        _mysql_metadata(sport).create_all(
+            create_mysql_engine(sport),
+            checkfirst=True,
+        )
+
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         os.environ["DATABASE_PATH"] = str(root / "legacy-baseball.db")
