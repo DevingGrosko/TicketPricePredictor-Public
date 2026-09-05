@@ -145,3 +145,25 @@ python manual_provider_capture.py browser \
 ```
 
 The output is written under `manual_provider_captures/`. It removes common authentication, session, customer, payment, and contact fields; it does not export cookies or request headers. Section/row/price records are heuristic candidates until a provider-specific parser is validated against real captures. Nothing from this tool is inserted into `NFL-collection.db` automatically.
+
+
+## Production database migration
+
+SQLite remains the default local and rollback backend. Production can use
+independent MySQL databases for MLB, NFL, and NHL by setting
+`TICKETSIGNAL_DATABASE_BACKEND=mysql` and the server-owned MySQL settings
+documented in `.env.example`.
+
+The guarded production cutover is:
+
+```bash
+python3 -m Flask_App.mysql_cutover migrate
+# Reload the PythonAnywhere web app from the Web tab.
+python3 -m Flask_App.mysql_cutover activate
+```
+
+`migrate` blocks collector writes, copies all raw and materialized tables,
+verifies counts, key ranges, deterministic samples, source stability, and
+foreign-key integrity, then leaves collection paused until a reloaded live
+worker confirms MySQL. The original SQLite files remain rollback copies.
+Active MySQL data should also be protected with a scheduled `mysqldump`.

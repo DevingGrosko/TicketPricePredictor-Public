@@ -53,6 +53,12 @@ from models import (
     event_datetime_for_storage,
     hours_before_event,
 )
+from Flask_App.database_config import (
+    configured_backend,
+    create_ticket_engine,
+    dispose_ticket_engine,
+    is_sqlite_engine,
+)
 from Flask_App.performance_cache import (
     OPTIONS_CACHE_TTL_SECONDS,
     PAGE_CACHE_TTL_SECONDS,
@@ -795,6 +801,9 @@ def nfl_database_path() -> Path:
 
 def _ensure_nfl_schema(engine: Any, db_path: Path) -> None:
     """Add nullable NFL metadata columns to an existing isolated SQLite DB."""
+
+    if not is_sqlite_engine(engine):
+        return
     key = str(db_path)
     with _SCHEMA_LOCK:
         if key in _SCHEMA_READY:
@@ -887,21 +896,23 @@ def _ensure_nfl_schema(engine: Any, db_path: Path) -> None:
 
 
 class CreateNFLModel:
-    """Open only the independent NFL SQLite database."""
+    """Open the configured NFL database, preserving explicit SQLite test files."""
 
     def __init__(self, db_path: str | Path | None = None):
         self.db_path = Path(db_path or nfl_database_path()).expanduser().resolve()
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.engine = create_engine(
-            f"sqlite:///{self.db_path}",
-            echo=False,
-            connect_args={"timeout": 30},
+        self.engine = create_ticket_engine(
+            "nfl",
+            sqlite_path=self.db_path,
+            force_sqlite=db_path is not None,
         )
-        NFLBase.metadata.create_all(self.engine)
-        _ensure_nfl_schema(self.engine, self.db_path)
+        if is_sqlite_engine(self.engine):
+            NFLBase.metadata.create_all(self.engine)
+            _ensure_nfl_schema(self.engine, self.db_path)
         ensure_summary_schema(self.engine)
         self.SessionLocal = sessionmaker(
-            bind=self.engine, autoflush=False, expire_on_commit=False
+            bind=self.engine,
+            autoflush=False,
+            expire_on_commit=False,
         )
 
     def getSession(self):
@@ -1225,7 +1236,7 @@ def store_nfl_snapshot(
             )
         return event_id, iteration_id, True
     finally:
-        model.engine.dispose()
+        dispose_ticket_engine(model.engine)
 
 def create_nfl_daily_backup(
     now: datetime | None = None,
@@ -1236,7 +1247,7 @@ def create_nfl_daily_backup(
     source = Path(source or nfl_database_path()).expanduser().resolve()
     if not source.exists():
         model = CreateNFLModel(source)
-        model.engine.dispose()
+        dispose_ticket_engine(model.engine)
 
     backup_dir.mkdir(parents=True, exist_ok=True)
     local_now = now.astimezone(EASTERN)
@@ -1341,7 +1352,8 @@ def ingest_nfl_snapshot():
         if event_date_utc - captured_at_utc > timedelta(hours=NFL_CAPTURE_WINDOW_HOURS):
             raise ValueError("The NFL game is outside the 30-day capture window.")
 
-        create_nfl_daily_backup(now=now)
+        if configured_backend() == "sqlite":
+            create_nfl_daily_backup(now=now)
         event_id, iteration_id, stored = store_nfl_snapshot(
             url,
             event_date,
@@ -1412,7 +1424,7 @@ def find_nfl_game(team_or_venue: str, identifier: str | None) -> NFLEvent | None
                 return None
             return event
     finally:
-        model.engine.dispose()
+        dispose_ticket_engine(model.engine)
 
 
 def nfl_map_section_data(
@@ -1460,7 +1472,7 @@ def nfl_map_section_data(
                 )
             return section_data, latest.captured_at if latest else None
     finally:
-        model.engine.dispose()
+        dispose_ticket_engine(model.engine)
 
 
 def format_nfl_capture_label(value: datetime | None) -> str:
@@ -1519,7 +1531,7 @@ class NFLGraphBuilder:
                     for ticket in tickets
                 ]
         finally:
-            model.engine.dispose()
+            dispose_ticket_engine(model.engine)
 
         pairs = [pair for pair in pairs if 0 < pair[0] <= NFL_CAPTURE_WINDOW_HOURS]
         if not pairs:
@@ -1594,7 +1606,7 @@ def _nfl_home_context() -> dict[str, Any]:
             games_dict = dict(sorted(games_dict.items()))
             stadium_game_counts = dict(sorted(stadium_game_counts.items()))
     finally:
-        model.engine.dispose()
+        dispose_ticket_engine(model.engine)
 
     return {
         "games_dict": games_dict,
@@ -1666,7 +1678,7 @@ def _nfl_options_context(home_team: str) -> dict[str, Any]:
                 and nfl_event_home_team(event) == selected
             ]
     finally:
-        model.engine.dispose()
+        dispose_ticket_engine(model.engine)
 
     upcoming = [event for event in events if not _event_is_completed(event, now)]
     completed = [event for event in events if _event_is_completed(event, now)]

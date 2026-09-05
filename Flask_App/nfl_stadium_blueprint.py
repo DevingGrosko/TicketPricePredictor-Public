@@ -54,6 +54,7 @@ from Flask_App.nhl_blueprint import (
 )
 
 from Flask_App.section_canonicalization import section_identity
+from Flask_App.database_config import dispose_ticket_engine
 from Flask_App.materialized_analytics import (
     TIMELINE_BUCKETS,
     read_summary_rows,
@@ -1257,7 +1258,7 @@ def build_nfl_stadium_context(selected_venue: str = "") -> dict[str, Any]:
                 )
             )
     finally:
-        model.engine.dispose()
+        dispose_ticket_engine(model.engine)
 
     cheapest, biggest_drops = _rank_sections(sections)
     upcoming: list[tuple[datetime, dict[str, Any]]] = []
@@ -1485,7 +1486,7 @@ def build_mlb_stadium_context(selected_venue: str = "") -> dict[str, Any]:
                 )
             )
     finally:
-        model.engine.dispose()
+        dispose_ticket_engine(model.engine)
 
     cheapest, biggest_drops = _rank_sections(sections)
     upcoming: list[tuple[datetime, dict[str, Any]]] = []
@@ -1672,7 +1673,7 @@ def build_nhl_arena_context(selected_venue: str = "") -> dict[str, Any]:
                 )
             )
     finally:
-        model.engine.dispose()
+        dispose_ticket_engine(model.engine)
 
     cheapest, biggest_drops = _rank_sections(sections)
     upcoming: list[tuple[datetime, dict[str, Any]]] = []
@@ -2434,7 +2435,7 @@ def build_nfl_section_context(
                     select(NFLEvent.map_geometry).where(NFLEvent.id == representative.id)
                 ).scalar_one_or_none()
     finally:
-        model.engine.dispose()
+        dispose_ticket_engine(model.engine)
 
     return _build_section_detail_context(
         base_context,
@@ -2528,7 +2529,7 @@ def build_mlb_section_context(
                 sections,
             )
     finally:
-        model.engine.dispose()
+        dispose_ticket_engine(model.engine)
 
     return _build_section_detail_context(
         base_context,
@@ -2670,7 +2671,7 @@ def build_nhl_section_context(
                     select(NHLEvent.map_geometry).where(NHLEvent.id == representative.id)
                 ).scalar_one_or_none()
     finally:
-        model.engine.dispose()
+        dispose_ticket_engine(model.engine)
 
     return _build_section_detail_context(
         base_context,
@@ -2722,7 +2723,7 @@ def _sport_venue_revision(sport_key: str, venue: str) -> int:
         with model.getSession()() as session:
             return venue_revision(session, venue)
     finally:
-        model.engine.dispose()
+        dispose_ticket_engine(model.engine)
 
 
 def _cached_venue_context(sport_key: str, selected_venue: str) -> dict[str, Any]:

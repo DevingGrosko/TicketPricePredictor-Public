@@ -110,7 +110,7 @@ def create_mysql_engine(sport_key: str) -> Engine:
             pool_pre_ping=True,
             pool_recycle=240,
             pool_size=1,
-            max_overflow=2,
+            max_overflow=0,
             pool_timeout=20,
             connect_args={
                 "connect_timeout": 10,
@@ -147,6 +147,13 @@ def is_sqlite_engine(engine: Any) -> bool:
 
 def is_mysql_engine(engine: Any) -> bool:
     return getattr(getattr(engine, "dialect", None), "name", "") == "mysql"
+
+
+def dispose_ticket_engine(engine: Engine) -> None:
+    """Dispose per-use SQLite engines while retaining shared MySQL pools."""
+
+    if is_sqlite_engine(engine):
+        engine.dispose()
 
 
 def migration_pause_active() -> bool:

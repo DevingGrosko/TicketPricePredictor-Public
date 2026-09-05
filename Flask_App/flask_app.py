@@ -5,7 +5,7 @@ import os
 import re
 
 from flask import Flask, jsonify, render_template, request
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import load_only
 
 from collector import (
@@ -33,6 +33,11 @@ from models import (
     write_concert_audit,
 )
 
+from Flask_App.database_config import (
+    configured_backend,
+    dispose_ticket_engine,
+    migration_pause_active,
+)
 from Flask_App.performance_cache import (
     OPTIONS_CACHE_TTL_SECONDS,
     PAGE_CACHE_TTL_SECONDS,
@@ -88,6 +93,66 @@ def authorized_collector_request():
     if not configured:
         return False
     return hmac.compare_digest(supplied, f"Bearer {configured}")
+
+
+@app.before_request
+def pause_ticket_ingestion_during_database_migration():
+    protected_paths = {
+        "/api/collector/snapshot",
+        "/api/nfl/snapshot",
+        "/api/nhl/snapshot",
+    }
+    if (
+        request.method == "POST"
+        and request.path in protected_paths
+        and migration_pause_active()
+    ):
+        return (
+            jsonify(
+                {
+                    "status": "maintenance",
+                    "message": "Ticket collection is paused during a database migration.",
+                }
+            ),
+            503,
+        )
+    return None
+
+
+@app.get("/api/database/status")
+def database_backend_status():
+    if not authorized_collector_request():
+        return jsonify({"status": "unauthorized"}), 401
+
+    from Flask_App.nfl_blueprint import CreateNFLModel
+    from Flask_App.nhl_blueprint import CreateNHLModel
+
+    models = {
+        "mlb": CreateModel(),
+        "nfl": CreateNFLModel(),
+        "nhl": CreateNHLModel(),
+    }
+    databases = {}
+    try:
+        for sport, model in models.items():
+            with model.engine.connect() as connection:
+                connection.execute(text("SELECT 1"))
+            databases[sport] = {
+                "dialect": model.engine.dialect.name,
+                "connected": True,
+            }
+    finally:
+        for model in models.values():
+            dispose_ticket_engine(model.engine)
+
+    return jsonify(
+        {
+            "status": "ok",
+            "backend": configured_backend(),
+            "migration_paused": migration_pause_active(),
+            "databases": databases,
+        }
+    )
 
 
 @app.post("/api/analytics/backfill")
@@ -176,7 +241,7 @@ def _refresh_mlb_materialized_summary(
         return "deferred"
     finally:
         if model is not None:
-            model.engine.dispose()
+            dispose_ticket_engine(model.engine)
 
 
 @app.post("/api/collector/snapshot")
@@ -233,7 +298,8 @@ def ingest_collector_snapshot():
                     }
                 )
 
-        create_daily_backup(now=now)
+        if configured_backend() == "sqlite":
+            create_daily_backup(now=now)
         event_id, iteration_id = store_snapshot(
             url,
             event_date,
@@ -410,7 +476,7 @@ def _baseball_home_context():
                 )
             games_dict = dict(sorted(games_dict.items()))
     finally:
-        model.engine.dispose()
+        dispose_ticket_engine(model.engine)
 
     return {
         "event_dict": {place: [] for place in games_dict},
@@ -452,7 +518,7 @@ def _baseball_options_context(place: str):
                 if is_baseball_event(event) and event_has_complete_public_data(event)
             ]
     finally:
-        model.engine.dispose()
+        dispose_ticket_engine(model.engine)
 
     games = []
     sections_by_game = {}

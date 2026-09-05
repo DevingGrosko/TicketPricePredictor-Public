@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """Migrate TicketSignal's active sport databases from SQLite to MySQL.
 
 The tool deliberately separates data copy from activation:
@@ -26,7 +25,19 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
-from sqlalchemy import JSON, MetaData, String, Table, create_engine, func, inspect, select, text
+from sqlalchemy import (
+    DateTime,
+    JSON,
+    MetaData,
+    String,
+    Table,
+    create_engine,
+    func,
+    inspect,
+    select,
+    text,
+)
+from sqlalchemy.dialects.mysql import DATETIME as MYSQL_DATETIME
 from sqlalchemy.engine import Connection, Engine
 
 
@@ -103,6 +114,19 @@ def _source_engine(path: Path) -> Engine:
     )
 
 
+def _source_fingerprint(path: Path) -> dict[str, tuple[int, int]]:
+    result: dict[str, tuple[int, int]] = {}
+    for candidate in (
+        path,
+        Path(str(path) + "-wal"),
+        Path(str(path) + "-journal"),
+    ):
+        if candidate.exists():
+            stat = candidate.stat()
+            result[candidate.name] = (int(stat.st_size), int(stat.st_mtime_ns))
+    return result
+
+
 def _column_length(table_name: str, column_name: str) -> int:
     name = column_name.casefold()
     if name in {"url", "source_url"}:
@@ -136,6 +160,8 @@ def _mysql_metadata(sport: str) -> MetaData:
         for column in table.columns:
             if isinstance(column.type, String) and column.type.length is None:
                 column.type = String(_column_length(table.name, column.name))
+            if isinstance(column.type, DateTime):
+                column.type = MYSQL_DATETIME(fsp=6)
     return target
 
 
@@ -236,6 +262,7 @@ def _copy_table(
             break
         payload = [dict(row._mapping) for row in rows]
         destination.execute(destination_table.insert(), payload)
+        destination.commit()
         copied += len(payload)
     return copied
 
@@ -306,6 +333,7 @@ def _foreign_key_orphans(connection: Connection, sport: str, tables: dict[str, T
 
 def migrate_sport(sport: str, *, replace: bool, batch_size: int) -> dict[str, Any]:
     source_path = Path(SOURCE_PATHS[sport]()).expanduser().resolve()
+    source_before = _source_fingerprint(source_path)
     source_engine = _source_engine(source_path)
     destination_engine = create_mysql_engine(sport)
     destination_metadata = _mysql_metadata(sport)
@@ -350,11 +378,9 @@ def migrate_sport(sport: str, *, replace: bool, batch_size: int) -> dict[str, An
 
     verification: dict[str, Any] = {}
     with source_engine.connect() as source, destination_engine.connect() as destination:
-        destination_reflected = MetaData()
-        destination_reflected.reflect(bind=destination, only=table_names)
         for name in table_names:
             source_table = source_tables[name]
-            destination_table = destination_reflected.tables[name]
+            destination_table = destination_tables[name]
             source_count = _count(source, source_table)
             destination_count = _count(destination, destination_table)
             source_signature = _pk_signature(source, source_table)
@@ -376,9 +402,17 @@ def migrate_sport(sport: str, *, replace: bool, batch_size: int) -> dict[str, An
                 "sample_digests": source_samples,
             }
 
-        orphans = _foreign_key_orphans(destination, sport, destination_reflected.tables)
+        orphans = _foreign_key_orphans(destination, sport, destination_tables)
         if any(orphans.values()):
             raise RuntimeError(f"{sport}: foreign-key orphan verification failed: {orphans}")
+
+
+    source_after = _source_fingerprint(source_path)
+    if source_after != source_before:
+        raise RuntimeError(
+            f"{sport}: SQLite source changed during migration; collector writes remain "
+            "paused and the copy must be repeated with --replace."
+        )
 
     report = {
         "sport": sport,
@@ -387,6 +421,7 @@ def migrate_sport(sport: str, *, replace: bool, batch_size: int) -> dict[str, An
         "source_modified_at": datetime.fromtimestamp(
             source_path.stat().st_mtime, timezone.utc
         ).isoformat(),
+        "source_fingerprint": source_after,
         "tables": verification,
         "foreign_keys": orphans,
         "elapsed_seconds": round(time.perf_counter() - started, 3),
@@ -481,13 +516,29 @@ def command_migrate(args: argparse.Namespace) -> int:
                 f"{len(report['tables'])} tables in {report['elapsed_seconds']:.1f}s.",
                 flush=True,
             )
+        changed_sources = {}
+        for report in reports:
+            source_path = Path(report["source"])
+            expected_fingerprint = report["source_fingerprint"]
+            actual_fingerprint = _source_fingerprint(source_path)
+            if actual_fingerprint != expected_fingerprint:
+                changed_sources[report["sport"]] = {
+                    "expected": expected_fingerprint,
+                    "actual": actual_fingerprint,
+                }
+        if changed_sources:
+            raise RuntimeError(
+                "One or more SQLite sources changed after their copy completed: "
+                f"{changed_sources}"
+            )
+
         _write_manifest(reports)
         update_backend_setting("mysql")
     except Exception:
         print(
             "Migration failed. Collector writes remain paused so the source cannot "
             "change unnoticed. Resolve the error, then rerun with --replace, or run "
-            "`python tools/mysql_cutover.py abort` to resume SQLite collection.",
+            "`python3 -m Flask_App.mysql_cutover abort` to resume SQLite collection.",
             file=sys.stderr,
             flush=True,
         )
@@ -497,7 +548,7 @@ def command_migrate(args: argparse.Namespace) -> int:
     print("The .env backend is now set to mysql, but the running web workers still need a reload.")
     print("Do NOT unpause collection yet.")
     print("Next: reload the web app in PythonAnywhere, then run:")
-    print("  python tools/mysql_cutover.py activate")
+    print("  python3 -m Flask_App.mysql_cutover activate")
     return 0
 
 
@@ -513,6 +564,19 @@ def command_activate(args: argparse.Namespace) -> int:
         raise RuntimeError(
             "The live web worker still reports a non-MySQL backend. Reload the web app "
             "from PythonAnywhere's Web tab, then rerun activate."
+        )
+    database_status = live.get("databases") or {}
+    non_mysql = {
+        sport: details
+        for sport, details in database_status.items()
+        if not isinstance(details, dict)
+        or not details.get("connected")
+        or details.get("dialect") != "mysql"
+    }
+    if set(database_status) != set(SPORTS) or non_mysql:
+        raise RuntimeError(
+            "The live worker did not verify MySQL connections for all sports: "
+            f"{database_status}"
         )
     if not live.get("migration_paused"):
         raise RuntimeError("The live app does not see the migration pause marker.")
@@ -549,8 +613,9 @@ def command_prepare_rollback(_args: argparse.Namespace) -> int:
     begin_migration_pause()
     update_backend_setting("sqlite")
     print("Rollback prepared: writes are paused and .env now selects SQLite.")
+    print("Warning: SQLite does not include snapshots written after MySQL activation.")
     print("Reload the PythonAnywhere web app, verify the site, then run:")
-    print("  python tools/mysql_cutover.py finish-rollback")
+    print("  python3 -m Flask_App.mysql_cutover finish-rollback")
     return 0
 
 
