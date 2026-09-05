@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import os
 from pathlib import Path
 import sys
@@ -24,9 +25,9 @@ def main() -> int:
     )
     admin = create_engine(admin_url, pool_pre_ping=True)
     database_names = {
-        "BASEBALL_DATABASE_URL": "ticketsignal_web_mlb",
-        "NFL_DATABASE_URL": "ticketsignal_web_nfl",
-        "NHL_DATABASE_URL": "ticketsignal_web_nhl",
+        "MYSQL_MLB_DATABASE": "ticketsignal_web_mlb",
+        "MYSQL_NFL_DATABASE": "ticketsignal_web_nfl",
+        "MYSQL_NHL_DATABASE": "ticketsignal_web_nhl",
     }
     with admin.begin() as connection:
         for name in database_names.values():
@@ -36,10 +37,17 @@ def main() -> int:
             )
 
     parsed = make_url(admin_url)
-    for variable, name in database_names.items():
-        os.environ[variable] = parsed.set(database=name).render_as_string(
-            hide_password=False
-        )
+    os.environ.update(
+        {
+            "TICKETSIGNAL_DATABASE_BACKEND": "mysql",
+            "MYSQL_HOST": str(parsed.host or "127.0.0.1"),
+            "MYSQL_USERNAME": str(parsed.username or "root"),
+            "MYSQL_PASSWORD_B64": base64.b64encode(
+                str(parsed.password or "").encode("utf-8")
+            ).decode("ascii"),
+            **database_names,
+        }
+    )
 
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
