@@ -14,7 +14,12 @@ import re
 from threading import RLock
 from typing import Any
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ImportError:  # Minimal collector smoke jobs may omit python-dotenv.
+    def load_dotenv(*_args: Any, **_kwargs: Any) -> bool:
+        return False
+
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine, URL
 
