@@ -1,0 +1,162 @@
+name: Apply MySQL semantic verification fix
+
+on:
+  push:
+    branches:
+      - fix/mysql-cutover-deployment
+    paths:
+      - ".github/workflows/apply-mysql-verification-fix.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/mysql-cutover-deployment
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Patch migration verification
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("Flask_App/mysql_cutover.py")
+          text = path.read_text(encoding="utf-8")
+
+          text = text.replace(
+              "from datetime import date, datetime, timezone\n",
+              "from datetime import date, datetime, timezone\nfrom decimal import Decimal, InvalidOperation\n",
+              1,
+          )
+          text = text.replace(
+              "from sqlalchemy import (\n    DateTime,\n    JSON,\n",
+              "from sqlalchemy import (\n    Boolean,\n    Date as SQLDate,\n    DateTime,\n    Float,\n    Integer,\n    JSON,\n",
+              1,
+          )
+          text = text.replace(
+              "    MetaData,\n    String,\n",
+              "    MetaData,\n    Numeric,\n    String,\n",
+              1,
+          )
+
+          old = '''def _row_digest(mapping: dict[str, Any]) -> str:\n    payload = json.dumps(\n        _normalize_for_digest(mapping),\n        sort_keys=True,\n        separators=(\",\", \":\"),\n        ensure_ascii=False,\n        default=_json_default,\n    )\n    return hashlib.sha256(payload.encode(\"utf-8\")).hexdigest()\n'''
+          new = '''def _normalize_column_value(column: Any, value: Any) -> Any:\n    \"\"\"Normalize DB-driver representations without hiding data changes.\n\n    SQLite is dynamically typed, so old INTEGER or VARCHAR columns can return\n    values such as ``1.0`` or ``101`` while MySQL returns ``1`` or ``\"101\"``\n    after applying the declared schema. These are semantically identical for\n    the column and should not fail a verified migration.\n    \"\"\"\n\n    if value is None:\n        return None\n    column_type = column.type\n    if isinstance(column_type, Boolean):\n        return bool(value)\n    if isinstance(column_type, Integer):\n        try:\n            number = Decimal(str(value))\n        except (InvalidOperation, ValueError) as exc:\n            raise RuntimeError(\n                f\"{column.table.name}.{column.name} contains a non-integer value: {value!r}\"\n            ) from exc\n        if number != number.to_integral_value():\n            raise RuntimeError(\n                f\"{column.table.name}.{column.name} contains a non-integer value: {value!r}\"\n            )\n        return int(number)\n    if isinstance(column_type, (Float, Numeric)):\n        try:\n            number = Decimal(str(value))\n        except (InvalidOperation, ValueError) as exc:\n            raise RuntimeError(\n                f\"{column.table.name}.{column.name} contains a non-numeric value: {value!r}\"\n            ) from exc\n        if number == number.to_integral_value():\n            return int(number)\n        return format(number.normalize(), \"f\")\n    if isinstance(column_type, DateTime):\n        if not isinstance(value, datetime):\n            raise RuntimeError(\n                f\"{column.table.name}.{column.name} contains a non-datetime value: {value!r}\"\n            )\n        return value.replace(tzinfo=None).isoformat(timespec=\"microseconds\")\n    if isinstance(column_type, SQLDate):\n        if not isinstance(value, date):\n            raise RuntimeError(\n                f\"{column.table.name}.{column.name} contains a non-date value: {value!r}\"\n            )\n        return value.isoformat()\n    if isinstance(column_type, String):\n        return str(value)\n    return _normalize_for_digest(value)\n\n\ndef _normalized_row(table: Table, mapping: dict[str, Any]) -> dict[str, Any]:\n    return {\n        column.name: _normalize_column_value(column, mapping.get(column.name))\n        for column in table.columns\n    }\n\n\ndef _row_digest(table: Table, mapping: dict[str, Any]) -> str:\n    payload = json.dumps(\n        _normalized_row(table, mapping),\n        sort_keys=True,\n        separators=(\",\", \":\"),\n        ensure_ascii=False,\n        default=_json_default,\n    )\n    return hashlib.sha256(payload.encode(\"utf-8\")).hexdigest()\n'''
+          if old not in text:
+              raise SystemExit("row digest block not found")
+          text = text.replace(old, new, 1)
+
+          old = '''def _sample_digests(connection: Connection, table: Table) -> list[str]:\n    count = _count(connection, table)\n    if not count:\n        return []\n    keys = list(table.primary_key.columns)\n    order = keys or list(table.columns)[:1]\n    offsets = sorted({0, count // 2, count - 1})\n    digests = []\n    for offset in offsets:\n        row = connection.execute(\n            select(table).order_by(*order).offset(offset).limit(1)\n        ).mappings().one()\n        digests.append(_row_digest(dict(row)))\n    return digests\n'''
+          new = '''def _sample_rows(connection: Connection, table: Table) -> list[dict[str, Any]]:\n    count = _count(connection, table)\n    if not count:\n        return []\n    keys = list(table.primary_key.columns)\n    order = keys or list(table.columns)[:1]\n    rows = []\n    for offset in sorted({0, count // 2, count - 1}):\n        row = connection.execute(\n            select(table).order_by(*order).offset(offset).limit(1)\n        ).mappings().one()\n        normalized = _normalized_row(table, dict(row))\n        rows.append(\n            {\n                \"offset\": offset,\n                \"digest\": hashlib.sha256(\n                    json.dumps(\n                        normalized,\n                        sort_keys=True,\n                        separators=(\",\", \":\"),\n                        ensure_ascii=False,\n                        default=_json_default,\n                    ).encode(\"utf-8\")\n                ).hexdigest(),\n                \"row\": normalized,\n            }\n        )\n    return rows\n\n\ndef _sample_digests(connection: Connection, table: Table) -> list[str]:\n    return [sample[\"digest\"] for sample in _sample_rows(connection, table)]\n\n\ndef _sample_difference(\n    source: Connection,\n    destination: Connection,\n    source_table: Table,\n    destination_table: Table,\n) -> str:\n    source_rows = _sample_rows(source, source_table)\n    destination_rows = _sample_rows(destination, destination_table)\n    differences = []\n    for source_sample, destination_sample in zip(source_rows, destination_rows):\n        if source_sample[\"digest\"] == destination_sample[\"digest\"]:\n            continue\n        changed = {}\n        keys = sorted(set(source_sample[\"row\"]) | set(destination_sample[\"row\"]))\n        for key in keys:\n            source_value = source_sample[\"row\"].get(key)\n            destination_value = destination_sample[\"row\"].get(key)\n            if source_value != destination_value:\n                changed[key] = {\n                    \"sqlite\": source_value,\n                    \"mysql\": destination_value,\n                }\n        differences.append(\n            {\n                \"offset\": source_sample[\"offset\"],\n                \"changed_columns\": changed,\n            }\n        )\n    return json.dumps(differences, ensure_ascii=False, default=_json_default)[:2000]\n'''
+          if old not in text:
+              raise SystemExit("sample digest block not found")
+          text = text.replace(old, new, 1)
+
+          old = '''            if source_samples != destination_samples:\n                raise RuntimeError(f\"{sport}.{name}: deterministic sample mismatch\")\n'''
+          new = '''            if source_samples != destination_samples:\n                details = _sample_difference(\n                    source,\n                    destination,\n                    source_table,\n                    destination_table,\n                )\n                raise RuntimeError(\n                    f\"{sport}.{name}: deterministic sample mismatch: {details}\"\n                )\n'''
+          if old not in text:
+              raise SystemExit("sample mismatch block not found")
+          text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Add semantic verification tests
+        shell: bash
+        run: |
+          cat > tests/test_mysql_semantic_verification.py <<'PY'
+          from datetime import datetime
+          from decimal import Decimal
+          import unittest
+
+          from sqlalchemy import Column, DateTime, Integer, MetaData, String, Table
+
+          from Flask_App.mysql_cutover import _normalized_row, _row_digest
+
+
+          class MySQLSemanticVerificationTests(unittest.TestCase):
+              def setUp(self):
+                  metadata = MetaData()
+                  self.table = Table(
+                      "tickets",
+                      metadata,
+                      Column("id", Integer, primary_key=True),
+                      Column("section", String(300)),
+                      Column("price", Integer),
+                      Column("ticketsPerSection", Integer, nullable=True),
+                      Column("captured", DateTime),
+                  )
+
+              def test_sqlite_and_mysql_driver_representations_match(self):
+                  sqlite_row = {
+                      "id": 1.0,
+                      "section": 101,
+                      "price": 80.0,
+                      "ticketsPerSection": 2.0,
+                      "captured": datetime(2026, 9, 5, 12, 0),
+                  }
+                  mysql_row = {
+                      "id": 1,
+                      "section": "101",
+                      "price": 80,
+                      "ticketsPerSection": 2,
+                      "captured": datetime(2026, 9, 5, 12, 0),
+                  }
+                  self.assertEqual(
+                      _row_digest(self.table, sqlite_row),
+                      _row_digest(self.table, mysql_row),
+                  )
+
+              def test_real_string_change_still_fails(self):
+                  source = {
+                      "id": 1,
+                      "section": "Section 101",
+                      "price": 80,
+                      "ticketsPerSection": None,
+                      "captured": datetime(2026, 9, 5, 12, 0),
+                  }
+                  destination = {**source, "section": "Section 10"}
+                  self.assertNotEqual(
+                      _row_digest(self.table, source),
+                      _row_digest(self.table, destination),
+                  )
+
+              def test_non_integral_value_is_rejected_for_integer_column(self):
+                  row = {
+                      "id": 1,
+                      "section": "101",
+                      "price": Decimal("80.5"),
+                      "ticketsPerSection": 2,
+                      "captured": datetime(2026, 9, 5, 12, 0),
+                  }
+                  with self.assertRaises(RuntimeError):
+                      _normalized_row(self.table, row)
+
+
+          if __name__ == "__main__":
+              unittest.main()
+          PY
+
+      - name: Validate patch
+        run: |
+          python -m pip install -r requirements.txt
+          python -m py_compile Flask_App/mysql_cutover.py
+          python -m unittest tests.test_mysql_semantic_verification -v
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Flask_App/mysql_cutover.py tests/test_mysql_semantic_verification.py
+          git commit -m "Normalize cross-database migration verification"
+          git push origin HEAD:fix/mysql-cutover-deployment
