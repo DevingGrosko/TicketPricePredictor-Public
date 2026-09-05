@@ -19,9 +19,9 @@ jobs:
         with:
           ref: feature/mysql-cutover
       - name: Package source
-        run: tar --exclude=.git -czf mysql-cutover-branch.tar.gz .
+        run: tar --exclude=.git -czf "$RUNNER_TEMP/mysql-cutover-branch.tar.gz" .
       - uses: actions/upload-artifact@v4
         with:
           name: mysql-cutover-branch-source
-          path: mysql-cutover-branch.tar.gz
+          path: ${{ runner.temp }}/mysql-cutover-branch.tar.gz
           retention-days: 1
