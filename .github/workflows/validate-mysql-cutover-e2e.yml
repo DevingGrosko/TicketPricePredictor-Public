@@ -30,10 +30,10 @@ jobs:
           --health-retries=20
 
     env:
-      DATABASE_PATH: ${{ runner.temp }}/mysql-e2e/baseball.db
-      CONCERT_DATABASE_PATH: ${{ runner.temp }}/mysql-e2e/concerts.db
-      NFL_DATABASE_PATH: ${{ runner.temp }}/mysql-e2e/nfl.db
-      NHL_DATABASE_PATH: ${{ runner.temp }}/mysql-e2e/nhl.db
+      DATABASE_PATH: /tmp/ticketsignal-mysql-e2e/baseball.db
+      CONCERT_DATABASE_PATH: /tmp/ticketsignal-mysql-e2e/concerts.db
+      NFL_DATABASE_PATH: /tmp/ticketsignal-mysql-e2e/nfl.db
+      NHL_DATABASE_PATH: /tmp/ticketsignal-mysql-e2e/nhl.db
       FLASK_SECRET_KEY: mysql-e2e-secret
       COLLECTOR_INGEST_TOKEN: mysql-e2e-token
       TICKETSIGNAL_DATABASE_BACKEND: sqlite
