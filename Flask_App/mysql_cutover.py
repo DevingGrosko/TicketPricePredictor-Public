@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation
 import hashlib
 import json
 import os
@@ -26,9 +27,14 @@ from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
 from sqlalchemy import (
+    Boolean,
+    Date as SQLDate,
     DateTime,
+    Float,
+    Integer,
     JSON,
     MetaData,
+    Numeric,
     String,
     Table,
     create_engine,
@@ -230,9 +236,69 @@ def _normalize_for_digest(value: Any) -> Any:
     return value
 
 
-def _row_digest(mapping: dict[str, Any]) -> str:
+def _normalize_column_value(column: Any, value: Any) -> Any:
+    """Normalize DB-driver representations without hiding data changes.
+
+    SQLite is dynamically typed, so old INTEGER or VARCHAR columns can return
+    values such as ``1.0`` or ``101`` while MySQL returns ``1`` or ``"101"``
+    after applying the declared schema. These are semantically identical for
+    the column and should not fail a verified migration.
+    """
+
+    if value is None:
+        return None
+    column_type = column.type
+    if isinstance(column_type, Boolean):
+        return bool(value)
+    if isinstance(column_type, Integer):
+        try:
+            number = Decimal(str(value))
+        except (InvalidOperation, ValueError) as exc:
+            raise RuntimeError(
+                f"{column.table.name}.{column.name} contains a non-integer value: {value!r}"
+            ) from exc
+        if number != number.to_integral_value():
+            raise RuntimeError(
+                f"{column.table.name}.{column.name} contains a non-integer value: {value!r}"
+            )
+        return int(number)
+    if isinstance(column_type, (Float, Numeric)):
+        try:
+            number = Decimal(str(value))
+        except (InvalidOperation, ValueError) as exc:
+            raise RuntimeError(
+                f"{column.table.name}.{column.name} contains a non-numeric value: {value!r}"
+            ) from exc
+        if number == number.to_integral_value():
+            return int(number)
+        return format(number.normalize(), "f")
+    if isinstance(column_type, DateTime):
+        if not isinstance(value, datetime):
+            raise RuntimeError(
+                f"{column.table.name}.{column.name} contains a non-datetime value: {value!r}"
+            )
+        return value.replace(tzinfo=None).isoformat(timespec="microseconds")
+    if isinstance(column_type, SQLDate):
+        if not isinstance(value, date):
+            raise RuntimeError(
+                f"{column.table.name}.{column.name} contains a non-date value: {value!r}"
+            )
+        return value.isoformat()
+    if isinstance(column_type, String):
+        return str(value)
+    return _normalize_for_digest(value)
+
+
+def _normalized_row(table: Table, mapping: dict[str, Any]) -> dict[str, Any]:
+    return {
+        column.name: _normalize_column_value(column, mapping.get(column.name))
+        for column in table.columns
+    }
+
+
+def _row_digest(table: Table, mapping: dict[str, Any]) -> str:
     payload = json.dumps(
-        _normalize_for_digest(mapping),
+        _normalized_row(table, mapping),
         sort_keys=True,
         separators=(",", ":"),
         ensure_ascii=False,
@@ -290,20 +356,69 @@ def _pk_signature(connection: Connection, table: Table) -> dict[str, Any]:
     return signature
 
 
-def _sample_digests(connection: Connection, table: Table) -> list[str]:
+def _sample_rows(connection: Connection, table: Table) -> list[dict[str, Any]]:
     count = _count(connection, table)
     if not count:
         return []
     keys = list(table.primary_key.columns)
     order = keys or list(table.columns)[:1]
-    offsets = sorted({0, count // 2, count - 1})
-    digests = []
-    for offset in offsets:
+    rows = []
+    for offset in sorted({0, count // 2, count - 1}):
         row = connection.execute(
             select(table).order_by(*order).offset(offset).limit(1)
         ).mappings().one()
-        digests.append(_row_digest(dict(row)))
-    return digests
+        normalized = _normalized_row(table, dict(row))
+        rows.append(
+            {
+                "offset": offset,
+                "digest": hashlib.sha256(
+                    json.dumps(
+                        normalized,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        ensure_ascii=False,
+                        default=_json_default,
+                    ).encode("utf-8")
+                ).hexdigest(),
+                "row": normalized,
+            }
+        )
+    return rows
+
+
+def _sample_digests(connection: Connection, table: Table) -> list[str]:
+    return [sample["digest"] for sample in _sample_rows(connection, table)]
+
+
+def _sample_difference(
+    source: Connection,
+    destination: Connection,
+    source_table: Table,
+    destination_table: Table,
+) -> str:
+    source_rows = _sample_rows(source, source_table)
+    destination_rows = _sample_rows(destination, destination_table)
+    differences = []
+    for source_sample, destination_sample in zip(source_rows, destination_rows):
+        if source_sample["digest"] == destination_sample["digest"]:
+            continue
+        changed = {}
+        keys = sorted(set(source_sample["row"]) | set(destination_sample["row"]))
+        for key in keys:
+            source_value = source_sample["row"].get(key)
+            destination_value = destination_sample["row"].get(key)
+            if source_value != destination_value:
+                changed[key] = {
+                    "sqlite": source_value,
+                    "mysql": destination_value,
+                }
+        differences.append(
+            {
+                "offset": source_sample["offset"],
+                "changed_columns": changed,
+            }
+        )
+    return json.dumps(differences, ensure_ascii=False, default=_json_default)[:2000]
 
 
 def _foreign_key_orphans(connection: Connection, sport: str, tables: dict[str, Table]) -> dict[str, int]:
@@ -395,7 +510,15 @@ def migrate_sport(sport: str, *, replace: bool, batch_size: int) -> dict[str, An
             if source_signature != destination_signature:
                 raise RuntimeError(f"{sport}.{name}: primary-key range mismatch")
             if source_samples != destination_samples:
-                raise RuntimeError(f"{sport}.{name}: deterministic sample mismatch")
+                details = _sample_difference(
+                    source,
+                    destination,
+                    source_table,
+                    destination_table,
+                )
+                raise RuntimeError(
+                    f"{sport}.{name}: deterministic sample mismatch: {details}"
+                )
             verification[name] = {
                 "rows": source_count,
                 "primary_keys": source_signature,

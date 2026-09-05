@@ -3,12 +3,19 @@
 
 from __future__ import annotations
 
+import base64
 import os
 from pathlib import Path
+import sys
 import tempfile
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import make_url
+
+
+PROJECT_DIR = Path(__file__).resolve().parents[1]
+if str(PROJECT_DIR) not in sys.path:
+    sys.path.insert(0, str(PROJECT_DIR))
 
 
 def main() -> int:
@@ -18,9 +25,9 @@ def main() -> int:
     )
     admin = create_engine(admin_url, pool_pre_ping=True)
     database_names = {
-        "BASEBALL_DATABASE_URL": "ticketsignal_web_mlb",
-        "NFL_DATABASE_URL": "ticketsignal_web_nfl",
-        "NHL_DATABASE_URL": "ticketsignal_web_nhl",
+        "MYSQL_MLB_DATABASE": "ticketsignal_web_mlb",
+        "MYSQL_NFL_DATABASE": "ticketsignal_web_nfl",
+        "MYSQL_NHL_DATABASE": "ticketsignal_web_nhl",
     }
     with admin.begin() as connection:
         for name in database_names.values():
@@ -30,9 +37,28 @@ def main() -> int:
             )
 
     parsed = make_url(admin_url)
-    for variable, name in database_names.items():
-        os.environ[variable] = parsed.set(database=name).render_as_string(
-            hide_password=False
+    os.environ.update(
+        {
+            "TICKETSIGNAL_DATABASE_BACKEND": "mysql",
+            "MYSQL_HOST": str(parsed.host or "127.0.0.1"),
+            "MYSQL_USERNAME": str(parsed.username or "root"),
+            "MYSQL_PASSWORD_B64": base64.b64encode(
+                str(parsed.password or "").encode("utf-8")
+            ).decode("ascii"),
+            **database_names,
+        }
+    )
+
+    # The production cutover creates a bounded, MySQL-safe copy of each
+    # application's ORM and analytics schema before inserting any rows. The
+    # web smoke test needs the same empty schema before exercising routes.
+    from Flask_App.database_config import create_mysql_engine
+    from Flask_App.mysql_cutover import _mysql_metadata
+
+    for sport in ("mlb", "nfl", "nhl"):
+        _mysql_metadata(sport).create_all(
+            create_mysql_engine(sport),
+            checkfirst=True,
         )
 
     with tempfile.TemporaryDirectory() as directory:
@@ -55,7 +81,7 @@ def main() -> int:
             "/nfl",
             "/nfl/stadium",
             "/nhl",
-            "/nhl/stadium",
+            "/nhl/arena",
             "/concerts",
         ):
             response = client.get(path)
