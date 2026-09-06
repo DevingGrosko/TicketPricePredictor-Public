@@ -1,0 +1,68 @@
+name: Rebuild report summaries
+on:
+  push:
+    branches: [main]
+    paths: [.github/workflows/rebuild-report-summaries.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: report-summary-maintenance
+  cancel-in-progress: false
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - name: Refresh compact summaries without touching raw data or migration state
+        env:
+          COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
+        run: |
+          python -u - <<'PY'
+          import json, os, time
+          from urllib.request import Request, urlopen
+          from urllib.error import HTTPError, URLError
+          base = 'https://bunnyjeff.pythonanywhere.com'
+          token = os.environ['COLLECTOR_INGEST_TOKEN']
+          def call(path, payload=None):
+              for attempt in range(8):
+                  try:
+                      request = Request(base + path, data=None if payload is None else json.dumps(payload).encode(), headers={'Authorization':'Bearer '+token, 'Accept':'application/json','Content-Type':'application/json'})
+                      with urlopen(request, timeout=90) as response:
+                          return json.load(response)
+                  except HTTPError as error:
+                      body = error.read().decode('utf-8','replace')[:2000]
+                      if error.code not in (409, 429, 502, 503, 504):
+                          raise RuntimeError(f'HTTP {error.code}: {body}') from error
+                      print(f'Transient HTTP {error.code}; retry {attempt+1}/8')
+                  except (URLError, TimeoutError):
+                      print(f'Transient connection timeout; retry {attempt+1}/8')
+                  time.sleep(min(5 * (attempt+1), 30))
+              raise RuntimeError('Maintenance request did not recover after bounded retries')
+          live = call('/api/database/status')
+          assert live['backend'] == 'mysql' and not live['migration_paused'], 'Unexpected migration/backend state; no maintenance started'
+          for sport in ('mlb','nfl','nhl'):
+              quality = call('/api/analytics/quality?sport='+sport)
+              assert quality.get('summary_schema_version') == 2, 'Updated workers are not ready'
+              for batch in range(1200):
+                  result = call('/api/analytics/backfill', {'sport':sport,'limit':1})
+                  print(json.dumps(result), flush=True)
+                  if result.get('complete') is True:
+                      break
+              else:
+                  raise RuntimeError(sport+' did not complete within the batch limit')
+          print('All three version-2 summary rebuilds completed.')
+          PY
+      - name: Audit the rebuilt live rankings
+        env:
+          COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
+        run: python tools/report_quality_live_check.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: rebuilt-live-report-quality
+          path: report-quality-results/
+          retention-days: 14
