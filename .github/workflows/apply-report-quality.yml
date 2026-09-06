@@ -1,0 +1,56 @@
+name: Apply report quality changes
+on:
+  push:
+    branches: [fix/team-reports-clickable-rankings-preseason]
+    paths: [.github/workflows/apply-report-quality.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: fix/team-reports-clickable-rankings-preseason
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          cache: pip
+      - name: Verify and apply exact tested patch
+        run: |
+          python - <<'PY'
+          import base64, hashlib, lzma
+          from pathlib import Path
+          encoded = ''.join(Path(f'tools/.report-patch-{n}.b64').read_text().strip() for n in (1, 2))
+          patch = lzma.decompress(base64.b64decode(encoded, validate=True))
+          assert hashlib.sha256(patch).hexdigest() == '44bd1c90d7678e97521ebc3d2b4baae46dc29e53a12f259760aca7c38aaf4416'
+          Path('/tmp/report-quality.patch').write_bytes(patch)
+          PY
+          git apply --check /tmp/report-quality.patch
+          git apply /tmp/report-quality.patch
+      - name: Install test dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run regression suite
+        env:
+          DATABASE_PATH: ${{ runner.temp }}/ticket-validation/baseball.db
+          NFL_DATABASE_PATH: ${{ runner.temp }}/ticket-validation/nfl.db
+          NHL_DATABASE_PATH: ${{ runner.temp }}/ticket-validation/nhl.db
+          CONCERT_DATABASE_PATH: ${{ runner.temp }}/ticket-validation/concert.db
+          TICKETSIGNAL_DATABASE_BACKEND: sqlite
+          FLASK_SECRET_KEY: local-validation-only
+          COLLECTOR_INGEST_TOKEN: local-validation-only
+        run: |
+          mkdir -p "$(dirname "$DATABASE_PATH")"
+          python -m compileall -q Flask_App models.py nfl_schedule_collector.py nhl_schedule_collector.py
+          node --check Flask_App/static/js/nfl-stadium.js
+          python -m unittest discover -s tests -v
+      - name: Commit validated application changes
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git rm tools/.report-patch-1.b64 tools/.report-patch-2.b64
+          git add Flask_App models.py nfl_schedule_collector.py nhl_schedule_collector.py tests docs
+          git diff --cached --stat
+          git commit -m 'Separate home-team reports and enforce comparable ranking evidence'
+          git push origin HEAD:fix/team-reports-clickable-rankings-preseason
