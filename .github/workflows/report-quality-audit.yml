@@ -1,0 +1,62 @@
+name: Report quality audit
+on:
+  push:
+    branches: [fix/team-reports-clickable-rankings-preseason]
+    paths: [.github/workflows/report-quality-audit.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v7
+      - name: Archive source and inspect public section inventories
+        run: |
+          mkdir -p audit-output
+          git archive --format=zip HEAD -o audit-output/source.zip
+          python - <<'PY'
+          import json, time
+          from html.parser import HTMLParser
+          from pathlib import Path
+          from urllib.request import Request, urlopen
+          from urllib.parse import urlencode
+          class Page(HTMLParser):
+              def __init__(self):
+                  super().__init__(); self.cards=[]; self.card=None; self.heading=False; self.select=None; self.options={}
+              def handle_starttag(self, tag, pairs):
+                  a=dict(pairs)
+                  if tag=='a' and 'data-stadium-card' in a:
+                      self.card={'url':a.get('href'), 'search':a.get('data-search'), 'team':''}
+                  if self.card is not None and tag in ('h2','h3'): self.heading=True
+                  if tag=='select': self.select=a.get('id')
+                  if tag=='option' and self.select and a.get('value'): self.options.setdefault(self.select,[]).append(a['value'])
+              def handle_endtag(self,tag):
+                  if tag in ('h2','h3'): self.heading=False
+                  if tag=='a' and self.card is not None: self.cards.append(self.card); self.card=None
+                  if tag=='select': self.select=None
+              def handle_data(self,s):
+                  if self.card is not None and self.heading: self.card['team']+=s.strip()
+          base='https://bunnyjeff.pythonanywhere.com'
+          out=Path('audit-output'); results={}
+          def get(path):
+              with urlopen(Request(base+path,headers={'User-Agent':'TicketSignal-read-only-audit/1.0'}),timeout=45) as r: return r.read().decode()
+          for sport, path, select, endpoint, key in [('mlb','/','game-place','/api/baseball/options','venue'),('nfl','/nfl','nfl-team','/api/nfl/options','team'),('nhl','/nhl','nhl-team','/api/nhl/options','team')]:
+              html=get(path); (out/(sport+'-before.html')).write_text(html)
+              page=Page(); page.feed(html)
+              inventories={}
+              for value in page.options.get(select,[]):
+                  try: inventories[value]=json.loads(get(endpoint+'?'+urlencode({key:value})))
+                  except Exception as e: inventories[value]={'error':str(e)}
+                  time.sleep(.2)
+              results[sport]={'cards':page.cards,'inventories':inventories}
+              print(sport, 'cards',len(page.cards),'inventories',len(inventories),flush=True)
+          (out/'public-inventory.json').write_text(json.dumps(results,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: report-quality-audit
+          path: audit-output/
+          retention-days: 14
