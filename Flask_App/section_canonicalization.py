@@ -11,6 +11,7 @@ from dataclasses import dataclass
 import re
 import unicodedata
 from typing import Any
+from Flask_App.report_policy import report_venue
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,7 @@ _TOKEN_REPLACEMENTS = {
     "sec": "section",
     "sect": "section",
     "granstand": "grandstand",
+    "firld": "field",
 }
 
 _PARKING_RE = re.compile(r"\bparking\b|^(?:lot|garage)\b|\bpark and ride\b")
@@ -100,7 +102,7 @@ def canonical_section_key(sport: Any, venue: Any, value: Any) -> str | None:
 
         expanded.append(str(int(token)) if token.isdigit() else token)
 
-    venue_phrase = _normalized_phrase(venue)
+    venue_phrase = _normalized_phrase(report_venue(venue))
     if (
         venue_phrase == "fenway park"
         and len(expanded) == 3

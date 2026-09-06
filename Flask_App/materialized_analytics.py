@@ -39,7 +39,7 @@ from models import captured_datetime_utc, event_datetime_utc
 from Flask_App.section_canonicalization import section_identity
 
 
-SUMMARY_SCHEMA_VERSION = 1
+SUMMARY_SCHEMA_VERSION = 2
 
 
 LOGGER = logging.getLogger(__name__)
@@ -530,7 +530,11 @@ def read_summary_rows(
         SECTION_BUCKET_SUMMARY.c.observation_count,
         SECTION_BUCKET_SUMMARY.c.first_captured_at,
         SECTION_BUCKET_SUMMARY.c.last_captured_at,
-    ).where(SECTION_BUCKET_SUMMARY.c.event_id.in_(ids))
+    ).select_from(SECTION_BUCKET_SUMMARY.join(SECTION_SUMMARY_STATE,
+        SECTION_BUCKET_SUMMARY.c.event_id == SECTION_SUMMARY_STATE.c.event_id
+    )).where(SECTION_BUCKET_SUMMARY.c.event_id.in_(ids),
+             SECTION_SUMMARY_STATE.c.summary_version == SUMMARY_SCHEMA_VERSION,
+             SECTION_SUMMARY_STATE.c.complete.is_(True))
     keys = sorted({_clean(key) for key in section_keys or [] if _clean(key)})
     if keys:
         statement = statement.where(SECTION_BUCKET_SUMMARY.c.section_key.in_(keys))

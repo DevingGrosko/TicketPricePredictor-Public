@@ -33,6 +33,7 @@ from sqlalchemy.orm import (
 
 
 from Flask_App.database_config import create_ticket_engine, is_sqlite_engine
+from Flask_App.report_policy import is_preseason
 
 PROJECT_DIR = Path(__file__).resolve().parent
 INCOMPLETE_PUBLIC_EVENT_DATES = frozenset(
@@ -112,6 +113,7 @@ def event_has_complete_public_data(event: "Event") -> bool:
     """Keep known incomplete collection days out of public views and analysis."""
     return bool(
         event.event_date
+        and not is_preseason("mlb", event)
         and event_datetime_eastern(event.event_date).date()
         not in INCOMPLETE_PUBLIC_EVENT_DATES
     )

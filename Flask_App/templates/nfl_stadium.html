@@ -9,7 +9,7 @@
   {% if sport_key == 'nhl' %}<link rel="stylesheet" href="{{ url_for('static', filename='css/nhl.css') }}?v=2">{% endif %}
   {% if sport_key == 'mlb' %}<link rel="stylesheet" href="{{ url_for('static', filename='css/mlb.css') }}?v=1">{% endif %}
   <link rel="stylesheet" href="{{ url_for('static', filename='css/venue-insights.css') }}?v=4">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/ranking-readability.css') }}?v=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/ranking-readability.css') }}?v=2">
 {% endblock %}
 
 {% block content %}
@@ -29,6 +29,7 @@
         <div>
           <span class="nfl-section-kicker">{{ sport_label }} team directory</span>
           <h1>Choose a team.</h1>
+          {% if selection_note %}<p>{{ selection_note }}</p>{% endif %}
           <p>See its cheapest sections, typical price drops, and game history.</p>
         </div>
       </div>
@@ -37,7 +38,7 @@
         <label for="venue-directory-search">Search by team or {{ venue_noun }}</label>
         <div>
           <input id="venue-directory-search" type="search" placeholder="Search by team or {{ venue_noun }}…" autocomplete="off" data-stadium-search data-venue-noun="{{ venue_noun }}">
-          <span data-stadium-count>{{ stadium_count }} {{ venue_noun }}{% if stadium_count != 1 %}s{% endif %}</span>
+          <span data-stadium-count>{{ stadium_count }} team reports</span>
         </div>
       </div>
 
@@ -65,20 +66,29 @@
         <div class="nfl-stadium-dashboard-hero__copy">
           <span class="nfl-section-kicker">{{ selected_venue }} · {{ venue_noun }} market report</span>
           <h1>{{ selected_team_label or sport_label ~ ' home team' }}</h1>
-          <p>Compare sections across tracked home games at {{ selected_venue }}.</p>
+          <p>{{ report_season }} home games · Preseason excluded</p>
         </div>
 
         <form class="nfl-stadium-switch" method="get" action="{{ directory_url }}" data-stadium-switch>
           <label for="venue-switcher">Switch team</label>
           <div>
-            <select id="venue-switcher" name="venue">
+            <select id="venue-switcher" name="team">
               {% for stadium in stadiums %}
-                <option value="{{ stadium.venue }}"{% if stadium.venue == selected_venue %} selected{% endif %}>{{ stadium.team_label or sport_label ~ ' home team' }} · {{ stadium.venue }} · {{ stadium.game_count }} game{% if stadium.game_count != 1 %}s{% endif %}</option>
+                <option value="{{ stadium.team }}"{% if stadium.team == selected_team %} selected{% endif %}>{{ stadium.team_label or sport_label ~ ' home team' }} · {{ stadium.venue }} · {{ stadium.game_count }} game{% if stadium.game_count != 1 %}s{% endif %}</option>
               {% endfor %}
             </select>
             <button class="button nfl-button nfl-button--primary" type="submit">Open</button>
           </div>
         </form>
+
+        {% if venue_options|length > 1 %}
+          <form class="nfl-stadium-switch" method="get" action="{{ directory_url }}" data-stadium-switch>
+            <input type="hidden" name="team" value="{{ selected_team }}">
+            <label for="report-venue">Venue — seating histories stay separate</label>
+            <select id="report-venue" name="venue">{% for venue in venue_options %}<option value="{{ venue }}"{% if venue == selected_venue %} selected{% endif %}>{{ venue }}</option>{% endfor %}</select>
+            <button class="button nfl-button nfl-button--primary" type="submit">Open</button>
+          </form>
+        {% endif %}
 
         <dl class="nfl-stadium-dashboard-metrics">
           <div><dt>{{ game_count }}</dt><dd>Games</dd></div>
@@ -103,54 +113,59 @@
         <div class="nfl-ranking-grid">
           <article class="nfl-ranking-card">
             <header>
-              <div><h3>Cheapest sections</h3></div>
+              <div><h3>Cheapest sections</h3><p class="ranking-window">Final 24 hours</p></div>
             </header>
             <ol>
               {% for section in cheapest_sections %}
-                <li>
+                <li class="nfl-ranking-row">
                   <span class="nfl-rank-number">{{ loop.index }}</span>
                   <div class="nfl-rank-copy">
                     <strong>{{ section.name }}</strong>
-                    <small>{{ section.game_count }} game{% if section.game_count != 1 %}s{% endif %}{% if section.is_low_price_sample %} · small sample{% endif %}</small>
+                    <small>{{ section.ranking_price_games }}/{{ section.ranking_total_games }} games</small>
                   </div>
-                  <div class="nfl-rank-value"><strong>{{ section.typical_price_label }}</strong><small>avg. price</small></div>
-                  {% if section.detail_url %}<a href="{{ section.detail_url }}" aria-label="Open details for {{ section.name }}">Open <span aria-hidden="true">&#8594;</span></a>{% endif %}
+                  <div class="nfl-rank-value"><strong>{{ section.ranking_price_label }}</strong><small>avg. price</small></div>
+                  {% if section.detail_url %}<a class="nfl-ranking-link" href="{{ section.detail_url }}" aria-label="Open details for {{ section.name }}">Open <span aria-hidden="true">&#8594;</span></a>{% endif %}
                 </li>
               {% else %}
-                <li class="nfl-ranking-empty">No section prices are available yet.</li>
+                <li class="nfl-ranking-empty">Not enough comparable history yet.</li>
               {% endfor %}
             </ol>
           </article>
 
           <article class="nfl-ranking-card nfl-ranking-card--drops">
             <header>
-              <div><h3>Largest typical drops</h3></div>
+              <div><h3>Largest typical drops</h3><p class="ranking-window">Final {{ "48 hours" if sport_key == "mlb" else "7 days" }}</p></div>
             </header>
             <ol>
               {% for section in biggest_drops %}
-                <li class="nfl-drop-profile-row">
+                <li class="nfl-drop-profile-row nfl-ranking-row">
                   <span class="nfl-rank-number">{{ loop.index }}</span>
                   <div class="nfl-rank-copy nfl-drop-profile-copy">
                     <strong>{{ section.name }}</strong>
-                    <small>{{ section.drop_game_count }} game{% if section.drop_game_count != 1 %}s{% endif %} · {{ section.material_drop_game_count }}/{{ section.drop_game_count }} fell {{ section.material_drop_threshold|int }}%+</small>
-                    {% if section.drop_peak_label and section.drop_low_label %}
-                      <div class="nfl-drop-profile-facts">
-                        <span>Peak {{ section.drop_peak_label|replace(' before', '') }} → low {{ section.drop_low_label|replace(' before', '') }}</span>
-                      </div>
-                    {% endif %}
+                    <small>{{ section.ranking_drop_games }}/{{ section.ranking_total_games }} games · {{ section.ranking_drop_material_games }} fell 20%+</small>
+
                   </div>
                   <div class="nfl-rank-value nfl-rank-value--drop nfl-drop-profile-value">
-                    <strong>{{ section.typical_max_drop_percent_label }}</strong>
+                    <strong>{{ section.ranking_drop_label }}</strong>
                     <small>typical max</small>
                   </div>
-                  {% if section.detail_url %}<a href="{{ section.detail_url }}" aria-label="Open details for {{ section.name }}">Open <span aria-hidden="true">&#8594;</span></a>{% endif %}
+                  {% if section.detail_url %}<a class="nfl-ranking-link" href="{{ section.detail_url }}" aria-label="Open details for {{ section.name }}">Open <span aria-hidden="true">&#8594;</span></a>{% endif %}
                 </li>
               {% else %}
-                <li class="nfl-ranking-empty">More completed game history is needed.</li>
+                <li class="nfl-ranking-empty">Not enough comparable history yet.</li>
               {% endfor %}
             </ol>
           </article>
         </div>
+
+        <details class="ranking-method">
+          <summary>How these rankings work</summary>
+          <p>Same team, venue, and season. Only completed regular-season and playoff games count. A section needs at least 3 comparable games and coverage of at least 60% of completed games in this report.</p>
+          <p>Cheapest: every included game must cover all three final-day windows (12–24, 6–12, and 0–6 hours). Window medians are weighted by duration, then game averages receive equal weight. No missing prices are filled in.</p>
+          <p>Drops: all five windows in the final {{ '48 hours' if sport_key == 'mlb' else '7 days' }} must have at least three observations. We find each game's largest earlier-high to later-low decline, then take the median across games. These are observed price histories, not guaranteed savings.</p>
+          <p>Sparse sections remain available below, but cannot win a ranking based on a single cheap game. These coverage rules are safeguards, not statistical confidence intervals.</p>
+        </details>
+        {% if ranking_note %}<p class="ranking-window">{{ ranking_note }}</p>{% endif %}
 
         <div class="nfl-report-lookup">
           <div>
@@ -161,7 +176,7 @@
             <select id="section-jump" data-section-jump-select>
               <option value="">Choose a section</option>
               {% for section in all_sections %}
-                {% if section.detail_url %}<option value="{{ section.detail_url }}">{{ section.name }} · {{ section.typical_price_label }}</option>{% endif %}
+                {% if section.detail_url %}<option value="{{ section.detail_url }}">{{ section.name }} · {{ section.game_count }} games{% if not section.ranking_price_eligible %} · limited comparison{% endif %}</option>{% endif %}
               {% endfor %}
             </select>
             <button class="button nfl-button nfl-button--primary" type="submit" data-section-jump-button disabled>Open</button>
@@ -175,4 +190,4 @@
 </div>
 {% endblock %}
 
-{% block scripts %}<script src="{{ url_for('static', filename='js/nfl-stadium.js') }}?v=4"></script>{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='js/nfl-stadium.js') }}?v=5"></script>{% endblock %}

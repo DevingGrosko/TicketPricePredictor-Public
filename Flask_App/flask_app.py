@@ -155,6 +155,22 @@ def database_backend_status():
     )
 
 
+@app.get("/api/analytics/quality")
+def analytics_quality():
+    """Authenticated, read-only audit of the same evidence used by report cards."""
+    if not authorized_collector_request():
+        return jsonify({"status": "unauthorized"}), 401
+    from Flask_App.report_quality import quality_report
+    try:
+        result = quality_report(
+            request.args.get("sport", ""), request.args.get("team", ""),
+            request.args.get("venue", ""),
+        )
+    except ValueError as exc:
+        return jsonify({"status": "error", "error": str(exc)}), 400
+    return jsonify(result)
+
+
 @app.post("/api/analytics/backfill")
 def analytics_backfill():
     """Refresh a bounded batch of materialized event summaries."""
@@ -475,10 +491,15 @@ def _baseball_home_context():
                     {"value": str(event.id), "label": format_event_title(event)}
                 )
             games_dict = dict(sorted(games_dict.items()))
+            from Flask_App.nfl_stadium_blueprint import _generic_venue_index, mlb_event_home_team
+            team_reports = _generic_venue_index(data, datetime.now(timezone.utc),
+                venue_getter=lambda e: e.Place, team_getter=mlb_event_home_team,
+                endpoint="nfl_stadium.mlb_stadium")
     finally:
         dispose_ticket_engine(model.engine)
 
     return {
+        "team_reports": team_reports,
         "event_dict": {place: [] for place in games_dict},
         "games_dict": games_dict,
         "game_sections_dict": {},

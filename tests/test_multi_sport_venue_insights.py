@@ -135,8 +135,8 @@ class MLBVenueInsightTests(unittest.TestCase):
                 self.assertEqual(context["selected_team_label"], "Washington Nationals")
                 self.assertEqual(context["game_count"], 3)
                 self.assertEqual(context["completed_game_count"], 3)
-                self.assertEqual(context["cheapest_sections"][0]["name"], "Section 500")
-                self.assertEqual(context["biggest_drops"][0]["name"], "Section 100")
+                self.assertEqual(context["cheapest_sections"], [])  # Missing common final-day windows
+                self.assertEqual(context["biggest_drops"], [])  # Sparse observations remain exploratory
                 self.assertEqual(
                     context["all_sections"][0]["average_price_label"], "$53.84"
                 )
@@ -301,8 +301,8 @@ class NHLVenueInsightTests(unittest.TestCase):
                 self.assertEqual(context["selected_team_label"], "Pittsburgh Penguins")
                 self.assertEqual(context["currency_label"], "USD")
                 self.assertEqual(context["game_count"], 3)
-                self.assertEqual(context["cheapest_sections"][0]["name"], "Section 500")
-                self.assertEqual(context["biggest_drops"][0]["name"], "Section 100")
+                self.assertEqual(context["cheapest_sections"], [])  # Missing common final-day windows
+                self.assertEqual(context["biggest_drops"], [])  # Sparse observations remain exploratory
                 self.assertEqual(context["stadiums"][0]["team_label"], "Pittsburgh Penguins")
                 self.assertIn("/nhl/map?", context["games"][0]["direct_url"])
                 by_name = {row["name"]: row for row in context["all_sections"]}
@@ -352,8 +352,8 @@ class VenueTemplateTests(unittest.TestCase):
         self.assertIn('nfl-stadium-card__eyebrow">{{ stadium.venue }}', dashboard)
 
         mlb_home = (root / "Flask_App/templates/HomeScreen.html").read_text()
-        self.assertIn("{% set team = mlb_team_for_venue(place) %}", mlb_home)
-        self.assertIn("<h3>{{ team }}</h3>", mlb_home)
+        self.assertIn("{% for report in team_reports %}", mlb_home)
+        self.assertIn("<h3>{{ report.team_label }}</h3>", mlb_home)
 
 
 if __name__ == "__main__":

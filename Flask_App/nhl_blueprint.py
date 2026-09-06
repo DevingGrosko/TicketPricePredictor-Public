@@ -59,6 +59,7 @@ from Flask_App.performance_cache import (
     page_cache,
 )
 from Flask_App.section_canonicalization import is_excluded_ticket_area
+from Flask_App.report_policy import is_preseason, report_venue
 from Flask_App.materialized_analytics import (
     ensure_summary_schema,
     refresh_event_summary_safely,
@@ -393,9 +394,9 @@ def nhl_event_away_team(event: NHLEvent) -> str | None:
 
 
 def nhl_display_venue(event: NHLEvent) -> str:
-    return event.canonical_venue or canonical_venue_name(
+    return report_venue(event.canonical_venue or canonical_venue_name(
         event.provider_venue or event.venue
-    )
+    ))
 
 
 def is_nhl_game_title(title: str) -> bool:
@@ -937,6 +938,11 @@ def ingest_nhl_snapshot():
             schedule_metadata,
             map_geometry,
         ) = nhl_snapshot_from_payload(payload)
+        from types import SimpleNamespace
+        candidate = SimpleNamespace(title=snapshot.title, event_date=event_date, **{
+            key: schedule_metadata.get(key) for key in ("game_type", "schedule_id")})
+        if is_preseason("nhl", candidate):
+            return jsonify({"status": "ignored", "reason": "preseason"}), 200
         now = datetime.now(timezone.utc)
         captured_at_utc = captured_at.astimezone(timezone.utc)
         event_date_utc = event_date.astimezone(timezone.utc)
@@ -1040,7 +1046,7 @@ def find_nhl_game(team_or_venue: str, identifier: str | None) -> NHLEvent | None
                 .filter(NHLEvent.id == int(identifier))
                 .first()
             )
-            if event is None:
+            if event is None or is_preseason("nhl", event):
                 return None
             accepted = {
                 nhl_event_home_team(event),
@@ -1211,6 +1217,7 @@ def _nhl_home_context() -> dict[str, Any]:
                         NHLEvent.country,
                         NHLEvent.currency,
                         NHLEvent.game_type,
+                        NHLEvent.schedule_id,
                         NHLEvent.compacted_at,
                     )
                 )
@@ -1220,6 +1227,11 @@ def _nhl_home_context() -> dict[str, Any]:
             all_games = [
                 game for game in all_games if _country_is_supported(game.country)
             ]
+            from Flask_App.nfl_stadium_blueprint import _generic_venue_index
+            team_reports = _generic_venue_index(all_games, now,
+                venue_getter=nhl_display_venue, team_getter=nhl_event_home_team,
+                endpoint="nfl_stadium.nhl_arena")
+            all_games = [game for game in all_games if not is_preseason("nhl", game)]
             upcoming_games = [game for game in all_games if not _event_is_completed(game, now)]
             completed_games = [game for game in all_games if _event_is_completed(game, now)]
             games = upcoming_games + list(reversed(completed_games))
@@ -1257,6 +1269,7 @@ def _nhl_home_context() -> dict[str, Any]:
 
     return {
         "games_dict": games_dict,
+        "team_reports": team_reports,
         "game_sections_dict": {},
         "team_count": len(games_dict),
         "game_count": sum(len(rows) for rows in games_dict.values()),
@@ -1316,6 +1329,7 @@ def _nhl_options_context(home_team: str) -> dict[str, Any]:
                         NHLEvent.country,
                         NHLEvent.currency,
                         NHLEvent.game_type,
+                        NHLEvent.schedule_id,
                     )
                 )
                 .filter(NHLEvent.home_team == selected)
@@ -1327,6 +1341,7 @@ def _nhl_options_context(home_team: str) -> dict[str, Any]:
                 for event in events
                 if _country_is_supported(event.country)
                 and nhl_event_home_team(event) == selected
+                and not is_preseason("nhl", event)
             ]
     finally:
         dispose_ticket_engine(model.engine)

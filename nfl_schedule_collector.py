@@ -48,6 +48,7 @@ from nfl_collector import (
     run_smoke_capture as run_feed_smoke_capture,
 )
 from nfl_metadata import canonical_venue_name, eastern_iso, geometry_section_count
+from Flask_App.report_policy import preseason_title
 
 
 ESPN_SCOREBOARD_URL = (
@@ -183,6 +184,11 @@ def parse_schedule_payload(
 
     for event in payload.get("events") or []:
         if not isinstance(event, dict):
+            continue
+        season = event.get("season") or {}
+        if isinstance(season, dict) and str(season.get("type")) == "1":
+            continue
+        if preseason_title(event.get("name")):
             continue
         try:
             event_date = _parse_datetime(event["date"])
