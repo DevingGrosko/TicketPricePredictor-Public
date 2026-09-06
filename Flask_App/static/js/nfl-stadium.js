@@ -34,15 +34,14 @@
 
   document.querySelectorAll('[data-stadium-search]').forEach(bindVenueSearch);
 
-  const stadiumSwitch = document.querySelector('[data-stadium-switch]');
-  if (stadiumSwitch) {
-    const select = stadiumSwitch.querySelector('select[name="venue"]');
+  document.querySelectorAll('[data-stadium-switch]').forEach((stadiumSwitch) => {
+    const select = stadiumSwitch.querySelector('select[name="team"], select[name="venue"]');
     if (select) {
       select.addEventListener('change', () => {
         if (select.value) stadiumSwitch.submit();
       });
     }
-  }
+  });
 
   document.querySelectorAll('[data-section-jump]').forEach((form) => {
     const select = form.querySelector('[data-section-jump-select]');

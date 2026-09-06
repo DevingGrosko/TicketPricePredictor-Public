@@ -27,7 +27,7 @@
       </div>
 
       <dl class="nfl-metrics" aria-label="MLB database totals">
-        <div><dt>{{ games_dict|length }}</dt><dd>Home teams</dd></div>
+        <div><dt>{{ team_reports|length }}</dt><dd>Home teams</dd></div>
         <div><dt>{{ event_count }}</dt><dd>Games tracked</dd></div>
       </dl>
     </div>
@@ -45,20 +45,17 @@
       <label for="mlb-team-search">Find a team or stadium</label>
       <div>
         <input id="mlb-team-search" type="search" placeholder="Search Nationals, Cubs, Fenway…" autocomplete="off" data-stadium-search data-venue-noun="team report">
-        <span data-stadium-count>{{ games_dict|length }} team report{% if games_dict|length != 1 %}s{% endif %}</span>
+        <span data-stadium-count>{{ team_reports|length }} team report{% if team_reports|length != 1 %}s{% endif %}</span>
       </div>
     </div>
 
     <div class="nfl-stadium-card-grid" data-stadium-grid>
-      {% for place, tracked_games in games_dict|dictsort %}
-        {% set team = mlb_team_for_venue(place) %}
-        <a class="nfl-stadium-card" href="{{ url_for('nfl_stadium.mlb_stadium', venue=place) }}" data-stadium-card data-search="{{ (team ~ ' ' ~ place)|lower }}">
-          <span class="nfl-stadium-card__eyebrow">{{ place }}</span>
-          <h3>{{ team }}</h3>
-          <dl>
-            <div><dt>{{ tracked_games|length }}</dt><dd>game{% if tracked_games|length != 1 %}s{% endif %}</dd></div>
-          </dl>
-          <span class="nfl-stadium-card__action">Open team report <b aria-hidden="true">&#8594;</b></span>
+      {% for report in team_reports %}
+        <a class="nfl-stadium-card" href="{{ report.url }}" data-stadium-card data-search="{{ (report.team_label ~ ' ' ~ report.venue)|lower }}">
+          <span class="nfl-stadium-card__eyebrow">{{ report.venue }}</span>
+          <h3>{{ report.team_label }}</h3>
+          <dl><div><dt>{{ report.game_count }}</dt><dd>{{ report.season }} games</dd></div></dl>
+          <span class="nfl-stadium-card__action">{% if report.game_count %}Open team report{% else %}Awaiting in-season data{% endif %} <b aria-hidden="true">&#8594;</b></span>
         </a>
       {% else %}
         <div class="empty-state nfl-empty-state nfl-stadium-picker__empty">

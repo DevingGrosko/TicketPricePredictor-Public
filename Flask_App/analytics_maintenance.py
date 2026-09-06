@@ -49,6 +49,7 @@ def _mlb_spec() -> tuple[Any, Any, Any, Any, list[Any], Callable[[Any], str]]:
             .options(
                 load_only(
                     Event.id,
+                    Event.title,
                     Event.event_date,
                     Event.URL,
                     Event.Place,

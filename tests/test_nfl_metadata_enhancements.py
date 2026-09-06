@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from flask import Flask
+from Flask_App.nfl_stadium_blueprint import nfl_stadium_blueprint
 
 from collector import EventSnapshot, SectionSnapshot
 from Flask_App.nfl_blueprint import (
@@ -275,7 +276,7 @@ class NFLMetadataEnhancementTests(unittest.TestCase):
                 future_snapshot = self._snapshot("future-1")
                 future_id, _, _ = store_nfl_snapshot(
                     "https://www.vividseats.com/game/production/9000002",
-                    now + timedelta(days=2),
+                    datetime(now.year + 1, 11, 1, 18, tzinfo=timezone.utc),
                     future_snapshot,
                     now,
                     db_path=db_path,
@@ -295,14 +296,15 @@ class NFLMetadataEnhancementTests(unittest.TestCase):
                 )
                 store_nfl_snapshot(
                     "https://www.vividseats.com/game/production/9000003",
-                    now - timedelta(days=1),
+                    datetime(2026, 1, 1, 18, tzinfo=timezone.utc),
                     past_snapshot,
-                    now - timedelta(days=3),
+                    datetime(2025, 12, 30, 18, tzinfo=timezone.utc),
                     db_path=db_path,
                 )
 
                 app = Flask(__name__)
                 app.register_blueprint(nfl_blueprint)
+                app.register_blueprint(nfl_stadium_blueprint)
                 render.return_value = "ok"
 
                 with app.test_request_context("/nfl"):

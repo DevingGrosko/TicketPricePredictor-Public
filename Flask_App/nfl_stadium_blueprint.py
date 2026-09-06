@@ -54,6 +54,10 @@ from Flask_App.nhl_blueprint import (
 )
 
 from Flask_App.section_canonicalization import section_identity
+from Flask_App.report_policy import (
+    normalized as report_normalized, report_venue, venue_aliases,
+    is_preseason, latest_season_events, season_label, add_ranking_evidence,
+)
 from Flask_App.database_config import dispose_ticket_engine
 from Flask_App.materialized_analytics import (
     TIMELINE_BUCKETS,
@@ -272,43 +276,87 @@ def _is_supported_nhl_event(event: NHLEvent) -> bool:
 
 
 
-def _stadium_index(
-    events: Iterable[NFLEvent],
-    now: datetime,
-) -> list[dict[str, Any]]:
-    grouped: dict[str, list[NFLEvent]] = defaultdict(list)
-    for event in events:
-        venue = _clean(nfl_display_venue(event))
-        if venue and _is_us_event(event):
-            grouped[venue].append(event)
+def _directory_events(session: Any, sport: str) -> list[Any]:
+    model = {"mlb": Event, "nfl": NFLEvent, "nhl": NHLEvent}[sport]
+    names = ("id", "title", "event_date", "URL", "Place") if sport == "mlb" else (
+        "id", "title", "event_date", "source_url", "venue", "home_team",
+        "canonical_venue", "provider_venue", "country",
+    ) + (("currency", "game_type", "schedule_id") if sport == "nhl" else ())
+    events = session.query(model).options(load_only(*(getattr(model, name) for name in names))).order_by(model.event_date).all()
+    if sport == "mlb":
+        return [e for e in events if e.Place and MLB_URL_MARKER in str(e.URL or "").casefold() and event_has_complete_public_data(e)]
+    eligible_country = _is_us_event if sport == "nfl" else _is_supported_nhl_event
+    return [e for e in events if eligible_country(e) and _event_venue_for_sport(e, sport)]
 
-    result = []
-    for venue, venue_events in grouped.items():
-        teams = sorted(
-            {
-                _clean(nfl_event_home_team(event))
-                for event in venue_events
-                if _clean(nfl_event_home_team(event))
-            }
-        )
-        completed_count = sum(_event_completed(event, now) for event in venue_events)
-        result.append(
-            {
-                "venue": venue,
-                "game_count": len(venue_events),
-                "completed_count": completed_count,
-                "upcoming_count": len(venue_events) - completed_count,
-                "team_label": " / ".join(teams[:2]),
-                "url": url_for("nfl_stadium.nfl_stadium", venue=venue),
-            }
-        )
-    return sorted(
-        result,
-        key=lambda row: (
-            (row["team_label"] or row["venue"]).casefold(),
-            row["venue"].casefold(),
-        ),
-    )
+
+def _home_team_for_report(event: Any, sport: str) -> str:
+    getter = {"mlb": mlb_event_home_team, "nfl": nfl_event_home_team, "nhl": nhl_event_home_team}[sport]
+    return _clean(getter(event))
+
+
+def _report_groups(events: Iterable[Any], sport: str) -> dict[str, list[Any]]:
+    grouped = defaultdict(list)
+    for event in events:
+        name = _home_team_for_report(event, sport)
+        if name and "home team" not in name:
+            grouped[report_normalized(name)].append(event)
+    return grouped
+
+
+def _venue_choices(events: list[Any], sport: str) -> list[str]:
+    groups = defaultdict(list)
+    for event in events:
+        groups[_event_venue_for_sport(event, sport)].append(event)
+    return sorted(groups, key=lambda v: (
+        -sum(not is_preseason(sport, e) for e in groups[v]),
+        -max(event_datetime_utc(e.event_date).timestamp() for e in groups[v]),
+        v.casefold(),
+    ))
+
+
+def _select_report(events: list[Any], sport: str, venue: str, team: str) -> dict[str, Any]:
+    groups = _report_groups(events, sport)
+    selected_team = _clean(team)
+    selected_venue = report_venue(venue)
+    if not selected_team and report_normalized(venue) in groups:
+        selected_team, selected_venue = _clean(venue), ""
+    if not selected_team and selected_venue:
+        matches = [key for key, rows in groups.items() if any(_event_venue_for_sport(e, sport) == selected_venue for e in rows)]
+        if len(matches) == 1:
+            selected_team = _home_team_for_report(groups[matches[0]][0], sport)
+        elif len(matches) > 1:
+            return {"selected_venue": "", "selected_team": "", "events": [], "error": None,
+                    "selection_note": "Choose a home team below. Teams sharing a stadium have separate price histories."}
+    key = report_normalized(selected_team)
+    if not key and not selected_venue:
+        return {"selected_venue": "", "selected_team": "", "events": [], "error": None}
+    if key not in groups:
+        return {"selected_venue": "", "selected_team": "", "events": [], "error": "That team or venue is not in the tracked history."}
+    team_events = groups[key]
+    eligible, year = latest_season_events(team_events, sport)
+    # Keep a useful empty team page when only preseason has been collected.
+    choices = _venue_choices(eligible or team_events, sport)
+    if selected_venue and selected_venue not in choices:
+        return {"selected_venue": "", "selected_team": "", "events": [], "error": "That venue has no games in this team's latest tracked season."}
+    selected_venue = selected_venue or choices[0]
+    name = _home_team_for_report(team_events[0], sport)
+    return {"selected_venue": selected_venue, "selected_team": name, "selected_team_label": name,
+            "events": [e for e in eligible if _event_venue_for_sport(e, sport) == selected_venue],
+            "report_season": season_label(sport, year), "venue_options": choices, "error": None}
+
+
+def _empty_report(config: dict, stadiums: list, choice: dict) -> dict[str, Any]:
+    return {**config, **{k:v for k,v in choice.items() if k != "events"},
+            "stadiums": stadiums, "stadium_count": len(stadiums),
+            "game_count": 0, "completed_game_count": 0, "upcoming_game_count": 0,
+            "analyzed_area_count": 0, "section_count": 0, "cheapest_sections": [],
+            "biggest_drops": [], "all_sections": [], "games": [],
+            "ranking_note": "No regular-season or playoff prices in this season yet. Preseason is excluded."}
+
+
+def _stadium_index(events: Iterable[NFLEvent], now: datetime) -> list[dict[str, Any]]:
+    return _generic_venue_index(events, now, venue_getter=nfl_display_venue,
+        team_getter=nfl_event_home_team, endpoint="nfl_stadium.nfl_stadium")
 
 
 
@@ -433,7 +481,7 @@ def _bucket_summary_rows_for(
 
 def _event_venue_for_sport(event: Any, sport_key: str) -> str:
     if sport_key == "mlb":
-        return _clean(getattr(event, "Place", ""))
+        return report_venue(getattr(event, "Place", ""))
     if sport_key == "nfl":
         return _clean(nfl_display_venue(event))
     if sport_key == "nhl":
@@ -1048,6 +1096,11 @@ def _finalize_section_insights(
             }
         )
 
+    add_ranking_evidence(insights, prepared, events, sport=sport_key, now=now,
+                         buckets=_TIMELINE_BUCKETS[sport_key], event_utc=event_datetime_utc)
+    for row in insights:
+        row["ranking_price_label"] = _currency_money(row["ranking_price"], currency)
+        row["ranking_drop_label"] = _percent_change(row["ranking_drop_percent"])
     insights.sort(key=lambda row: (row["average_price"], row["name"].casefold()))
     analyzed_area_count = sum(
         len(game_ids) >= LOW_SAMPLE_GAMES for game_ids in game_ids_by_section.values()
@@ -1055,27 +1108,12 @@ def _finalize_section_insights(
     return insights, analyzed_area_count
 
 
-def _rank_sections(
-    sections: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    cheapest = sorted(
-        sections,
-        key=lambda row: (row["typical_price"], row["name"].casefold()),
-    )[:5]
-    biggest_drops = sorted(
-        [
-            row
-            for row in sections
-            if row["drop_game_count"] >= LOW_SAMPLE_GAMES
-            and row["typical_max_drop_percent"] is not None
-            and row["typical_max_drop_percent"] > 0
-        ],
-        key=lambda row: (
-            -row["typical_max_drop_percent"],
-            row["name"].casefold(),
-        ),
-    )[:5]
-    return cheapest, biggest_drops
+def _rank_sections(sections: list[dict[str, Any]]) -> tuple[list[dict], list[dict]]:
+    cheapest = sorted((r for r in sections if r.get("ranking_price_eligible")),
+        key=lambda r: (r["ranking_price"], -r["ranking_price_games"], r["name"].casefold()))[:5]
+    drops = sorted((r for r in sections if r.get("ranking_drop_eligible") and r["ranking_drop_percent"] > 0),
+        key=lambda r: (-r["ranking_drop_percent"], -r["ranking_drop_games"], r["name"].casefold()))[:5]
+    return cheapest, drops
 
 
 def _team_label(events: Iterable[Any], team_getter: Callable[[Any], str | None]) -> str:
@@ -1085,40 +1123,23 @@ def _team_label(events: Iterable[Any], team_getter: Callable[[Any], str | None])
 
 
 def _generic_venue_index(
-    events: Iterable[Any],
-    now: datetime,
-    *,
-    venue_getter: Callable[[Any], str],
-    team_getter: Callable[[Any], str | None],
-    endpoint: str,
+    events: Iterable[Any], now: datetime, *, venue_getter: Callable,
+    team_getter: Callable, endpoint: str,
 ) -> list[dict[str, Any]]:
-    grouped: dict[str, list[Any]] = defaultdict(list)
-    for event in events:
-        venue = _clean(venue_getter(event))
-        if venue:
-            grouped[venue].append(event)
-
+    sport = "mlb" if ".mlb_" in endpoint else "nhl" if ".nhl_" in endpoint else "nfl"
     result = []
-    for venue, venue_events in grouped.items():
-        team_label = _team_label(venue_events, team_getter)
-        completed_count = sum(_event_completed(event, now) for event in venue_events)
-        result.append(
-            {
-                "venue": venue,
-                "game_count": len(venue_events),
-                "completed_count": completed_count,
-                "upcoming_count": len(venue_events) - completed_count,
-                "team_label": team_label,
-                "url": url_for(endpoint, venue=venue),
-            }
-        )
-    return sorted(
-        result,
-        key=lambda row: (
-            (row["team_label"] or row["venue"]).casefold(),
-            row["venue"].casefold(),
-        ),
-    )
+    for rows in _report_groups(events, sport).values():
+        eligible, year = latest_season_events(rows, sport)
+        venues = _venue_choices(eligible or rows, sport)
+        venue = venues[0]
+        selected = [e for e in eligible if _event_venue_for_sport(e, sport) == venue]
+        name = _clean(team_getter(rows[0]))
+        completed = sum(_event_completed(e, now) for e in selected)
+        result.append({"venue": venue, "team": name, "team_label": name,
+            "game_count": len(selected), "completed_count": completed,
+            "upcoming_count": len(selected) - completed,
+            "season": season_label(sport, year), "url": url_for(endpoint, team=name)})
+    return sorted(result, key=lambda row: row["team_label"].casefold())
 
 
 
@@ -1177,60 +1198,20 @@ def _nfl_page_config() -> dict[str, Any]:
 
 
 
-def build_nfl_stadium_context(selected_venue: str = "") -> dict[str, Any]:
+def build_nfl_stadium_context(selected_venue: str = "", selected_team: str = "") -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     model = CreateNFLModel()
     config = _nfl_page_config()
     try:
         with model.getSession()() as session:
-            directory_events = (
-                session.query(NFLEvent)
-                .options(
-                    load_only(
-                        NFLEvent.id,
-                        NFLEvent.title,
-                        NFLEvent.event_date,
-                        NFLEvent.source_url,
-                        NFLEvent.venue,
-                        NFLEvent.home_team,
-                        NFLEvent.canonical_venue,
-                        NFLEvent.provider_venue,
-                        NFLEvent.country,
-                    )
-                )
-                .order_by(NFLEvent.event_date)
-                .all()
-            )
-            directory_events = [
-                event
-                for event in directory_events
-                if _is_us_event(event) and _clean(nfl_display_venue(event))
-            ]
+            directory_events = _directory_events(session, "nfl")
             stadiums = _stadium_index(directory_events, now)
 
-            selected = _clean(selected_venue)
-            if not selected:
-                return {
-                    **config,
-                    "stadiums": stadiums,
-                    "stadium_count": len(stadiums),
-                    "selected_venue": "",
-                    "error": None,
-                }
-
-            selected_ids = [
-                event.id
-                for event in directory_events
-                if _clean(nfl_display_venue(event)) == selected
-            ]
-            if not selected_ids:
-                return {
-                    **config,
-                    "stadiums": stadiums,
-                    "stadium_count": len(stadiums),
-                    "selected_venue": "",
-                    "error": f"{selected} is not in the tracked NFL stadium history.",
-                }
+            choice = _select_report(directory_events, "nfl", selected_venue, selected_team)
+            if not choice.get("events"):
+                return _empty_report(config, stadiums, choice)
+            selected = choice["selected_venue"]
+            selected_ids = [e.id for e in choice["events"]]
 
             selected_events = (
                 session.query(NFLEvent)
@@ -1250,7 +1231,8 @@ def build_nfl_stadium_context(selected_venue: str = "") -> dict[str, Any]:
                     sport_key="nfl",
                     detail_url_builder=lambda event, section: url_for(
                         "nfl_stadium.nfl_section",
-                        venue=_clean(nfl_display_venue(event)),
+                        venue=selected,
+                        team=choice["selected_team"],
                         section=section,
                     ),
                     secondary_url_builder=None,
@@ -1292,6 +1274,9 @@ def build_nfl_stadium_context(selected_venue: str = "") -> dict[str, Any]:
         "stadiums": stadiums,
         "stadium_count": len(stadiums),
         "selected_venue": selected,
+        "selected_team": choice["selected_team"],
+        "report_season": choice["report_season"],
+        "venue_options": choice["venue_options"],
         "selected_team_label": _team_label(selected_events, nfl_event_home_team) or "NFL home team",
         "error": None,
         "game_count": len(selected_events),
@@ -1404,29 +1389,13 @@ def _is_public_mlb_event(event: Event) -> bool:
 
 
 
-def build_mlb_stadium_context(selected_venue: str = "") -> dict[str, Any]:
+def build_mlb_stadium_context(selected_venue: str = "", selected_team: str = "") -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     model = CreateModel()
     config = _mlb_page_config()
     try:
         with model.getSession()() as session:
-            directory_events = (
-                session.query(Event)
-                .options(
-                    load_only(
-                        Event.id,
-                        Event.title,
-                        Event.event_date,
-                        Event.URL,
-                        Event.Place,
-                    )
-                )
-                .order_by(Event.event_date)
-                .all()
-            )
-            directory_events = [
-                event for event in directory_events if _is_public_mlb_event(event)
-            ]
+            directory_events = _directory_events(session, "mlb")
             stadiums = _generic_venue_index(
                 directory_events,
                 now,
@@ -1435,27 +1404,11 @@ def build_mlb_stadium_context(selected_venue: str = "") -> dict[str, Any]:
                 endpoint="nfl_stadium.mlb_stadium",
             )
 
-            selected = _clean(selected_venue)
-            if not selected:
-                return {
-                    **config,
-                    "stadiums": stadiums,
-                    "stadium_count": len(stadiums),
-                    "selected_venue": "",
-                    "error": None,
-                }
-
-            selected_ids = [
-                event.id for event in directory_events if _clean(event.Place) == selected
-            ]
-            if not selected_ids:
-                return {
-                    **config,
-                    "stadiums": stadiums,
-                    "stadium_count": len(stadiums),
-                    "selected_venue": "",
-                    "error": f"{selected} is not in the tracked MLB stadium history.",
-                }
+            choice = _select_report(directory_events, "mlb", selected_venue, selected_team)
+            if not choice.get("events"):
+                return _empty_report(config, stadiums, choice)
+            selected = choice["selected_venue"]
+            selected_ids = [e.id for e in choice["events"]]
 
             selected_events = (
                 session.query(Event)
@@ -1474,12 +1427,13 @@ def build_mlb_stadium_context(selected_venue: str = "") -> dict[str, Any]:
                     sport_key="mlb",
                     detail_url_builder=lambda _event, section: url_for(
                         "nfl_stadium.mlb_section",
+                        team=choice["selected_team"],
                         venue=selected,
                         section=section,
                     ),
                     secondary_url_builder=lambda _event, section: url_for(
                         "predict",
-                        event=selected,
+                        event=_event.Place,
                         section=section,
                     ),
                     event_label_builder=format_mlb_title,
@@ -1506,7 +1460,7 @@ def build_mlb_stadium_context(selected_venue: str = "") -> dict[str, Any]:
             "direct_url": "",
             "base_url": url_for(
                 "graph",
-                event=selected,
+                event=event.Place,
                 game=str(event.id),
                 mode="single",
                 display="money",
@@ -1523,6 +1477,9 @@ def build_mlb_stadium_context(selected_venue: str = "") -> dict[str, Any]:
         "stadiums": stadiums,
         "stadium_count": len(stadiums),
         "selected_venue": selected,
+        "selected_team": choice["selected_team"],
+        "report_season": choice["report_season"],
+        "venue_options": choice["venue_options"],
         "selected_team_label": _team_label(selected_events, mlb_event_home_team) or mlb_team_for_venue(selected),
         "error": None,
         "game_count": len(selected_events),
@@ -1569,35 +1526,12 @@ def _nhl_page_config(currency: str = "USD") -> dict[str, Any]:
 
 
 
-def build_nhl_arena_context(selected_venue: str = "") -> dict[str, Any]:
+def build_nhl_arena_context(selected_venue: str = "", selected_team: str = "") -> dict[str, Any]:
     now = datetime.now(timezone.utc)
     model = CreateNHLModel()
     try:
         with model.getSession()() as session:
-            directory_events = (
-                session.query(NHLEvent)
-                .options(
-                    load_only(
-                        NHLEvent.id,
-                        NHLEvent.title,
-                        NHLEvent.event_date,
-                        NHLEvent.source_url,
-                        NHLEvent.venue,
-                        NHLEvent.home_team,
-                        NHLEvent.canonical_venue,
-                        NHLEvent.provider_venue,
-                        NHLEvent.country,
-                        NHLEvent.currency,
-                    )
-                )
-                .order_by(NHLEvent.event_date)
-                .all()
-            )
-            directory_events = [
-                event
-                for event in directory_events
-                if _is_supported_nhl_event(event) and _clean(nhl_display_venue(event))
-            ]
+            directory_events = _directory_events(session, "nhl")
             stadiums = _generic_venue_index(
                 directory_events,
                 now,
@@ -1606,29 +1540,11 @@ def build_nhl_arena_context(selected_venue: str = "") -> dict[str, Any]:
                 endpoint="nfl_stadium.nhl_arena",
             )
 
-            selected = _clean(selected_venue)
-            if not selected:
-                return {
-                    **_nhl_page_config(),
-                    "stadiums": stadiums,
-                    "stadium_count": len(stadiums),
-                    "selected_venue": "",
-                    "error": None,
-                }
-
-            selected_ids = [
-                event.id
-                for event in directory_events
-                if _clean(nhl_display_venue(event)) == selected
-            ]
-            if not selected_ids:
-                return {
-                    **_nhl_page_config(),
-                    "stadiums": stadiums,
-                    "stadium_count": len(stadiums),
-                    "selected_venue": "",
-                    "error": f"{selected} is not in the tracked NHL arena history.",
-                }
+            choice = _select_report(directory_events, "nhl", selected_venue, selected_team)
+            if not choice.get("events"):
+                return _empty_report(_nhl_page_config(), stadiums, choice)
+            selected = choice["selected_venue"]
+            selected_ids = [e.id for e in choice["events"]]
 
             selected_events = (
                 session.query(NHLEvent)
@@ -1665,6 +1581,7 @@ def build_nhl_arena_context(selected_venue: str = "") -> dict[str, Any]:
                     sport_key="nhl",
                     detail_url_builder=lambda _event, section: url_for(
                         "nfl_stadium.nhl_section",
+                        team=choice["selected_team"],
                         venue=selected,
                         section=section,
                     ),
@@ -1707,6 +1624,9 @@ def build_nhl_arena_context(selected_venue: str = "") -> dict[str, Any]:
         "stadiums": stadiums,
         "stadium_count": len(stadiums),
         "selected_venue": selected,
+        "selected_team": choice["selected_team"],
+        "report_season": choice["report_season"],
+        "venue_options": choice["venue_options"],
         "selected_team_label": _team_label(selected_events, nhl_event_home_team) or "NHL home team",
         "error": None,
         "game_count": len(selected_events),
@@ -2189,7 +2109,7 @@ def _section_error_context(
         "nhl": "nfl_stadium.nhl_arena",
     }.get(base_context.get("sport_key"))
     if endpoint and base_context.get("selected_venue"):
-        report_url = url_for(endpoint, venue=base_context["selected_venue"])
+        report_url = url_for(endpoint, venue=base_context["selected_venue"], team=base_context.get("selected_team") or None)
 
     return {
         **base_context,
@@ -2288,6 +2208,7 @@ def _build_section_detail_context(
     report_url = url_for(
         report_endpoint,
         venue=base_context["selected_venue"],
+        team=base_context.get("selected_team") or None,
     )
     buying_window_url = (
         buying_window_url_builder(section_name)
@@ -2347,10 +2268,11 @@ def _minimal_section_base_context(
 def build_nfl_section_context(
     selected_venue: str,
     requested_section: str,
+    selected_team: str = "",
 ) -> dict[str, Any]:
     selected = _clean(selected_venue)
     config = _nfl_page_config()
-    if not selected or not _clean(requested_section):
+    if not (selected or selected_team) or not _clean(requested_section):
         return _section_error_context(
             {**config, "selected_venue": selected, "error": None},
             "Choose an NFL team and section.",
@@ -2361,30 +2283,16 @@ def build_nfl_section_context(
     model = CreateNFLModel()
     try:
         with model.getSession()() as session:
-            events = (
-                session.query(NFLEvent)
-                .options(defer(NFLEvent.map_geometry))
-                .filter(
-                    or_(
-                        NFLEvent.canonical_venue == selected,
-                        NFLEvent.provider_venue == selected,
-                        NFLEvent.venue == selected,
-                    )
-                )
-                .order_by(NFLEvent.event_date)
-                .all()
-            )
-            events = [
-                event
-                for event in events
-                if _is_us_event(event) and _clean(nfl_display_venue(event)) == selected
-            ]
-            if not events:
+            directory_events = _directory_events(session, "nfl")
+            choice = _select_report(directory_events, "nfl", selected, selected_team)
+            selected = choice["selected_venue"]
+            if not choice.get("events"):
                 return _section_error_context(
-                    {**config, "selected_venue": "", "error": None},
-                    f"{selected} is not in the tracked NFL stadium history.",
-                    requested_section,
-                )
+                    {**config, **{k:v for k,v in choice.items() if k != "events"}},
+                    choice.get("error") or "No regular-season or playoff history for this selection.", requested_section)
+            events = session.query(NFLEvent).options(defer(NFLEvent.map_geometry)).filter(
+                NFLEvent.id.in_([e.id for e in choice["events"]])
+            ).order_by(NFLEvent.event_date).all()
 
             requested_identity = section_identity("nfl", selected, requested_section)
             rows = read_summary_rows(
@@ -2401,7 +2309,8 @@ def build_nfl_section_context(
                 sport_key="nfl",
                 detail_url_builder=lambda event, section: url_for(
                     "nfl_stadium.nfl_section",
-                    venue=_clean(nfl_display_venue(event)),
+                    venue=selected,
+                    team=choice["selected_team"],
                     section=section,
                 ),
                 secondary_url_builder=None,
@@ -2413,6 +2322,7 @@ def build_nfl_section_context(
                 _team_label(events, nfl_event_home_team) or "NFL home team",
                 sections,
             )
+            base_context.update({k: choice[k] for k in ("selected_team", "report_season", "venue_options")})
 
             geometry_by_id: dict[int, Any] = {}
             geometry_candidates = [
@@ -2471,10 +2381,11 @@ def build_nfl_section_context(
 def build_mlb_section_context(
     selected_venue: str,
     requested_section: str,
+    selected_team: str = "",
 ) -> dict[str, Any]:
     selected = _clean(selected_venue)
     config = _mlb_page_config()
-    if not selected or not _clean(requested_section):
+    if not (selected or selected_team) or not _clean(requested_section):
         return _section_error_context(
             {**config, "selected_venue": selected, "error": None},
             "Choose an MLB team and section.",
@@ -2485,19 +2396,16 @@ def build_mlb_section_context(
     model = CreateModel()
     try:
         with model.getSession()() as session:
-            events = (
-                session.query(Event)
-                .filter(Event.Place == selected)
-                .order_by(Event.event_date)
-                .all()
-            )
-            events = [event for event in events if _is_public_mlb_event(event)]
-            if not events:
+            directory_events = _directory_events(session, "mlb")
+            choice = _select_report(directory_events, "mlb", selected, selected_team)
+            selected = choice["selected_venue"]
+            if not choice.get("events"):
                 return _section_error_context(
-                    {**config, "selected_venue": "", "error": None},
-                    f"{selected} is not in the tracked MLB stadium history.",
-                    requested_section,
-                )
+                    {**config, **{k:v for k,v in choice.items() if k != "events"}},
+                    choice.get("error") or "No regular-season or playoff history for this selection.", requested_section)
+            events = session.query(Event).filter(
+                Event.id.in_([e.id for e in choice["events"]])
+            ).order_by(Event.event_date).all()
 
             requested_identity = section_identity("mlb", selected, requested_section)
             rows = read_summary_rows(
@@ -2514,11 +2422,12 @@ def build_mlb_section_context(
                 sport_key="mlb",
                 detail_url_builder=lambda _event, section: url_for(
                     "nfl_stadium.mlb_section",
+                    team=choice["selected_team"],
                     venue=selected,
                     section=section,
                 ),
                 secondary_url_builder=lambda _event, section: url_for(
-                    "predict", event=selected, section=section
+                    "predict", event=events[-1].Place, section=section
                 ),
                 event_label_builder=format_mlb_title,
             )
@@ -2528,6 +2437,7 @@ def build_mlb_section_context(
                 _team_label(events, mlb_event_home_team) or mlb_team_for_venue(selected),
                 sections,
             )
+            base_context.update({k: choice[k] for k in ("selected_team", "report_season", "venue_options")})
     finally:
         dispose_ticket_engine(model.engine)
 
@@ -2545,7 +2455,7 @@ def build_mlb_section_context(
         event_label_builder=format_mlb_title,
         game_url_builder=lambda event, section: url_for(
             "graph",
-            event=selected,
+            event=event.Place,
             game=str(event.id),
             section=section,
             mode="single",
@@ -2554,7 +2464,7 @@ def build_mlb_section_context(
         map_url_builder=None,
         source_url_getter=lambda event: event.URL or "",
         buying_window_url_builder=lambda section: url_for(
-            "predict", event=selected, section=section
+            "predict", event=events[-1].Place, section=section
         ),
     )
 
@@ -2564,9 +2474,10 @@ def build_mlb_section_context(
 def build_nhl_section_context(
     selected_venue: str,
     requested_section: str,
+    selected_team: str = "",
 ) -> dict[str, Any]:
     selected = _clean(selected_venue)
-    if not selected or not _clean(requested_section):
+    if not (selected or selected_team) or not _clean(requested_section):
         config = _nhl_page_config()
         return _section_error_context(
             {**config, "selected_venue": selected, "error": None},
@@ -2578,32 +2489,16 @@ def build_nhl_section_context(
     model = CreateNHLModel()
     try:
         with model.getSession()() as session:
-            all_events = (
-                session.query(NHLEvent)
-                .options(defer(NHLEvent.map_geometry))
-                .filter(
-                    or_(
-                        NHLEvent.canonical_venue == selected,
-                        NHLEvent.provider_venue == selected,
-                        NHLEvent.venue == selected,
-                    )
-                )
-                .order_by(NHLEvent.event_date)
-                .all()
-            )
-            all_events = [
-                event
-                for event in all_events
-                if _is_supported_nhl_event(event)
-                and _clean(nhl_display_venue(event)) == selected
-            ]
-            if not all_events:
-                config = _nhl_page_config()
+            directory_events = _directory_events(session, "nhl")
+            choice = _select_report(directory_events, "nhl", selected, selected_team)
+            selected = choice["selected_venue"]
+            if not choice.get("events"):
                 return _section_error_context(
-                    {**config, "selected_venue": "", "error": None},
-                    f"{selected} is not in the tracked NHL arena history.",
-                    requested_section,
-                )
+                    {**_nhl_page_config(), **{k:v for k,v in choice.items() if k != "events"}},
+                    choice.get("error") or "No regular-season or playoff history for this selection.", requested_section)
+            all_events = session.query(NHLEvent).options(defer(NHLEvent.map_geometry)).filter(
+                NHLEvent.id.in_([e.id for e in choice["events"]])
+            ).order_by(NHLEvent.event_date).all()
 
             currency_counts = Counter(
                 (_clean(event.currency).upper() or "USD") for event in all_events
@@ -2637,6 +2532,7 @@ def build_nhl_section_context(
                 sport_key="nhl",
                 detail_url_builder=lambda _event, section: url_for(
                     "nfl_stadium.nhl_section",
+                    team=choice["selected_team"],
                     venue=selected,
                     section=section,
                 ),
@@ -2649,6 +2545,7 @@ def build_nhl_section_context(
                 _team_label(all_events, nhl_event_home_team) or "NHL home team",
                 sections,
             )
+            base_context.update({k: choice[k] for k in ("selected_team", "report_season", "venue_options")})
 
             geometry_by_id: dict[int, Any] = {}
             geometry_candidates = [
@@ -2721,12 +2618,12 @@ def _sport_venue_revision(sport_key: str, venue: str) -> int:
     model = models[sport_key]()
     try:
         with model.getSession()() as session:
-            return venue_revision(session, venue)
+            return sum(venue_revision(session, alias) for alias in venue_aliases(venue))
     finally:
         dispose_ticket_engine(model.engine)
 
 
-def _cached_venue_context(sport_key: str, selected_venue: str) -> dict[str, Any]:
+def _cached_venue_context(sport_key: str, selected_venue: str, selected_team: str = "") -> dict[str, Any]:
     builders: dict[str, Callable[[str], dict[str, Any]]] = {
         "mlb": build_mlb_stadium_context,
         "nfl": build_nfl_stadium_context,
@@ -2739,8 +2636,8 @@ def _cached_venue_context(sport_key: str, selected_venue: str) -> dict[str, Any]
         else _sport_database_version(sport_key)
     )
     return page_cache.get_or_create(
-        cache_key("venue-summary-v2", sport_key, version, selected),
-        lambda: builders[sport_key](selected),
+        cache_key("venue-summary-v3", sport_key, version, selected, selected_team),
+        lambda: builders[sport_key](selected, selected_team),
         ttl_seconds=PAGE_CACHE_TTL_SECONDS,
         tags=(sport_key, f"{sport_key}:{selected.casefold()}" if selected else sport_key),
     )
@@ -2750,6 +2647,7 @@ def _cached_section_context(
     sport_key: str,
     selected_venue: str,
     requested_section: str,
+    selected_team: str = "",
 ) -> dict[str, Any]:
     builders: dict[str, Callable[[str, str], dict[str, Any]]] = {
         "mlb": build_mlb_section_context,
@@ -2764,13 +2662,14 @@ def _cached_section_context(
     )
     return page_cache.get_or_create(
         cache_key(
-            "section-summary-v2",
+            "section-summary-v3",
             sport_key,
             version,
             selected,
             requested_section,
+            selected_team,
         ),
-        lambda: builders[sport_key](selected, requested_section),
+        lambda: builders[sport_key](selected, requested_section, selected_team),
         ttl_seconds=PAGE_CACHE_TTL_SECONDS,
         tags=(sport_key, f"{sport_key}:{selected.casefold()}" if selected else sport_key),
     )
@@ -2786,19 +2685,19 @@ def inject_team_display_helpers() -> dict[str, Any]:
 
 @nfl_stadium_blueprint.get("/nfl/stadium")
 def nfl_stadium():
-    context = _cached_venue_context("nfl", request.args.get("venue", ""))
+    context = _cached_venue_context("nfl", request.args.get("venue", ""), request.args.get("team", ""))
     return render_template("nfl_stadium.html", **context)
 
 
 @nfl_stadium_blueprint.get("/baseball/stadium")
 def mlb_stadium():
-    context = _cached_venue_context("mlb", request.args.get("venue", ""))
+    context = _cached_venue_context("mlb", request.args.get("venue", ""), request.args.get("team", ""))
     return render_template("nfl_stadium.html", **context)
 
 
 @nfl_stadium_blueprint.get("/nhl/arena")
 def nhl_arena():
-    context = _cached_venue_context("nhl", request.args.get("venue", ""))
+    context = _cached_venue_context("nhl", request.args.get("venue", ""), request.args.get("team", ""))
     return render_template("nfl_stadium.html", **context)
 
 
@@ -2806,8 +2705,9 @@ def nhl_arena():
 def nfl_section():
     context = _cached_section_context(
         "nfl",
-        request.args.get("venue") or request.args.get("team") or "",
+        request.args.get("venue", ""),
         request.args.get("section", ""),
+        request.args.get("team", ""),
     )
     return render_template("venue_section.html", **context)
 
@@ -2816,8 +2716,9 @@ def nfl_section():
 def mlb_section():
     context = _cached_section_context(
         "mlb",
-        request.args.get("venue") or request.args.get("team") or "",
+        request.args.get("venue", ""),
         request.args.get("section", ""),
+        request.args.get("team", ""),
     )
     return render_template("venue_section.html", **context)
 
@@ -2826,7 +2727,8 @@ def mlb_section():
 def nhl_section():
     context = _cached_section_context(
         "nhl",
-        request.args.get("venue") or request.args.get("team") or "",
+        request.args.get("venue", ""),
         request.args.get("section", ""),
+        request.args.get("team", ""),
     )
     return render_template("venue_section.html", **context)

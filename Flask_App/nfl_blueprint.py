@@ -67,6 +67,7 @@ from Flask_App.performance_cache import (
     page_cache,
 )
 from Flask_App.section_canonicalization import is_excluded_ticket_area
+from Flask_App.report_policy import is_preseason, report_venue
 from Flask_App.materialized_analytics import (
     ensure_summary_schema,
     refresh_event_summary_safely,
@@ -958,9 +959,9 @@ def nfl_event_away_team(event: NFLEvent) -> str | None:
 
 
 def nfl_display_venue(event: NFLEvent) -> str:
-    return event.canonical_venue or canonical_venue_name(
+    return report_venue(event.canonical_venue or canonical_venue_name(
         event.provider_venue or event.venue
-    )
+    ))
 
 
 def is_nfl_game_title(title: str) -> bool:
@@ -1339,6 +1340,12 @@ def ingest_nfl_snapshot():
             schedule_metadata,
             map_geometry,
         ) = nfl_snapshot_from_payload(payload)
+        from types import SimpleNamespace
+        candidate = SimpleNamespace(title=snapshot.title, event_date=event_date, **{
+            key: schedule_metadata.get(key) for key in ("game_type", "schedule_id")})
+        candidate.game_type = (payload.get("schedule") or {}).get("season_type")
+        if is_preseason("nfl", candidate):
+            return jsonify({"status": "ignored", "reason": "preseason"}), 200
         now = datetime.now(timezone.utc)
         captured_at_utc = captured_at.astimezone(timezone.utc)
         event_date_utc = event_date.astimezone(timezone.utc)
@@ -1412,7 +1419,7 @@ def find_nfl_game(team_or_venue: str, identifier: str | None) -> NFLEvent | None
                 .filter(NFLEvent.id == int(identifier))
                 .first()
             )
-            if event is None:
+            if event is None or is_preseason("nfl", event):
                 return None
             accepted = {
                 nfl_event_home_team(event),
@@ -1579,6 +1586,11 @@ def _nfl_home_context() -> dict[str, Any]:
                 )
                 if not _country_is_explicitly_non_us(game.country)
             ]
+            from Flask_App.nfl_stadium_blueprint import _generic_venue_index
+            team_reports = _generic_venue_index(all_games, now,
+                venue_getter=nfl_display_venue, team_getter=nfl_event_home_team,
+                endpoint="nfl_stadium.nfl_stadium")
+            all_games = [game for game in all_games if not is_preseason("nfl", game)]
             upcoming_games = [game for game in all_games if not _event_is_completed(game, now)]
             completed_games = [game for game in all_games if _event_is_completed(game, now)]
             games = upcoming_games + list(reversed(completed_games))
@@ -1610,6 +1622,7 @@ def _nfl_home_context() -> dict[str, Any]:
 
     return {
         "games_dict": games_dict,
+        "team_reports": team_reports,
         "game_sections_dict": {},
         "team_count": len(games_dict),
         "game_count": sum(len(rows) for rows in games_dict.values()),
@@ -1676,6 +1689,7 @@ def _nfl_options_context(home_team: str) -> dict[str, Any]:
                 for event in events
                 if not _country_is_explicitly_non_us(event.country)
                 and nfl_event_home_team(event) == selected
+                and not is_preseason("nfl", event)
             ]
     finally:
         dispose_ticket_engine(model.engine)

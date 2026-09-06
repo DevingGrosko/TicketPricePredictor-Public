@@ -28,7 +28,7 @@
         <div class="venue-section-hero__copy">
           <span class="nfl-section-kicker">{{ selected_team_label }} · {{ selected_venue }}</span>
           <h1>{{ selected_section }}</h1>
-          <p>{{ section_summary.game_count }} tracked home game{% if section_summary.game_count != 1 %}s{% endif %} across {{ section_summary.price_bucket_count }} comparable time window{% if section_summary.price_bucket_count != 1 %}s{% endif %}.</p>
+          <p>{{ report_season }} · {{ section_summary.game_count }} tracked home game{% if section_summary.game_count != 1 %}s{% endif %} across {{ section_summary.price_bucket_count }} comparable time window{% if section_summary.price_bucket_count != 1 %}s{% endif %}.</p>
           <div class="venue-section-hero__actions">
             <a class="button nfl-button nfl-button--primary" href="#price-timeline">View price timeline <span aria-hidden="true">&#8595;</span></a>
             {% if buying_window_url %}<a class="venue-section-text-link" href="{{ buying_window_url }}">Buying window <span aria-hidden="true">&#8594;</span></a>{% endif %}
@@ -44,7 +44,7 @@
             <dt>{{ section_summary.typical_max_drop_percent_label }}</dt>
             <dd class="venue-section-metric-detail">
               {% if section_summary.drop_game_count %}
-                <span>Typical maximum decline · {{ section_summary.typical_max_drop_dollar_label }}</span>
+                <span>Typical maximum decline (observed windows) · {{ section_summary.typical_max_drop_dollar_label }}</span>
                 <span>Median across {{ section_summary.drop_game_count }} game{% if section_summary.drop_game_count != 1 %}s{% endif %}</span>
                 <span>Dropped at least {{ section_summary.material_drop_threshold|int }}% in {{ section_summary.material_drop_game_count }} of {{ section_summary.drop_game_count }} games</span>
                 {% if section_summary.drop_peak_label and section_summary.drop_low_label %}<span>Peak: {{ section_summary.drop_peak_label }} · Low: {{ section_summary.drop_low_label }}</span>{% endif %}
@@ -70,6 +70,11 @@
           </div>
         </dl>
       </header>
+
+      <dl class="venue-section-metrics" aria-label="Comparable ranking evidence">
+        <div><dt>{{ section_summary.ranking_price_label }}</dt><dd>Final 24h average · {{ section_summary.ranking_price_games }}/{{ section_summary.ranking_total_games }} completed games{% if not section_summary.ranking_price_eligible %} · insufficient ranking coverage{% endif %}</dd></div>
+        <div><dt>{{ section_summary.ranking_drop_label }}</dt><dd>Typical max drop, final {{ '48h' if sport_key == 'mlb' else '7d' }} · {{ section_summary.ranking_drop_games }}/{{ section_summary.ranking_total_games }} games{% if not section_summary.ranking_drop_eligible %} · insufficient ranking coverage{% endif %}</dd></div>
+      </dl>
 
       {% if currency_warning %}
         <div class="nfl-sample-note venue-section-currency-note">

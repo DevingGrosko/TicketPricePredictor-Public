@@ -1,0 +1,28 @@
+name: Report quality audit
+on:
+  workflow_run:
+    workflows: [Deploy to PythonAnywhere]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+      - name: Verify live team identity and comparable ranking evidence
+        env:
+          COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
+        run: python tools/report_quality_live_check.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-report-quality
+          path: report-quality-results/
+          retention-days: 14

@@ -305,7 +305,7 @@ def parse_schedule_payload(
                 continue
 
             game_type = int(game.get("gameType") or 0)
-            if game_type not in {1, 2, 3}:
+            if game_type not in {2, 3}:
                 continue
             game_state = str(game.get("gameState") or "").upper()
             if game_state in {"FINAL", "OFF"}:

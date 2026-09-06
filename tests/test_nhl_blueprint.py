@@ -7,6 +7,7 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from flask import Flask
+from Flask_App.nfl_stadium_blueprint import nfl_stadium_blueprint
 
 from collector import EventSnapshot, SectionSnapshot
 from models import captured_datetime_for_storage, event_datetime_for_storage
@@ -158,7 +159,7 @@ class NHLBlueprintTests(unittest.TestCase):
                         "canonical_venue": "TD Garden",
                         "venue_timezone": "America/New_York",
                         "country": "USA",
-                        "game_type": 1,
+                        "game_type": 2,
                         "season": 20262027,
                     },
                     currency="USD",
@@ -167,6 +168,7 @@ class NHLBlueprintTests(unittest.TestCase):
                 render.return_value = "ok"
                 app = Flask(__name__)
                 app.register_blueprint(nhl_blueprint)
+                app.register_blueprint(nfl_stadium_blueprint)
                 with app.test_request_context("/nhl"):
                     self.assertEqual(nhl_home(), "ok")
                 context = render.call_args.kwargs
@@ -181,7 +183,7 @@ class NHLBlueprintTests(unittest.TestCase):
                 )
                 self.assertTrue(
                     context["games_dict"]["Boston Bruins"][0]["label"]
-                    .startswith("Completed · Preseason")
+                    .startswith("Completed · Regular season")
                 )
             finally:
                 if old_path is None:

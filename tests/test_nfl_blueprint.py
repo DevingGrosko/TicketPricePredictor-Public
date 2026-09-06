@@ -7,6 +7,7 @@ from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
 from flask import Flask
+from Flask_App.nfl_stadium_blueprint import nfl_stadium_blueprint
 
 from collector import EventSnapshot, SectionSnapshot, snapshot_to_payload
 from Flask_App.materialized_analytics import read_summary_rows
@@ -91,13 +92,14 @@ class NFLDatabaseIsolationTests(unittest.TestCase):
             try:
                 app = Flask(__name__, template_folder="../Flask_App/templates")
                 app.register_blueprint(nfl_blueprint)
+                app.register_blueprint(nfl_stadium_blueprint)
                 app.config.update(TESTING=True)
                 client = app.test_client()
 
                 captured_at = datetime.now(timezone.utc).replace(
                     minute=0, second=0, microsecond=0
                 )
-                event_date = captured_at + timedelta(days=2)
+                event_date = captured_at + timedelta(days=14)
                 snapshot = self._snapshot()
                 payload = snapshot_to_payload(
                     "https://www.vividseats.com/game/production/1234567",
@@ -142,6 +144,7 @@ class NFLDatabaseIsolationTests(unittest.TestCase):
             try:
                 app = Flask(__name__, template_folder="../Flask_App/templates")
                 app.register_blueprint(nfl_blueprint)
+                app.register_blueprint(nfl_stadium_blueprint)
                 app.config.update(TESTING=True)
                 client = app.test_client()
                 captured_at = datetime.now(timezone.utc).replace(
@@ -254,6 +257,7 @@ class NFLTeamGroupingTests(unittest.TestCase):
 
                 app = Flask(__name__)
                 app.register_blueprint(nfl_blueprint)
+                app.register_blueprint(nfl_stadium_blueprint)
                 render.return_value = "ok"
                 with app.test_request_context("/nfl"):
                     response = nfl_home()
@@ -322,6 +326,7 @@ class NFLStadiumMapTests(unittest.TestCase):
 
                 app = Flask(__name__)
                 app.register_blueprint(nfl_blueprint)
+                app.register_blueprint(nfl_stadium_blueprint)
                 render.return_value = "map"
                 path = (
                     f"/nfl/map?team=New%20York%20Giants&game={game_id}"

@@ -75,7 +75,7 @@ class NFLStadiumInsightTests(unittest.TestCase):
             previous = os.environ.get("NFL_DATABASE_PATH")
             os.environ["NFL_DATABASE_PATH"] = str(db_path)
             try:
-                now = datetime.now(timezone.utc)
+                now = datetime(2025, 12, 15, 20, tzinfo=timezone.utc)
                 games = [
                     (
                         "8000001",
@@ -142,14 +142,8 @@ class NFLStadiumInsightTests(unittest.TestCase):
                 self.assertEqual(context["game_count"], 3)
                 self.assertEqual(context["completed_game_count"], 3)
                 self.assertEqual(context["section_count"], 3)
-                self.assertEqual(
-                    context["cheapest_sections"][0]["name"],
-                    "Section 500",
-                )
-                self.assertEqual(
-                    context["biggest_drops"][0]["name"],
-                    "Section 100",
-                )
+                self.assertEqual(context["cheapest_sections"], [])
+                self.assertEqual(context["biggest_drops"], [])
 
                 by_name = {
                     section["name"]: section
@@ -284,7 +278,7 @@ class NFLStadiumInsightTests(unittest.TestCase):
             previous = os.environ.get("NFL_DATABASE_PATH")
             os.environ["NFL_DATABASE_PATH"] = str(db_path)
             try:
-                event_date = datetime.now(timezone.utc) - timedelta(days=2)
+                event_date = datetime(2025, 12, 13, 20, tzinfo=timezone.utc)
                 self._store_capture(
                     db_path, "8100001", event_date, 48, {"Section 100": 100}
                 )
@@ -322,7 +316,7 @@ class NFLStadiumInsightTests(unittest.TestCase):
             previous = os.environ.get("NFL_DATABASE_PATH")
             os.environ["NFL_DATABASE_PATH"] = str(db_path)
             try:
-                now = datetime.now(timezone.utc)
+                now = datetime(2025, 12, 15, 20, tzinfo=timezone.utc)
                 event_dates = [
                     now - timedelta(days=12),
                     now - timedelta(days=9),
@@ -385,7 +379,7 @@ class NFLStadiumInsightTests(unittest.TestCase):
             previous = os.environ.get("NFL_DATABASE_PATH")
             os.environ["NFL_DATABASE_PATH"] = str(db_path)
             try:
-                now = datetime.now(timezone.utc)
+                now = datetime(2025, 12, 15, 20, tzinfo=timezone.utc)
                 series = (
                     ("8300001", (100, 150, 75)),
                     ("8300002", (100, 140, 70)),
@@ -447,7 +441,7 @@ class NFLStadiumInsightTests(unittest.TestCase):
             response = nfl_stadium()
 
         self.assertEqual(response, "dashboard")
-        build_context.assert_called_once_with("nfl", "MetLife Stadium")
+        build_context.assert_called_once_with("nfl", "MetLife Stadium", "")
         render.assert_called_once_with(
             "nfl_stadium.html",
             stadiums=[],

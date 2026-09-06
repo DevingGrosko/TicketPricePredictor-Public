@@ -61,9 +61,15 @@ class FlaskProductionStartupTests(unittest.TestCase):
                     )
                 )
 
-                now = datetime.now(timezone.utc).replace(
-                    minute=0, second=0, microsecond=0
-                )
+                now = datetime(2026, 9, 20, 12, tzinfo=timezone.utc)
+                class TestClock(datetime):
+                    @classmethod
+                    def now(cls, tz=None):
+                        return now.astimezone(tz) if tz else now.replace(tzinfo=None)
+                import Flask_App.nfl_blueprint as nfl_module
+                import Flask_App.nhl_blueprint as nhl_module
+                nfl_module.datetime = TestClock
+                nhl_module.datetime = TestClock
                 event_date = now + timedelta(days=2)
                 headers = {
                     "Authorization": "Bearer integration-test-token",

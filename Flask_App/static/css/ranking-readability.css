@@ -130,3 +130,15 @@
     text-align: left;
   }
 }
+
+/* Stretch the real native link across its own row (including empty padding).
+   No JS click handler: keyboard, middle-click and cmd/ctrl-click still work. */
+.nfl-ranking-row { position: relative; }
+.nfl-ranking-link::after { content: ""; position: absolute; inset: 0; border-radius: 9px; }
+.nfl-ranking-row:hover { border-color: rgba(219, 230, 246, .4); }
+.nfl-ranking-link:focus-visible { outline: none; }
+.nfl-ranking-link:focus-visible::after { outline: 2px solid currentColor; outline-offset: -2px; }
+.ranking-window { margin: 8px 0 0; color: #a7b7c9; font-size: 12px; line-height: 1.5; }
+.ranking-method { margin-top: 16px; color: #a7b7c9; font-size: 13px; line-height: 1.6; }
+.ranking-method summary { cursor: pointer; width: fit-content; }
+.ranking-method p { max-width: 78ch; }

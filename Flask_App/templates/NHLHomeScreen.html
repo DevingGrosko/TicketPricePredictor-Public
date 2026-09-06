@@ -46,28 +46,17 @@
       <label for="nhl-team-search">Find a team or arena</label>
       <div>
         <input id="nhl-team-search" type="search" placeholder="Search Canadiens, Penguins, Rogers…" autocomplete="off" data-stadium-search data-venue-noun="team report">
-        <span data-stadium-count>{{ arena_count }} team report{% if arena_count != 1 %}s{% endif %}</span>
+        <span data-stadium-count>{{ team_reports|length }} team report{% if team_reports|length != 1 %}s{% endif %}</span>
       </div>
     </div>
 
     <div class="nfl-stadium-card-grid" data-stadium-grid>
-      {% for venue, tracked_games in arena_game_counts.items() %}
-        {% set team_ns = namespace(names=[]) %}
-        {% for team, team_games in games_dict.items() %}
-          {% for game in team_games %}
-            {% if game.venue == venue %}
-              {% if team not in team_ns.names %}{% set team_ns.names = team_ns.names + [team] %}{% endif %}
-            {% endif %}
-          {% endfor %}
-        {% endfor %}
-        {% set team_label = team_ns.names|join(' / ') %}
-        <a class="nfl-stadium-card" href="{{ url_for('nfl_stadium.nhl_arena', venue=venue) }}" data-stadium-card data-search="{{ (team_label ~ ' ' ~ venue)|lower }}">
-          <span class="nfl-stadium-card__eyebrow">{{ venue }}</span>
-          <h3>{{ team_label or 'NHL home team' }}</h3>
-          <dl>
-            <div><dt>{{ tracked_games }}</dt><dd>game{% if tracked_games != 1 %}s{% endif %}</dd></div>
-          </dl>
-          <span class="nfl-stadium-card__action">Open team report <b aria-hidden="true">&#8594;</b></span>
+      {% for report in team_reports %}
+        <a class="nfl-stadium-card" href="{{ report.url }}" data-stadium-card data-search="{{ (report.team_label ~ ' ' ~ report.venue)|lower }}">
+          <span class="nfl-stadium-card__eyebrow">{{ report.venue }}</span>
+          <h3>{{ report.team_label }}</h3>
+          <dl><div><dt>{{ report.game_count }}</dt><dd>{{ report.season }} games</dd></div></dl>
+          <span class="nfl-stadium-card__action">{% if report.game_count %}Open team report{% else %}Awaiting in-season data{% endif %} <b aria-hidden="true">&#8594;</b></span>
         </a>
       {% else %}
         <div class="empty-state nfl-empty-state nfl-stadium-picker__empty">
