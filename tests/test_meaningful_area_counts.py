@@ -133,11 +133,11 @@ class PresentationTests(unittest.TestCase):
             (root / "Flask_App/templates/nfl_stadium.html").read_text(),
         )
 
-    def test_report_labels_supported_count_as_areas_analyzed(self):
+    def test_team_report_does_not_expose_internal_area_metric(self):
         root = Path(__file__).resolve().parents[1]
         text = (root / "Flask_App/templates/nfl_stadium.html").read_text()
-        self.assertIn("{{ analyzed_area_count }}", text)
-        self.assertIn("<dd>Areas analyzed</dd>", text)
+        self.assertNotIn("{{ analyzed_area_count }}", text)
+        self.assertNotIn("<dd>Areas analyzed</dd>", text)
 
 
 if __name__ == "__main__":
