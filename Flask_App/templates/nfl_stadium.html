@@ -27,18 +27,15 @@
     {% elif not selected_venue %}
       <div class="nfl-stadium-directory__hero">
         <div>
-          <span class="nfl-section-kicker">{{ sport_label }} team directory</span>
           <h1>Choose a team.</h1>
-          {% if selection_note %}<p>{{ selection_note }}</p>{% endif %}
-          <p>See its cheapest sections, typical price drops, and game history.</p>
         </div>
       </div>
 
       <div class="nfl-stadium-picker__controls nfl-stadium-picker__controls--directory">
-        <label for="venue-directory-search">Search by team or {{ venue_noun }}</label>
+        <label class="sr-only" for="venue-directory-search">Search by team or {{ venue_noun }}</label>
         <div>
           <input id="venue-directory-search" type="search" placeholder="Search by team or {{ venue_noun }}…" autocomplete="off" data-stadium-search data-venue-noun="{{ venue_noun }}">
-          <span data-stadium-count>{{ stadium_count }} team reports</span>
+          <span data-stadium-count>{{ stadium_count }} teams</span>
         </div>
       </div>
 
@@ -47,34 +44,30 @@
           <a class="nfl-stadium-card" href="{{ stadium.url }}" data-stadium-card data-search="{{ (stadium.team_label ~ ' ' ~ stadium.venue)|lower }}">
             <span class="nfl-stadium-card__eyebrow">{{ stadium.venue }}</span>
             <h2>{{ stadium.team_label or sport_label ~ ' home team' }}</h2>
-            <dl>
-              <div><dt>{{ stadium.game_count }}</dt><dd>games</dd></div>
-            </dl>
-            <span class="nfl-stadium-card__action">Open team report <b aria-hidden="true">&#8594;</b></span>
+            <span class="nfl-stadium-card__action">View report <b aria-hidden="true">&#8594;</b></span>
           </a>
         {% else %}
           <div class="empty-state nfl-empty-state nfl-stadium-picker__empty">
             <span>!</span>
             <h2>No {{ sport_label }} history yet</h2>
-            <p>The directory will populate after game snapshots are stored.</p>
           </div>
         {% endfor %}
       </div>
-      <p class="nfl-stadium-no-results" data-stadium-empty hidden>No tracked team or {{ venue_noun }} matches that search.</p>
+      <p class="nfl-stadium-no-results" data-stadium-empty hidden>No matches.</p>
     {% else %}
       <header class="nfl-stadium-dashboard-hero">
         <div class="nfl-stadium-dashboard-hero__copy">
-          <span class="nfl-section-kicker">{{ selected_venue }} · {{ venue_noun }} market report</span>
+          <span class="nfl-section-kicker">{{ selected_venue }}</span>
           <h1>{{ selected_team_label or sport_label ~ ' home team' }}</h1>
-          <p>{{ report_season }} home games · Preseason excluded</p>
+          <p>{{ report_season }}</p>
         </div>
 
         <form class="nfl-stadium-switch" method="get" action="{{ directory_url }}" data-stadium-switch>
-          <label for="venue-switcher">Switch team</label>
+          <label for="venue-switcher">Team</label>
           <div>
             <select id="venue-switcher" name="team">
               {% for stadium in stadiums %}
-                <option value="{{ stadium.team }}"{% if stadium.team == selected_team %} selected{% endif %}>{{ stadium.team_label or sport_label ~ ' home team' }} · {{ stadium.venue }} · {{ stadium.game_count }} game{% if stadium.game_count != 1 %}s{% endif %}</option>
+                <option value="{{ stadium.team }}"{% if stadium.team == selected_team %} selected{% endif %}>{{ stadium.team_label or sport_label ~ ' home team' }} · {{ stadium.venue }}</option>
               {% endfor %}
             </select>
             <button class="button nfl-button nfl-button--primary" type="submit">Open</button>
@@ -84,32 +77,20 @@
         {% if venue_options|length > 1 %}
           <form class="nfl-stadium-switch" method="get" action="{{ directory_url }}" data-stadium-switch>
             <input type="hidden" name="team" value="{{ selected_team }}">
-            <label for="report-venue">Venue — seating histories stay separate</label>
+            <label for="report-venue">Venue</label>
             <select id="report-venue" name="venue">{% for venue in venue_options %}<option value="{{ venue }}"{% if venue == selected_venue %} selected{% endif %}>{{ venue }}</option>{% endfor %}</select>
             <button class="button nfl-button nfl-button--primary" type="submit">Open</button>
           </form>
         {% endif %}
-
-        <dl class="nfl-stadium-dashboard-metrics">
-          <div><dt>{{ game_count }}</dt><dd>Games</dd></div>
-          <div><dt>{{ analyzed_area_count }}</dt><dd>Areas analyzed</dd></div>
-          <div><dt>{{ completed_game_count }}</dt><dd>Completed</dd></div>
-        </dl>
       </header>
 
       {% if currency_warning %}
         <div class="nfl-sample-note">
-          <span aria-hidden="true">&#9432;</span><p><strong>Currency guardrail.</strong> {{ currency_warning }}</p>
+          <span aria-hidden="true">&#9432;</span><p>{{ currency_warning }}</p>
         </div>
       {% endif %}
 
       <section class="nfl-dashboard-section nfl-dashboard-section--compact" id="overview">
-        <div class="nfl-dashboard-section__heading">
-          <div>
-            <h2>Cheapest sections &amp; typical drops</h2>
-          </div>
-        </div>
-
         <div class="nfl-ranking-grid">
           <article class="nfl-ranking-card">
             <header>
@@ -121,13 +102,13 @@
                   <span class="nfl-rank-number">{{ loop.index }}</span>
                   <div class="nfl-rank-copy">
                     <strong>{{ section.name }}</strong>
-                    <small>{{ section.ranking_price_games }}/{{ section.ranking_total_games }} games</small>
+                    <small>{{ section.ranking_price_games }} games</small>
                   </div>
-                  <div class="nfl-rank-value"><strong>{{ section.ranking_price_label }}</strong><small>avg. price</small></div>
+                  <div class="nfl-rank-value"><strong>{{ section.ranking_price_label }}</strong><small>average</small></div>
                   {% if section.detail_url %}<a class="nfl-ranking-link" href="{{ section.detail_url }}" aria-label="Open details for {{ section.name }}">Open <span aria-hidden="true">&#8594;</span></a>{% endif %}
                 </li>
               {% else %}
-                <li class="nfl-ranking-empty">Not enough comparable history yet.</li>
+                <li class="nfl-ranking-empty">Not enough history yet.</li>
               {% endfor %}
             </ol>
           </article>
@@ -142,8 +123,7 @@
                   <span class="nfl-rank-number">{{ loop.index }}</span>
                   <div class="nfl-rank-copy nfl-drop-profile-copy">
                     <strong>{{ section.name }}</strong>
-                    <small>{{ section.ranking_drop_games }}/{{ section.ranking_total_games }} games · {{ section.ranking_drop_material_games }} fell 20%+</small>
-
+                    <small>{{ section.ranking_drop_games }} games</small>
                   </div>
                   <div class="nfl-rank-value nfl-rank-value--drop nfl-drop-profile-value">
                     <strong>{{ section.ranking_drop_label }}</strong>
@@ -152,36 +132,27 @@
                   {% if section.detail_url %}<a class="nfl-ranking-link" href="{{ section.detail_url }}" aria-label="Open details for {{ section.name }}">Open <span aria-hidden="true">&#8594;</span></a>{% endif %}
                 </li>
               {% else %}
-                <li class="nfl-ranking-empty">Not enough comparable history yet.</li>
+                <li class="nfl-ranking-empty">Not enough history yet.</li>
               {% endfor %}
             </ol>
           </article>
         </div>
 
-        <details class="ranking-method">
-          <summary>How these rankings work</summary>
-          <p>Same team, venue, and season. Only completed regular-season and playoff games count. A section needs at least 3 comparable games and coverage of at least 60% of completed games in this report.</p>
-          <p>Cheapest: every included game must cover all three final-day windows (12–24, 6–12, and 0–6 hours). Window medians are weighted by duration, then game averages receive equal weight. No missing prices are filled in.</p>
-          <p>Drops: all five windows in the final {{ '48 hours' if sport_key == 'mlb' else '7 days' }} must have at least three observations. We find each game's largest earlier-high to later-low decline, then take the median across games. These are observed price histories, not guaranteed savings.</p>
-          <p>Sparse sections remain available below, but cannot win a ranking based on a single cheap game. These coverage rules are safeguards, not statistical confidence intervals.</p>
-        </details>
-        {% if ranking_note %}<p class="ranking-window">{{ ranking_note }}</p>{% endif %}
-
         <div class="nfl-report-lookup">
           <div>
-            <h3>More sections</h3>
+            <h3>Explore sections</h3>
           </div>
           <form data-section-jump>
             <label class="sr-only" for="section-jump">Choose a section</label>
             <select id="section-jump" data-section-jump-select>
               <option value="">Choose a section</option>
               {% for section in all_sections %}
-                {% if section.detail_url %}<option value="{{ section.detail_url }}">{{ section.name }} · {{ section.game_count }} games{% if not section.ranking_price_eligible %} · limited comparison{% endif %}</option>{% endif %}
+                {% if section.detail_url %}<option value="{{ section.detail_url }}">{{ section.name }} · {{ section.game_count }} games</option>{% endif %}
               {% endfor %}
             </select>
             <button class="button nfl-button nfl-button--primary" type="submit" data-section-jump-button disabled>Open</button>
           </form>
-          <a class="nfl-report-lookup__link" href="{{ home_url }}#single-game">Single-game tools <span aria-hidden="true">&#8594;</span></a>
+          <a class="nfl-report-lookup__link" href="{{ home_url }}#single-game">Single-game history <span aria-hidden="true">&#8594;</span></a>
         </div>
       </section>
 
