@@ -121,33 +121,50 @@ jobs:
         env:
           COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
         run: |
-          set -euo pipefail
-          base="https://bunnyjeff.pythonanywhere.com"
-          for sport in mlb nfl nhl; do
-            echo "Backfilling $sport materialized summaries"
-            complete=0
-            for attempt in $(seq 1 300); do
-              response="$(
-                curl -fsS --max-time 180 \
-                  -X POST \
-                  -H "Authorization: Bearer $COLLECTOR_INGEST_TOKEN" \
-                  -H 'Content-Type: application/json' \
-                  -d "{\"sport\":\"$sport\",\"limit\":5}" \
-                  "$base/api/analytics/backfill"
-              )"
-              echo "$response"
-              complete="$(
-                python -c 'import json, sys; print(1 if json.load(sys.stdin).get("complete") else 0)' <<< "$response"
-              )"
-              if [[ "$complete" == "1" ]]; then
-                break
-              fi
-            done
-            if [[ "$complete" != "1" ]]; then
-              echo "$sport backfill did not complete within 300 batches" >&2
-              exit 1
-            fi
-          done
+          python -u - <<'PY'
+          import json
+          import os
+          import time
+          from urllib.error import HTTPError, URLError
+          from urllib.request import Request, urlopen
+
+          base = "https://bunnyjeff.pythonanywhere.com"
+          token = os.environ["COLLECTOR_INGEST_TOKEN"]
+
+          def call(path, payload=None):
+              for attempt in range(8):
+                  try:
+                      request = Request(
+                          base + path,
+                          data=None if payload is None else json.dumps(payload).encode(),
+                          headers={
+                              "Authorization": "Bearer " + token,
+                              "Accept": "application/json",
+                              "Content-Type": "application/json",
+                          },
+                      )
+                      with urlopen(request, timeout=90) as response:
+                          return json.load(response)
+                  except HTTPError as error:
+                      body = error.read().decode("utf-8", "replace")[:2000]
+                      if error.code not in (409, 429, 502, 503, 504):
+                          raise RuntimeError(f"HTTP {error.code}: {body}") from error
+                      print(f"Transient HTTP {error.code}; retry {attempt + 1}/8", flush=True)
+                  except (URLError, TimeoutError):
+                      print(f"Transient connection timeout; retry {attempt + 1}/8", flush=True)
+                  time.sleep(min(5 * (attempt + 1), 30))
+              raise RuntimeError("Maintenance request did not recover after bounded retries")
+
+          for sport in ("mlb", "nfl", "nhl"):
+              print(f"Backfilling {sport} materialized summaries", flush=True)
+              for batch in range(1200):
+                  result = call("/api/analytics/backfill", {"sport": sport, "limit": 1})
+                  print(json.dumps(result), flush=True)
+                  if result.get("complete") is True:
+                      break
+              else:
+                  raise RuntimeError(f"{sport} did not complete within the batch limit")
+          PY
 
       - name: Verify public pages and API startup
         run: |
