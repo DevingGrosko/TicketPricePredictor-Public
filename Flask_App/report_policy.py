@@ -12,6 +12,14 @@ import unicodedata
 MIN_RANK_GAMES = 3
 MIN_RANK_COVERAGE = 0.60
 
+_RETIRED_MLB_HOME_VENUES = frozenset(
+    {
+        "george m steinbrenner field",
+        "steinbrenner field",
+        "tropicana field",
+    }
+)
+
 
 def clean(value: Any) -> str:
     return ' '.join(unicodedata.normalize('NFKC', str(value or '')).split())
@@ -21,11 +29,32 @@ def normalized(value: Any) -> str:
     return re.sub(r'[^a-z0-9]+', ' ', clean(value).casefold()).strip()
 
 
+def is_retired_mlb_home_event(event: Any) -> bool:
+    """Identify Rays home events without matching Rays away games."""
+    venue = normalized(
+        getattr(event, 'Place', '') or getattr(event, 'venue', '')
+    )
+    if venue in _RETIRED_MLB_HOME_VENUES:
+        return True
+
+    title = clean(getattr(event, 'title', ''))
+    parts = re.split(r'\s+(?:at|vs\.?|versus)\s+', title, maxsplit=1, flags=re.I)
+    if len(parts) != 2:
+        return False
+    home = normalized(parts[1])
+    return home == 'tampa bay rays' or home == 'rays'
+
+
 def preseason_title(value: Any) -> bool:
     return bool(re.search(r'\b(?:pre[\s-]*season|exhibition|spring[\s-]*training)\b', clean(value), re.I))
 
 
 def is_preseason(sport: str, event: Any) -> bool:
+    # Legacy MLB public filters already route non-public events through this
+    # predicate. Treat the retired Rays home history the same way so it cannot
+    # reappear while the production cleanup removes its stored rows.
+    if sport == 'mlb' and is_retired_mlb_home_event(event):
+        return True
     if preseason_title(getattr(event, 'title', '')):
         return True
     kind = getattr(event, 'game_type', None)
