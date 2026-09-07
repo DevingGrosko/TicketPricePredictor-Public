@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass
 from threading import Lock
 from typing import Any, Callable
 
+from sqlalchemy import delete, select
 from sqlalchemy.orm import defer, load_only
 
 from models import (
@@ -17,9 +18,13 @@ from models import (
 )
 from Flask_App.database_config import dispose_ticket_engine
 from Flask_App.materialized_analytics import (
+    SECTION_BUCKET_SUMMARY,
+    SECTION_SUMMARY_STATE,
     refresh_event_summary,
     stale_event_ids,
 )
+from Flask_App.performance_cache import invalidate_sport_cache
+from Flask_App.report_policy import is_retired_mlb_home_event
 
 
 MLB_URL_MARKER = "--sports-mlb-baseball/"
@@ -34,11 +39,89 @@ class BackfillResult:
     total_events: int
     complete: bool
     event_ids: tuple[int, ...]
+    retired_events_removed: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         payload = asdict(self)
         payload["event_ids"] = list(self.event_ids)
         return payload
+
+
+def _remove_retired_mlb_history() -> int:
+    """Delete only retired MLB home events and their dependent stored data.
+
+    The cleanup is one transaction. Opposing-team home games remain because
+    ``is_retired_mlb_home_event`` requires a Rays home identity rather than a
+    generic Rays mention in the matchup title.
+    """
+    model = CreateModel()
+    removed = 0
+    try:
+        with model.getSession()() as session:
+            candidates = (
+                session.query(Event)
+                .options(
+                    load_only(
+                        Event.id,
+                        Event.title,
+                        Event.URL,
+                        Event.Place,
+                    )
+                )
+                .order_by(Event.id)
+                .all()
+            )
+            retired_ids = sorted(
+                int(event.id)
+                for event in candidates
+                if MLB_URL_MARKER in str(event.URL or "").casefold()
+                and is_retired_mlb_home_event(event)
+            )
+            if not retired_ids:
+                return 0
+
+            iteration_ids = list(
+                session.execute(
+                    select(Iteration.__table__.c.id).where(
+                        Iteration.__table__.c.event_id.in_(retired_ids)
+                    )
+                ).scalars()
+            )
+
+            # Materialized summaries do not have database foreign keys to raw
+            # events, so remove them explicitly before deleting the source rows.
+            session.execute(
+                delete(SECTION_BUCKET_SUMMARY).where(
+                    SECTION_BUCKET_SUMMARY.c.event_id.in_(retired_ids)
+                )
+            )
+            session.execute(
+                delete(SECTION_SUMMARY_STATE).where(
+                    SECTION_SUMMARY_STATE.c.event_id.in_(retired_ids)
+                )
+            )
+            if iteration_ids:
+                session.execute(
+                    delete(Ticket.__table__).where(
+                        Ticket.__table__.c.iteration_id.in_(iteration_ids)
+                    )
+                )
+            session.execute(
+                delete(Iteration.__table__).where(
+                    Iteration.__table__.c.event_id.in_(retired_ids)
+                )
+            )
+            session.execute(
+                delete(Event.__table__).where(Event.__table__.c.id.in_(retired_ids))
+            )
+            session.commit()
+            removed = len(retired_ids)
+    finally:
+        dispose_ticket_engine(model.engine)
+
+    if removed:
+        invalidate_sport_cache("mlb")
+    return removed
 
 
 def _mlb_spec() -> tuple[Any, Any, Any, Any, list[Any], Callable[[Any], str]]:
@@ -185,6 +268,9 @@ def backfill_sport(sport: str, *, limit: int = 3) -> BackfillResult:
 
     model = None
     try:
+        retired_events_removed = (
+            _remove_retired_mlb_history() if normalized == "mlb" else 0
+        )
         model, _event_model, iteration_model, ticket_model, events, venue_getter = (
             _sport_spec(normalized)
         )
@@ -228,6 +314,7 @@ def backfill_sport(sport: str, *, limit: int = 3) -> BackfillResult:
             total_events=len(events),
             complete=not remaining_ids,
             event_ids=tuple(processed),
+            retired_events_removed=retired_events_removed,
         )
     finally:
         if model is not None:
