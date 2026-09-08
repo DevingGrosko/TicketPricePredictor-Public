@@ -1,0 +1,66 @@
+name: Fix MLB team report hook
+
+on:
+  push:
+    branches:
+      - perf/mlb-materialized-team-reports
+    paths:
+      - ".github/workflows/fix-mlb-team-report-hook.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: perf/mlb-materialized-team-reports
+          fetch-depth: 0
+
+      - name: Repair hook
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("Flask_App/flask_app.py")
+          text = path.read_text()
+          bad = (
+              '        if result is None:\n'
+              '    return "deferred"\n'
+              'try:\n'
+              '    refreshed = refresh_mlb_team_report(venue)\n'
+              'except Exception:\n'
+              '    app.logger.exception(\n'
+              '        "Deferred MLB team report refresh for venue %s", venue\n'
+              '    )\n'
+              '    return "team-deferred"\n'
+              'return "updated" if refreshed else "team-deferred"\n'
+          )
+          good = (
+              '        if result is None:\n'
+              '            return "deferred"\n'
+              '        try:\n'
+              '            refreshed = refresh_mlb_team_report(venue)\n'
+              '        except Exception:\n'
+              '            app.logger.exception(\n'
+              '                "Deferred MLB team report refresh for venue %s", venue\n'
+              '            )\n'
+              '            return "team-deferred"\n'
+              '        return "updated" if refreshed else "team-deferred"\n'
+          )
+          if text.count(bad) != 1:
+              raise RuntimeError("malformed MLB hook not found exactly once")
+          path.write_text(text.replace(bad, good, 1))
+          PY
+          rm -f .github/mlb-team-report-materialization.patch
+          rm .github/workflows/fix-mlb-team-report-hook.yml
+          git diff --check
+
+      - name: Commit repair
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix MLB team report refresh hook"
+          git push origin HEAD:perf/mlb-materialized-team-reports
