@@ -1,0 +1,42 @@
+name: Apply MLB team report materialization
+
+on:
+  push:
+    branches:
+      - perf/mlb-materialized-team-reports
+    paths:
+      - ".github/mlb-team-report-materialization.patch"
+      - ".github/workflows/apply-mlb-team-report-materialization.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-mlb-team-report-materialization
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: perf/mlb-materialized-team-reports
+          fetch-depth: 0
+
+      - name: Apply integration patch
+        run: |
+          git apply --check .github/mlb-team-report-materialization.patch
+          git apply .github/mlb-team-report-materialization.patch
+          rm .github/mlb-team-report-materialization.patch
+          rm .github/workflows/apply-mlb-team-report-materialization.yml
+          git diff --check
+
+      - name: Commit integration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Route MLB team pages through persistent summaries"
+          git push origin HEAD:perf/mlb-materialized-team-reports
