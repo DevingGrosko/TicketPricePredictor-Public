@@ -15,9 +15,14 @@ from flask import render_template, request, url_for
 from sqlalchemy import Column, DateTime, Integer, JSON, MetaData, String, Table, delete, insert, select
 from sqlalchemy.orm import load_only
 
-from models import CreateModel, Event, Iteration, Ticket, event_has_complete_public_data
+from models import (
+    CreateModel,
+    Event,
+    event_datetime_utc,
+    event_has_complete_public_data,
+)
 from Flask_App.database_config import dispose_ticket_engine
-from Flask_App.materialized_analytics import TIMELINE_BUCKETS, read_summary_rows, venue_revision
+from Flask_App.materialized_analytics import read_summary_rows, venue_revision
 from Flask_App.report_policy import latest_season_events, report_venue, season_key, venue_aliases
 
 
@@ -58,6 +63,18 @@ def _venue_revision(session: Any, venue: str) -> int:
     return sum(venue_revision(session, alias) for alias in venue_aliases(venue))
 
 
+def _completed_count(
+    events: Iterable[Event],
+    now: datetime | None = None,
+) -> int:
+    current = now or datetime.now(timezone.utc)
+    return sum(
+        1
+        for event in events
+        if event.event_date and event_datetime_utc(event.event_date) <= current
+    )
+
+
 def _group_latest_venues(events: Iterable[Event]) -> dict[str, tuple[list[Event], int]]:
     grouped: dict[str, list[Event]] = defaultdict(list)
     for event in events:
@@ -88,15 +105,19 @@ def stale_mlb_team_report_venues(session: Any, events: Iterable[Event]) -> list[
         )
     ).mappings().all()
     stored = {(str(row["venue"]), int(row["season"])): row for row in rows}
+    now = datetime.now(timezone.utc)
 
     stale: list[str] = []
-    for venue, (_events, year) in sorted(grouped.items()):
+    for venue, (venue_events, year) in sorted(grouped.items()):
         row = stored.get((venue, year))
         revision = _venue_revision(session, venue)
+        payload = dict(row["payload"] or {}) if row is not None else {}
         if (
             row is None
             or int(row["summary_version"]) != TEAM_REPORT_SCHEMA_VERSION
             or int(row["source_revision"]) != revision
+            or int(payload.get("completed_game_count") or 0)
+            != _completed_count(venue_events, now)
         ):
             stale.append(venue)
     return stale
@@ -144,12 +165,13 @@ def _compact_payload(session: Any, venue: str, events: list[Event], year: int) -
         format_mlb_title,
     )
 
+    now = datetime.now(timezone.utc)
     bucket_rows = read_summary_rows(session, [int(event.id) for event in events])
     prepared = _prepared_summary_rows(events, bucket_rows, "mlb")
     sections, _analyzed = _finalize_section_insights(
         events,
         prepared,
-        datetime.now(timezone.utc),
+        now,
         currency="USD",
         sport_key="mlb",
         detail_url_builder=lambda _event, _section: None,
@@ -181,9 +203,7 @@ def _compact_payload(session: Any, venue: str, events: list[Event], year: int) -
         "venue": report_venue(venue),
         "season": int(year),
         "game_count": len(events),
-        "completed_game_count": sum(
-            1 for event in events if event.event_date and event.event_date <= datetime.now().replace(tzinfo=None)
-        ),
+        "completed_game_count": _completed_count(events, now),
         "all_sections": compact_sections,
         "cheapest_section_keys": [row["section_key"] for row in cheapest],
         "biggest_drop_keys": [row["section_key"] for row in biggest_drops],
@@ -248,7 +268,13 @@ def refresh_mlb_team_report(venue: str) -> bool:
         dispose_ticket_engine(model.engine)
 
 
-def read_mlb_team_report(session: Any, venue: str, season: int) -> dict[str, Any] | None:
+def read_mlb_team_report(
+    session: Any,
+    venue: str,
+    season: int,
+    *,
+    current_completed_count: int | None = None,
+) -> dict[str, Any] | None:
     """Read a fresh persistent report, returning None when maintenance is behind."""
     _ensure_schema(session.connection())
     canonical = report_venue(venue)
@@ -265,7 +291,14 @@ def read_mlb_team_report(session: Any, venue: str, season: int) -> dict[str, Any
         return None
     if int(row["source_revision"]) != _venue_revision(session, canonical):
         return None
-    return dict(row["payload"] or {})
+    payload = dict(row["payload"] or {})
+    if (
+        current_completed_count is not None
+        and int(payload.get("completed_game_count") or 0)
+        != int(current_completed_count)
+    ):
+        return None
+    return payload
 
 
 def render_materialized_mlb_team_report():
@@ -305,9 +338,40 @@ def render_materialized_mlb_team_report():
                 year = int(str(choice.get("report_season") or ""))
             except ValueError:
                 year = max((season_key("mlb", event) for event in choice["events"]), default=0)
-            payload = read_mlb_team_report(session, selected, year) if year else None
+            completed_now = _completed_count(choice["events"], now)
+            payload = (
+                read_mlb_team_report(
+                    session,
+                    selected,
+                    year,
+                    current_completed_count=completed_now,
+                )
+                if year
+                else None
+            )
     finally:
         dispose_ticket_engine(model.engine)
+
+    if payload is None and selected:
+        # A newly-completed game changes the ranking cohort even without another
+        # price snapshot. Rebuild once at that boundary, then all later readers
+        # use the persistent row again.
+        try:
+            refreshed = refresh_mlb_team_report(selected)
+        except Exception:
+            refreshed = False
+        if refreshed:
+            model = CreateModel()
+            try:
+                with model.getSession()() as session:
+                    payload = read_mlb_team_report(
+                        session,
+                        selected,
+                        year,
+                        current_completed_count=completed_now,
+                    )
+            finally:
+                dispose_ticket_engine(model.engine)
 
     if payload is None:
         # Safe fallback: correctness wins if derived maintenance ever falls behind.
