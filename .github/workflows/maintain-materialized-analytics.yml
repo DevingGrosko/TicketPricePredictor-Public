@@ -1,0 +1,47 @@
+name: Maintain materialized analytics
+
+on:
+  workflow_call:
+    secrets:
+      COLLECTOR_INGEST_TOKEN:
+        required: true
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/scripts/maintain_materialized_analytics.py"
+      - ".github/workflows/maintain-materialized-analytics.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/scripts/maintain_materialized_analytics.py"
+      - ".github/workflows/maintain-materialized-analytics.yml"
+      - ".github/workflows/collect-ticket-prices.yml"
+      - "tests/test_analytics_maintenance_runner.py"
+
+permissions:
+  contents: read
+
+jobs:
+  maintain:
+    # Serialize scheduled/manual repair passes, but do not make PR checks wait
+    # for production maintenance. Collection itself keeps its existing cadence.
+    concurrency:
+      group: analytics-maintenance-${{ github.event_name == 'pull_request' && github.run_id || 'production' }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Test maintenance completion and retry safeguards
+        run: python -m unittest discover -s tests -p 'test_analytics_maintenance_runner.py' -v
+      - name: Repair deferred event and team summaries until complete
+        if: github.event_name != 'pull_request'
+        env:
+          COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
+        run: python -u .github/scripts/maintain_materialized_analytics.py
