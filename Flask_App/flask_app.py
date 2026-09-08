@@ -258,15 +258,15 @@ def _refresh_mlb_materialized_summary(
             bucket_slots=(slot,),
         )
         if result is None:
-    return "deferred"
-try:
-    refreshed = refresh_mlb_team_report(venue)
-except Exception:
-    app.logger.exception(
-        "Deferred MLB team report refresh for venue %s", venue
-    )
-    return "team-deferred"
-return "updated" if refreshed else "team-deferred"
+            return "deferred"
+        try:
+            refreshed = refresh_mlb_team_report(venue)
+        except Exception:
+            app.logger.exception(
+                "Deferred MLB team report refresh for venue %s", venue
+            )
+            return "team-deferred"
+        return "updated" if refreshed else "team-deferred"
     except Exception:
         app.logger.exception(
             "Deferred MLB materialized analytics refresh for event %s", event_id
