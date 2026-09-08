@@ -113,7 +113,7 @@ class MaterializedMLBTeamReportTests(unittest.TestCase):
                         next(
                             row["section_key"]
                             for row in payload["all_sections"]
-                            if row["name"] == "Section 200"
+                            if row["name"] == "Section 100"
                         ),
                     )
                     self.assertEqual(
