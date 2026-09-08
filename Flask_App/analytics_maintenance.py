@@ -25,6 +25,10 @@ from Flask_App.materialized_analytics import (
 )
 from Flask_App.performance_cache import invalidate_sport_cache
 from Flask_App.report_policy import is_retired_mlb_home_event
+from Flask_App.team_report_materialized import (
+    refresh_mlb_team_report_in_session,
+    stale_mlb_team_report_venues,
+)
 
 
 MLB_URL_MARKER = "--sports-mlb-baseball/"
@@ -40,6 +44,8 @@ class BackfillResult:
     complete: bool
     event_ids: tuple[int, ...]
     retired_events_removed: int = 0
+    team_reports_processed: int = 0
+    team_reports_remaining: int = 0
 
     def as_dict(self) -> dict[str, Any]:
         payload = asdict(self)
@@ -251,7 +257,7 @@ def _sport_spec(
 
 
 def backfill_sport(sport: str, *, limit: int = 3) -> BackfillResult:
-    """Refresh a small batch of stale event summaries.
+    """Refresh a small batch of stale event and team summaries.
 
     This function is intentionally batched so a production maintenance request
     remains bounded. Deploy and collector workflows can call it repeatedly
@@ -275,6 +281,9 @@ def backfill_sport(sport: str, *, limit: int = 3) -> BackfillResult:
             _sport_spec(normalized)
         )
         event_by_id = {int(event.id): event for event in events}
+        processed: list[int] = []
+        team_reports_processed = 0
+        team_reports_remaining = 0
         with model.getSession()() as session:
             stale = stale_event_ids(
                 session,
@@ -284,7 +293,6 @@ def backfill_sport(sport: str, *, limit: int = 3) -> BackfillResult:
                 iteration_model=iteration_model,
             )
             selected_ids = stale[:batch_limit]
-            processed: list[int] = []
             for event_id in selected_ids:
                 event = event_by_id[event_id]
                 refresh_event_summary(
@@ -307,14 +315,34 @@ def backfill_sport(sport: str, *, limit: int = 3) -> BackfillResult:
                 venue_getter=venue_getter,
                 iteration_model=iteration_model,
             )
+
+            # Once all event-level summaries are current, build the persistent
+            # MLB venue/team payloads in small batches. This makes deployment
+            # prewarm every team before public traffic reaches the new reader.
+            if normalized == "mlb" and not remaining_ids:
+                stale_venues = stale_mlb_team_report_venues(session, events)
+                for venue in stale_venues[:batch_limit]:
+                    refresh_mlb_team_report_in_session(
+                        session,
+                        venue,
+                        candidate_events=events,
+                    )
+                    session.commit()
+                    team_reports_processed += 1
+                team_reports_remaining = len(
+                    stale_mlb_team_report_venues(session, events)
+                )
+
         return BackfillResult(
             sport=normalized,
             processed=len(processed),
             remaining=len(remaining_ids),
             total_events=len(events),
-            complete=not remaining_ids,
+            complete=not remaining_ids and not team_reports_remaining,
             event_ids=tuple(processed),
             retired_events_removed=retired_events_removed,
+            team_reports_processed=team_reports_processed,
+            team_reports_remaining=team_reports_remaining,
         )
     finally:
         if model is not None:

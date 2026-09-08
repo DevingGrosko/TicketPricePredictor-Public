@@ -51,6 +51,10 @@ from Flask_App.materialized_analytics import (
     refresh_event_summary_safely,
     timeline_bucket_slot,
 )
+from Flask_App.team_report_materialized import (
+    refresh_mlb_team_report,
+    render_materialized_mlb_team_report,
+)
 
 # Load .env only in local development. PythonAnywhere also keeps its values in
 # this file, and the storage layer reloads it before resolving database paths.
@@ -76,6 +80,10 @@ from Flask_App.nhl_blueprint import nhl_blueprint
 app.register_blueprint(nfl_blueprint)
 app.register_blueprint(nfl_stadium_blueprint)
 app.register_blueprint(nhl_blueprint)
+
+# Keep the existing endpoint and URL, but serve the MLB team report
+# from the persistent team-summary payload.
+app.view_functions["nfl_stadium.mlb_stadium"] = render_materialized_mlb_team_report
 
 MAX_SNAPSHOT_REPLAY_AGE = timedelta(days=7)
 MAX_SNAPSHOT_CLOCK_SKEW = timedelta(minutes=5)
@@ -249,7 +257,16 @@ def _refresh_mlb_materialized_summary(
             ticket_model=Ticket,
             bucket_slots=(slot,),
         )
-        return "updated" if result is not None else "deferred"
+        if result is None:
+            return "deferred"
+        try:
+            refreshed = refresh_mlb_team_report(venue)
+        except Exception:
+            app.logger.exception(
+                "Deferred MLB team report refresh for venue %s", venue
+            )
+            return "team-deferred"
+        return "updated" if refreshed else "team-deferred"
     except Exception:
         app.logger.exception(
             "Deferred MLB materialized analytics refresh for event %s", event_id
