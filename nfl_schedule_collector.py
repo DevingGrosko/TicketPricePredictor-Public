@@ -59,6 +59,7 @@ SCHEDULE_REQUEST_TIMEOUT_SECONDS = 20
 SCHEDULE_REQUEST_ATTEMPTS = 3
 VIVID_SEARCH_SETTLE_SECONDS = 2.0
 VIVID_SEARCH_MAX_SECONDS = 18
+VIVID_CAPTURE_ATTEMPTS = 2
 EVENT_TIME_TOLERANCE_HOURS = 18
 SMOKE_HORIZON_HOURS = 45 * 24
 
@@ -474,6 +475,11 @@ def validate_captured_match(
         )
 
 
+def _retryable_capture_error(exc: Exception) -> bool:
+    """Retry only timeout-like provider failures, never validation mismatches."""
+    return isinstance(exc, TimeoutError) or type(exc).__name__ == "TimeoutException"
+
+
 def _capture_resolution(
     resolution: ScheduleResolution,
     *,
@@ -482,22 +488,51 @@ def _capture_resolution(
 ) -> tuple[str, datetime, Any]:
     errors: list[str] = []
     for candidate in resolution.candidates:
-        browser: VividNFLBrowser | None = None
         try:
             url = validated_vivid_url(candidate.url)
-            browser = VividNFLBrowser(headless=headless, timeout=timeout)
-            raw_payload, event_date = browser.capture(url)
-            snapshot = NFLSnapshotParser.parse(raw_payload)
-            validate_captured_match(resolution.game, event_date, snapshot.title)
-            return url, event_date, snapshot
         except Exception as exc:
             errors.append(f"{candidate.url}: {type(exc).__name__}: {exc}")
-        finally:
-            if browser is not None:
-                try:
-                    browser.close()
-                except Exception:
-                    pass
+            continue
+
+        for attempt in range(1, VIVID_CAPTURE_ATTEMPTS + 1):
+            browser: VividNFLBrowser | None = None
+            try:
+                browser = VividNFLBrowser(headless=headless, timeout=timeout)
+                raw_payload, provider_event_date = browser.capture(url)
+                snapshot = NFLSnapshotParser.parse(raw_payload)
+                validate_captured_match(
+                    resolution.game,
+                    provider_event_date,
+                    snapshot.title,
+                )
+                # The structured schedule is authoritative for kickoff time.
+                # Vivid's rendered time is only a sanity check because naive
+                # local times can otherwise be interpreted as Eastern for a
+                # Seattle/Los Angeles/etc. event and make a live game appear past.
+                return url, resolution.game.event_date, snapshot
+            except Exception as exc:
+                errors.append(
+                    f"{candidate.url} attempt {attempt}: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                if (
+                    attempt >= VIVID_CAPTURE_ATTEMPTS
+                    or not _retryable_capture_error(exc)
+                ):
+                    break
+                print(
+                    f"NFL CAPTURE RETRY: {resolution.game.away_team} at "
+                    f"{resolution.game.home_team} after {type(exc).__name__}; "
+                    "starting a fresh browser.",
+                    file=sys.stderr,
+                    flush=True,
+                )
+            finally:
+                if browser is not None:
+                    try:
+                        browser.close()
+                    except Exception:
+                        pass
     raise RuntimeError("; ".join(errors) or "No Vivid candidate was available.")
 
 
