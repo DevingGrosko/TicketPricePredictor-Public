@@ -147,6 +147,18 @@ def schedule_url(now: datetime, horizon_hours: int) -> str:
     return f"{configured}{separator}dates={dates}&limit=1000"
 
 
+def _season_schedule_url(now: datetime) -> str:
+    """Use ESPN's season scoreboard, which is more stable than date-range queries."""
+    from collector import NEW_YORK
+
+    local = now.astimezone(NEW_YORK)
+    # January/February NFL games belong to the season that began the prior year.
+    season_year = local.year - 1 if local.month <= 2 else local.year
+    configured = os.environ.get("NFL_SCHEDULE_SCOREBOARD_URL", ESPN_SCOREBOARD_URL)
+    separator = "&" if "?" in configured else "?"
+    return f"{configured}{separator}dates={season_year}&limit=1000"
+
+
 def fetch_json(url: str, timeout: int = SCHEDULE_REQUEST_TIMEOUT_SECONDS) -> dict[str, Any]:
     request = Request(
         url,
@@ -273,9 +285,20 @@ def fetch_schedule_games(
     *,
     fetcher: JsonFetcher = fetch_json,
 ) -> tuple[list[ScheduledNFLGame], str]:
-    url = schedule_url(now, horizon_hours)
-    payload = fetcher(url, SCHEDULE_REQUEST_TIMEOUT_SECONDS)
-    return parse_schedule_payload(payload, now, horizon_hours), url
+    # ESPN's date-range scoreboard began returning HTTP 400 in production in
+    # September 2026. The season-level scoreboard provides the same structured
+    # events and lets parse_schedule_payload enforce the exact rolling horizon.
+    # Keep the range URL as a secondary source in case ESPN changes behavior again.
+    urls = (_season_schedule_url(now), schedule_url(now, horizon_hours))
+    errors: list[str] = []
+    for url in urls:
+        try:
+            payload = fetcher(url, SCHEDULE_REQUEST_TIMEOUT_SECONDS)
+        except Exception as exc:
+            errors.append(f"{url}: {type(exc).__name__}: {exc}")
+            continue
+        return parse_schedule_payload(payload, now, horizon_hours), url
+    raise RuntimeError("NFL schedule sources failed: " + "; ".join(errors))
 
 
 def schedule_games_due(
