@@ -94,7 +94,10 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
         run: |
           minute="$(date -u +%M)"
-          if [[ "$EVENT_NAME" == "push" || "$DISPATCH_SOURCE" == "manual" || 10#$minute -lt 30 ]]; then
+          if [[ "$EVENT_NAME" == "schedule" ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping NFL on the best-effort GitHub baseball recovery schedule."
+          elif [[ "$EVENT_NAME" == "push" || "$DISPATCH_SOURCE" == "manual" || 10#$minute -lt 30 ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "NFL cadence evaluation is due for this UTC hour."
           else
@@ -166,7 +169,10 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
         run: |
           minute="$(date -u +%M)"
-          if [[ "$EVENT_NAME" == "push" || "$DISPATCH_SOURCE" == "manual" || 10#$minute -lt 30 ]]; then
+          if [[ "$EVENT_NAME" == "schedule" ]]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "Skipping NHL on the best-effort GitHub baseball recovery schedule."
+          elif [[ "$EVENT_NAME" == "push" || "$DISPATCH_SOURCE" == "manual" || 10#$minute -lt 30 ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "NHL cadence evaluation is due for this UTC hour."
           else
