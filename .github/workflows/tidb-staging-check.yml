@@ -47,8 +47,56 @@ jobs:
         run: python -m unittest discover -s tests -p 'test_tidb_staging*.py' -v
 
       - name: Read-only TiDB connectivity and empty-schema check
+        id: connection_check
         env:
           TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
           TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
           TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
         run: python -m Flask_App.tidb_staging_check
+
+      - name: Diagnose missing schemas without creating or changing anything
+        if: failure() && steps.connection_check.outcome == 'failure'
+        env:
+          TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
+          TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
+          TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
+        run: |
+          python - <<'PYCODE'
+          import json
+          from sqlalchemy import create_engine, text
+          from sqlalchemy.engine import URL
+          from sqlalchemy.pool import NullPool
+          from Flask_App.tidb_staging import SCHEMAS, StagingTiDBConfig
+          from Flask_App.tidb_staging_check import CheckFailed, safe_diagnostic
+
+          engine = None
+          try:
+              config = StagingTiDBConfig.from_environment()
+              # Connect without selecting a database, only to inspect schema names.
+              # Credentials and host still come exclusively from validated staging settings.
+              url = URL.create('mysql+pymysql', host=config.host, port=4000,
+                               username=config.username, password=config.password,
+                               query={'charset': 'utf8mb4'})
+              engine = create_engine(url, poolclass=NullPool, hide_parameters=True,
+                                     connect_args={'ssl': config.tls_context(),
+                                                   'connect_timeout': 10,
+                                                   'read_timeout': 15,
+                                                   'write_timeout': 15})
+              with engine.connect() as connection:
+                  version = connection.execute(text('SELECT VERSION()')).scalar_one()
+                  if 'tidb' not in str(version).lower():
+                      raise CheckFailed('wrong_server')
+                  names = [row[0] for row in connection.execute(text(
+                      "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA "
+                      "WHERE SCHEMA_NAME LIKE 'ticketsignal%' ORDER BY SCHEMA_NAME"))]
+              print('Certificate-verified login to TiDB succeeded.')
+              print('Visible TicketSignal schema names: ' + json.dumps(names))
+              print('Expected staging schemas present: ' + str(len(set(names) & set(SCHEMAS.values()))) + '/3')
+              print('Metadata inspection only; nothing was created, imported, or changed.')
+          except Exception as error:
+              print('Metadata check failed: ' + safe_diagnostic(error))
+              raise SystemExit(1)
+          finally:
+              if engine is not None:
+                  engine.dispose()
+          PYCODE
