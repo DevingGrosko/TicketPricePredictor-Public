@@ -1,0 +1,43 @@
+name: NFL staging read-only snapshot verification
+
+# Read-only recovery after an idle importer connection closed.
+# No raw exports, PythonAnywhere credentials, imports, synthetic writes or deploys.
+on:
+  push:
+    branches: [staging/tidb-free-hosting-2026-09-20]
+    paths:
+      - .github/workflows/tidb-nfl-readonly-verify.yml
+      - tools/tidb_nfl_readonly_verify.py
+      - tools/tidb_nfl_expected_snapshot.json
+      - tests/test_tidb_nfl_readonly_verify.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tidb-staging-schema-and-import
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/staging/tidb-free-hosting-2026-09-20'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: tidb-staging
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - name: Install only the database client
+        run: python -m pip install --disable-pip-version-check 'PyMySQL>=1.1.1,<2'
+      - name: Credential-free verifier tests
+        run: python -m unittest discover -s tests -p 'test_tidb_nfl_readonly_verify.py' -v
+      - name: Read NFL staging and compare all-field fingerprints with the pinned source
+        env:
+          TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
+          TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
+          TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
+        run: python -u -m tools.tidb_nfl_readonly_verify
