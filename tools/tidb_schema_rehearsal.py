@@ -50,6 +50,17 @@ def normal_index(row):
     return (row[0], int(row[1]), int(row[2]), row[3])
 
 
+def declared_auto_increment(show_create):
+    # TiDB SHOW CREATE TABLE exposes the retained allocation base in the final
+    # table-options line. information_schema.TABLES.AUTO_INCREMENT is not a
+    # portable next-value check on TiDB. Do not scan column/default expressions.
+    options = re.search(r"\n\) ENGINE=InnoDB\b([^\n]*)\Z", str(show_create))
+    need(options is not None, "Missing reviewed table-options line.")
+    value = re.search(r"(?:^|\s)AUTO_INCREMENT=(\d+)(?:\s|$)", options[1])
+    need(value is not None, "Target table lacks an explicit auto-increment base.")
+    return int(value[1])
+
+
 def normal_collation(value):
     return str(value or "").lower().replace("utf8mb3_", "utf8_")
 
@@ -109,10 +120,11 @@ def parse_definitions(content: bytes):
 
 def inspect_table(connection, schema, d):
     params = {"schema": schema, "table": d.name}
-    meta = connection.execute(text("SELECT TABLE_TYPE, TABLE_COLLATION, AUTO_INCREMENT FROM information_schema.tables WHERE table_schema=:schema AND table_name=:table"), params).one()
+    meta = connection.execute(text("SELECT TABLE_TYPE, TABLE_COLLATION FROM information_schema.tables WHERE table_schema=:schema AND table_name=:table"), params).one()
     need(meta[0] == "BASE TABLE" and normal_collation(meta[1]) == "utf8_general_ci", "Unexpected target table type or collation.")
     if d.auto_increment is not None:
-        need(meta[2] is not None and int(meta[2]) >= d.auto_increment, "Target auto-increment floor is below the exported floor.")
+        shown = connection.exec_driver_sql(f"SHOW CREATE TABLE `{d.name}`").one()[1]
+        need(declared_auto_increment(shown) >= d.auto_increment, "Target declared auto-increment base is below the exported floor.")
     columns = connection.execute(text("SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, EXTRA, COLLATION_NAME FROM information_schema.columns WHERE table_schema=:schema AND table_name=:table ORDER BY ORDINAL_POSITION"), params)
     got = [(r[0], normal_type(r[1]), r[2], r[3] or "", normal_collation(r[4])) for r in columns]
     # TiDB may describe native JSON using a binary utf8mb4 collation; that is not
