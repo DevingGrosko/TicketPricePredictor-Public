@@ -1,0 +1,46 @@
+name: TiDB staging schema rehearsal
+
+# Creates only reviewed empty staging tables; synthetic test rows are rolled back.
+# No production credentials, source database, collection, import, or deployment.
+on:
+  push:
+    branches: [staging/tidb-free-hosting-2026-09-20]
+    paths:
+      - .github/workflows/tidb-staging-schema.yml
+      - tools/tidb_staging_schema.sql
+      - tools/tidb_schema_rehearsal.py
+      - tests/test_tidb_schema_rehearsal.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tidb-staging-schema-and-import
+  cancel-in-progress: false
+
+jobs:
+  schema:
+    if: >-
+      github.repository == 'DevingGrosko/TicketPricePredictor-Public' &&
+      github.ref == 'refs/heads/staging/tidb-free-hosting-2026-09-20'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment: tidb-staging
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - name: Install only staging test dependencies
+        run: python -m pip install --disable-pip-version-check 'SQLAlchemy>=2,<3' 'PyMySQL>=1.1.1,<2'
+      - name: Offline staging tests without credentials
+        run: python -m unittest discover -s tests -p 'test_tidb*.py' -v
+      - name: Verify empty targets, create reviewed tables, test, and roll back synthetic rows
+        env:
+          TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
+          TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
+          TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
+        run: python -m tools.tidb_schema_rehearsal --apply-empty-staging
