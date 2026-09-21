@@ -1,0 +1,68 @@
+name: MLB NFL staging importer validation
+
+# No historical exports, production credentials, imports, or deployments.
+# The live job uses synthetic rows with forced rollback, on empty MLB/NFL only.
+on:
+  push:
+    branches: [staging/tidb-free-hosting-2026-09-20]
+    paths:
+      - .github/workflows/tidb-mlb-nfl-import-tests.yml
+      - tools/tidb_mlb_nfl_import.py
+      - tools/tidb_mlb_nfl_smoke.py
+      - tests/test_tidb_mlb_nfl_import.py
+
+permissions:
+  contents: read
+
+jobs:
+  unit-and-mysql:
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/staging/tidb-free-hosting-2026-09-20'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ephemeral-test-only
+          MYSQL_DATABASE: importer_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 --silent"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --disable-pip-version-check 'PyMySQL[rsa]>=1.1.1,<2'
+      - name: Synthetic unit tests and disposable MySQL integration
+        env:
+          SPORTS_IMPORT_TEST_MYSQL: '1'
+        run: python -m unittest discover -s tests -p 'test_tidb_mlb_nfl_import.py' -v
+
+  tidb-rollback-smoke:
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/staging/tidb-free-hosting-2026-09-20'
+    needs: unit-and-mysql
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: tidb-staging
+    concurrency:
+      group: tidb-staging-schema-and-import
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --disable-pip-version-check 'PyMySQL>=1.1.1,<2'
+      - name: Validate real staging schemas and synthetic batches without committing data
+        env:
+          TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
+          TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
+          TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
+        run: python -u -m tools.tidb_mlb_nfl_smoke
