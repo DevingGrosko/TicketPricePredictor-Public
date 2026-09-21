@@ -45,6 +45,11 @@ def normal_type(value):
     return re.sub(r"^int\(11\)$", "int", str(value).lower())
 
 
+def normal_index(row):
+    # TiDB returns NON_UNIQUE as text in information_schema.statistics.
+    return (row[0], int(row[1]), int(row[2]), row[3])
+
+
 def normal_collation(value):
     return str(value or "").lower().replace("utf8mb3_", "utf8_")
 
@@ -115,7 +120,7 @@ def inspect_table(connection, schema, d):
     got = [(a,b,c,d_, "" if b == "json" else e) for a,b,c,d_,e in got]
     need(got == d.columns, "Target columns differ from the reviewed source definition.")
     indexes = connection.execute(text("SELECT INDEX_NAME, NON_UNIQUE, SEQ_IN_INDEX, COLUMN_NAME FROM information_schema.statistics WHERE table_schema=:schema AND table_name=:table"), params)
-    need(sorted(tuple(r) for r in indexes) == d.indexes, "Target indexes differ from the reviewed source definition.")
+    need(sorted(normal_index(r) for r in indexes) == d.indexes, "Target indexes differ from the reviewed source definition.")
     fks = connection.execute(text("SELECT CONSTRAINT_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME, REFERENCED_TABLE_SCHEMA FROM information_schema.key_column_usage WHERE table_schema=:schema AND table_name=:table AND REFERENCED_TABLE_NAME IS NOT NULL"), params).all()
     need(all(r[4] == schema for r in fks), "Cross-schema foreign key detected.")
     need(sorted(tuple(r[:4]) for r in fks) == d.foreign_keys, "Target foreign keys differ from the reviewed source definition.")
@@ -244,7 +249,8 @@ def main():
         if isinstance(exc, RehearsalError):
             print("STOP: " + str(exc), file=sys.stderr)
         else:
-            code = getattr(getattr(exc, "orig", None), "args", (None,))[0]
+            args = getattr(getattr(exc, "orig", None), "args", ())
+            code = args[0] if args else None
             print(f"STOP: {type(exc).__name__}; driver code {code if isinstance(code, int) else 'not available'}. Credentials and raw SQL errors omitted.", file=sys.stderr)
         print("Previously created empty tables may remain; do not drop or import over them. Production was not accessed.", file=sys.stderr)
         return 1
