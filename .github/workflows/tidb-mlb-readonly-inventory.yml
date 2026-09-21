@@ -1,0 +1,79 @@
+name: MLB staging read-only inventory
+
+# Bounded SELECT-only inventory; no import, DDL, collection, or deployment.
+on:
+  push:
+    branches: [staging/tidb-free-hosting-2026-09-20]
+    paths: [.github/workflows/tidb-mlb-readonly-inventory.yml]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tidb-staging-schema-and-import
+  cancel-in-progress: false
+
+jobs:
+  inventory:
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/staging/tidb-free-hosting-2026-09-20'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: tidb-staging
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --disable-pip-version-check 'PyMySQL>=1.1.1,<2'
+      - name: Inspect only MLB staging metadata and exact counts
+        env:
+          TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
+          TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
+          TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
+        run: |
+          python -u - <<'PY'
+          import hashlib
+          import json
+          from pathlib import Path
+          path = Path('tools/tidb_mlb_nfl_import.py')
+          if hashlib.sha256(path.read_bytes()).hexdigest() != '58b40b0ca5a23cc1dcdbc10fae79f7744727262fdf45c5bff62a5ee8168d21c6':
+              raise SystemExit('STOP: expected connection helper changed.')
+          from tools import tidb_mlb_nfl_import as helper
+          tables = ('analytics_dirty_venue', 'event', 'iterations', 'section_bucket_summary',
+                    'section_summary_state', 'team_report_summary', 'tickets')
+          c = None
+          try:
+              c = helper.connect_staging('mlb')
+              with c.cursor() as cursor:
+                  cursor.execute('SELECT DATABASE(), VERSION()')
+                  selected, version = cursor.fetchone()
+                  if selected != 'ticketsignal_staging_mlb' or 'tidb' not in str(version).lower():
+                      raise helper.Stop('Wrong staging target.')
+                  cursor.execute('SELECT TABLE_NAME, TABLE_TYPE, DATA_LENGTH, INDEX_LENGTH FROM information_schema.tables WHERE table_schema=%s', (selected,))
+                  metadata = cursor.fetchall()
+                  if {r[0] for r in metadata} != set(tables) or any(r[1] != 'BASE TABLE' for r in metadata):
+                      raise helper.Stop('Unexpected or missing MLB staging tables.')
+                  result = {'schema': selected, 'mode': 'read-only', 'rows_written': 0, 'tables': {}}
+                  for name in tables:
+                      cursor.execute('SELECT COUNT(*) FROM `' + name + '`')
+                      count = int(cursor.fetchone()[0])
+                      result['tables'][name] = count
+                      print(name + ': ' + format(count, ',') + ' rows')
+                  result['total_rows'] = sum(result['tables'].values())
+                  result['estimated_table_and_index_bytes'] = sum(int(r[2] or 0) + int(r[3] or 0) for r in metadata)
+                  print('INVENTORY_REPORT ' + json.dumps(result, sort_keys=True))
+                  print('PASS: MLB staging inventory only. No imports, writes, or production/NFL/NHL access.')
+          except Exception as error:
+              code = error.args[0] if error.args and isinstance(error.args[0], int) else None
+              detail = str(error) if isinstance(error, helper.Stop) else type(error).__name__
+              print('STOP: ' + detail + '; database_code=' + str(code))
+              raise SystemExit(1)
+          finally:
+              if c is not None:
+                  try:
+                      c.close()
+                  except Exception:
+                      pass
+          PY
