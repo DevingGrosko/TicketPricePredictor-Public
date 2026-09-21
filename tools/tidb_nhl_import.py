@@ -363,7 +363,7 @@ def insert_batch(connection, table: Table, rows: list) -> None:
         with connection.cursor() as cursor:
             count = cursor.executemany(sql, rows)
             require(count == len(rows), 'Inserted row count mismatch.')
-            cursor.execute('SHOW WARNINGS LIMIT 1')
+            cursor.execute('SHOW WARNINGS')
             require(cursor.fetchone() is None, 'Server warning: stopped rather than accepting a conversion.')
         connection.commit()
     except BaseException:
