@@ -1,0 +1,145 @@
+name: TiDB NHL warning-query regression
+
+# Staging only. No exports, production access, DDL, or committed synthetic data.
+on:
+  push:
+    branches: [staging/tidb-free-hosting-2026-09-20]
+    paths:
+      - .github/workflows/tidb-nhl-warning-smoke.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tidb-staging-schema-and-import
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/staging/tidb-free-hosting-2026-09-20'
+    environment: tidb-staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - name: Install connection-test dependencies
+        run: python -m pip install --disable-pip-version-check 'SQLAlchemy>=2,<3' 'PyMySQL>=1.1.1,<2'
+      - name: Offline importer tests without credentials
+        run: python -m unittest discover -s tests -p 'test_tidb_nhl_import*.py' -v
+      - name: Reproduce old query and test fixed batch without committing rows
+        env:
+          TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
+          TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
+          TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
+        run: |
+          python -u - <<'PY'
+          from datetime import datetime
+          import hashlib
+          from pathlib import Path
+          import pymysql
+          from tools import tidb_nhl_import as imp
+          from tools.tidb_schema_rehearsal import parse_definitions
+
+          class ProbeReachedCommit(Exception):
+              pass
+
+          class RollbackOnlyConnection:
+              # The importer receives a real cursor but cannot commit its test row.
+              def __init__(self, connection, expected):
+                  self.connection = connection
+                  self.expected = expected
+              def begin(self):
+                  return self.connection.begin()
+              def cursor(self):
+                  return self.connection.cursor()
+              def rollback(self):
+                  return self.connection.rollback()
+              def commit(self):
+                  got = imp.all_rows(self.connection,
+                      'SELECT venue,revision,dirty,updated_at FROM analytics_dirty_venue')
+                  imp.require(list(got) == self.expected, 'Synthetic inserted values differed.')
+                  raise ProbeReachedCommit()
+
+          stage = 'configuration'
+          connection = None
+          try:
+              definitions = parse_definitions(Path('tools/tidb_staging_schema.sql').read_bytes())['nhl']
+              tables = [imp.Table(d.name, d.columns, d.indexes, d.foreign_keys, d.auto_increment, []) for d in definitions]
+              imp.require(imp.SCHEMA == 'ticketsignal_staging_nhl', 'Unexpected target.')
+              stage = 'verified TLS connection'
+              connection = imp.connect_staging()
+              stage = 'unchanged importer metadata checks'
+              imp.check_target(connection, tables)
+              print('PASS: importer authentication and complete NHL schema checks.')
+              def counts():
+                  return {t.name: int(imp.all_rows(connection, f'SELECT COUNT(*) FROM `{t.name}`')[0][0]) for t in tables}
+              before = counts()
+              for name, count in before.items():
+                  print(f'BEFORE {name}: {count} committed rows')
+              imp.require(not any(before.values()), 'Target is not empty; no synthetic probe will run.')
+              connection.rollback()
+              stage = 'same session settings as the importer'
+              with connection.cursor() as cursor:
+                  cursor.execute("SET SESSION sql_mode='STRICT_TRANS_TABLES,NO_AUTO_VALUE_ON_ZERO,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION'")
+                  cursor.execute("SET SESSION time_zone='+00:00'")
+                  cursor.execute("SET SESSION tidb_txn_mode='pessimistic'")
+              connection.commit()
+              print('PASS: all three importer session settings.')
+              stage = 'read-only reproduction of original warning query'
+              with connection.cursor() as cursor:
+                  try:
+                      cursor.execute('SHOW WARNINGS LIMIT 1')
+                  except pymysql.err.ProgrammingError as error:
+                      imp.require(error.args[0] == 1064, 'Unexpected error from old query.')
+                      print('REPRODUCED: SHOW WARNINGS LIMIT 1 returns database code 1064.')
+                  else:
+                      raise imp.Stop('Original query did not reproduce the reported error.')
+              connection.rollback()
+              stage = 'fixed insert and warning check with forced rollback'
+              table = next(t for t in tables if t.name == 'analytics_dirty_venue')
+              row = ('NHL-import-warning-probe', 1, 0, datetime(2026, 9, 20, 12, 34, 56, 123456))
+              try:
+                  imp.insert_batch(RollbackOnlyConnection(connection, [row]), table, [row])
+              except ProbeReachedCommit:
+                  print('PASS: real INSERT, plain SHOW WARNINGS and exact readback; commit intercepted and rolled back.')
+              else:
+                  raise imp.Stop('Probe did not reach the expected commit boundary.')
+              imp.require(not any(counts().values()), 'Rollback left unexpected rows.')
+              connection.rollback()
+              stage = 'real conversion-warning rejection and rollback'
+              with connection.cursor() as cursor:
+                  cursor.execute("SET SESSION sql_mode=''")
+              connection.commit()
+              bad_row = (row[0], 2147483648, 0, row[3])
+              try:
+                  imp.insert_batch(RollbackOnlyConnection(connection, [bad_row]), table, [bad_row])
+              except imp.Stop as error:
+                  imp.require(str(error) == 'Server warning: stopped rather than accepting a conversion.',
+                              'Warning probe failed for another reason.')
+                  print('PASS: genuine conversion warning detected; batch rolled back, not committed.')
+              else:
+                  raise imp.Stop('A conversion warning was not rejected.')
+              stage = 'final committed-row counts'
+              after = counts()
+              imp.require(after == before, 'Final row counts differ from the empty baseline.')
+              for name, count in after.items():
+                  print(f'AFTER {name}: {count} committed rows')
+              print('Importer SHA256: ' + hashlib.sha256(Path('tools/tidb_nhl_import.py').read_bytes()).hexdigest())
+              print('PASS: failure reproduced and warning-check fix validated on TiDB. No historical data imported or synthetic rows committed. No PythonAnywhere access.')
+          except Exception as error:
+              code = error.args[0] if error.args and isinstance(error.args[0], int) else None
+              detail = str(error) if isinstance(error, imp.Stop) else type(error).__name__
+              print(f'STOP at {stage}: {detail}; database_code={code}')
+              raise SystemExit(1)
+          finally:
+              if connection is not None:
+                  try:
+                      connection.rollback()
+                  finally:
+                      connection.close()
+          PY
