@@ -1,0 +1,55 @@
+name: MLB initial-copy tests
+
+# No staging environment or credentials. MySQL is disposable synthetic test data.
+on:
+  push:
+    branches: [staging/tidb-free-hosting-2026-09-20]
+    paths:
+      - .github/workflows/tidb-mlb-initial-copy-tests.yml
+      - tools/tidb_mlb_initial_copy.py
+      - tests/test_tidb_mlb_initial_copy.py
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/staging/tidb-free-hosting-2026-09-20'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ephemeral-test-only
+          MYSQL_DATABASE: importer_test
+        ports: [3306:3306]
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 --silent"
+          --health-interval=5s --health-timeout=5s --health-retries=30
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --disable-pip-version-check 'PyMySQL[rsa]>=1.1.1,<2'
+      - name: Test copy control flow and unchanged SQL driver helpers
+        env:
+          SPORTS_IMPORT_TEST_MYSQL: '1'
+        run: |
+          python -m unittest discover -s tests -p 'test_tidb_mlb_initial_copy.py' -v
+          python -m unittest discover -s tests -p 'test_tidb_mlb_nfl_import.py' -v
+          python - <<'PY'
+          import hashlib
+          from pathlib import Path
+          from tools import tidb_mlb_initial_copy as copy
+          helper = copy.load_helper()
+          assert helper.schema_for(copy.SPORT) == 'ticketsignal_staging_mlb'
+          assert tuple(copy.EXPECTED_ROWS) == helper.SPECS['mlb']['tables']
+          assert sum(copy.EXPECTED_ROWS.values()) == 6062765
+          for name in ('tidb_mlb_initial_copy.py', 'tidb_mlb_nfl_import.py'):
+              print(name + ' SHA256: ' + hashlib.sha256((Path('tools') / name).read_bytes()).hexdigest())
+          print('PASS: 17 orchestration tests and 36 original helper tests; pinned helper loaded; no live staging access.')
+          PY
