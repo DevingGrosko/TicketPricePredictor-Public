@@ -1,0 +1,52 @@
+{
+  "sport": "mlb",
+  "schema": "ticketsignal_staging_mlb",
+  "gzip_sha256": "06c22d54401a78e078d3aa5472815e070a48f4b135f8523400eec33830a1389f",
+  "sql_sha256": "f7621c8a692de8ea7736e1f00619917623ed076557f312f1aa76908372445fea",
+  "ddl_sha256": "fffc0abaa69caecffcfc32c68644b5da4c2e339c12e05dba96a4a06c35abaad3",
+  "total_rows": 6062765,
+  "tables": [
+    {
+      "name": "analytics_dirty_venue",
+      "rows": 11,
+      "canonical_sha256": "63f1ccc5a8d21baee8b13cb7e32b8efca4f5fdc39595f5d559f8ec8d935e8c80",
+      "ddl": "CREATE TABLE `analytics_dirty_venue` (\n  `venue` varchar(300) NOT NULL,\n  `revision` int NOT NULL,\n  `dirty` tinyint(1) NOT NULL,\n  `updated_at` datetime(6) NOT NULL,\n  PRIMARY KEY (`venue`),\n  KEY `ix_analytics_dirty_venue_dirty` (`dirty`,`updated_at`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;"
+    },
+    {
+      "name": "event",
+      "rows": 310,
+      "canonical_sha256": "b859176359050aefa62b4a66e0672ffdee8632505daf1880e7a98069e8c82a11",
+      "ddl": "CREATE TABLE `event` (\n  `id` int NOT NULL AUTO_INCREMENT,\n  `title` varchar(700) NOT NULL,\n  `event_date` datetime(6) NOT NULL,\n  `event_sections` json NOT NULL,\n  `URL` varchar(700) DEFAULT NULL,\n  `Place` varchar(300) DEFAULT NULL,\n  PRIMARY KEY (`id`)\n) ENGINE=InnoDB AUTO_INCREMENT=313 DEFAULT CHARSET=utf8mb3;"
+    },
+    {
+      "name": "iterations",
+      "rows": 39879,
+      "canonical_sha256": "2eb266055415a458e7b85205d208944871b9f7a79703180090c07e05bde06b97",
+      "ddl": "CREATE TABLE `iterations` (\n  `id` int NOT NULL AUTO_INCREMENT,\n  `event_id` int NOT NULL,\n  `captured_at` datetime(6) NOT NULL,\n  PRIMARY KEY (`id`),\n  KEY `event_id` (`event_id`),\n  CONSTRAINT `iterations_ibfk_1` FOREIGN KEY (`event_id`) REFERENCES `event` (`id`)\n) ENGINE=InnoDB AUTO_INCREMENT=40496 DEFAULT CHARSET=utf8mb3;"
+    },
+    {
+      "name": "section_bucket_summary",
+      "rows": 286418,
+      "canonical_sha256": "48859e84a36c91dea60c80e9b6f12817b4a280257b14f716ed165f72c5b2efdc",
+      "ddl": "CREATE TABLE `section_bucket_summary` (\n  `event_id` int NOT NULL,\n  `section_key` varchar(600) NOT NULL,\n  `bucket_slot` int NOT NULL,\n  `section_name` varchar(300) NOT NULL,\n  `median_price` float NOT NULL,\n  `observation_count` int NOT NULL,\n  `first_captured_at` datetime(6) NOT NULL,\n  `last_captured_at` datetime(6) NOT NULL,\n  `refreshed_at` datetime(6) NOT NULL,\n  PRIMARY KEY (`event_id`,`section_key`,`bucket_slot`),\n  KEY `ix_section_bucket_summary_event` (`event_id`),\n  KEY `ix_section_bucket_summary_key_event` (`section_key`,`event_id`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;"
+    },
+    {
+      "name": "section_summary_state",
+      "rows": 303,
+      "canonical_sha256": "e974e2513cbba94c6f17fe6ff4e4f8b77aa8fe2282177231ac056abfd471f192",
+      "ddl": "CREATE TABLE `section_summary_state` (\n  `event_id` int NOT NULL AUTO_INCREMENT,\n  `summary_version` int NOT NULL,\n  `event_signature` varchar(64) NOT NULL,\n  `source_iteration_id` int DEFAULT NULL,\n  `source_iteration_count` int NOT NULL,\n  `complete` tinyint(1) NOT NULL,\n  `refreshed_at` datetime(6) NOT NULL,\n  PRIMARY KEY (`event_id`)\n) ENGINE=InnoDB AUTO_INCREMENT=313 DEFAULT CHARSET=utf8mb3;"
+    },
+    {
+      "name": "team_report_summary",
+      "rows": 10,
+      "canonical_sha256": "9d4455214dc647a031b3b767e9a3d8af81af54240cde9a80acf7046e0f289a92",
+      "ddl": "CREATE TABLE `team_report_summary` (\n  `sport` varchar(16) NOT NULL,\n  `venue` varchar(191) NOT NULL,\n  `season` int NOT NULL,\n  `summary_version` int NOT NULL,\n  `source_revision` int NOT NULL,\n  `payload` json NOT NULL,\n  `refreshed_at` datetime NOT NULL,\n  PRIMARY KEY (`sport`,`venue`,`season`)\n) ENGINE=InnoDB DEFAULT CHARSET=utf8mb3;"
+    },
+    {
+      "name": "tickets",
+      "rows": 5735834,
+      "canonical_sha256": "3a1e8f526483856b43f23db225283369304874608cb7a49772796246cb4f81e8",
+      "ddl": "CREATE TABLE `tickets` (\n  `id` int NOT NULL AUTO_INCREMENT,\n  `section` varchar(300) NOT NULL,\n  `price` int NOT NULL,\n  `ticketsPerSection` int DEFAULT NULL,\n  `iteration_id` int NOT NULL,\n  PRIMARY KEY (`id`),\n  KEY `iteration_id` (`iteration_id`),\n  CONSTRAINT `tickets_ibfk_1` FOREIGN KEY (`iteration_id`) REFERENCES `iterations` (`id`)\n) ENGINE=InnoDB AUTO_INCREMENT=5759850 DEFAULT CHARSET=utf8mb3;"
+    }
+  ]
+}
