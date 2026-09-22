@@ -1,0 +1,43 @@
+name: MLB staging read-only snapshot verification
+
+# No raw exports, production credentials, imports, synthetic writes, or deploys.
+# The largest reviewed table is buffered on a standard public-repository runner.
+on:
+  push:
+    branches: [staging/tidb-free-hosting-2026-09-20]
+    paths:
+      - .github/workflows/tidb-mlb-readonly-verify.yml
+      - tools/tidb_mlb_readonly_verify.py
+      - tools/tidb_mlb_expected_snapshot.json
+      - tests/test_tidb_mlb_readonly_verify.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tidb-staging-schema-and-import
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/staging/tidb-free-hosting-2026-09-20'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: tidb-staging
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - name: Install only the database client
+        run: python -m pip install --disable-pip-version-check 'PyMySQL>=1.1.1,<2'
+      - name: Credential-free verifier tests
+        run: python -m unittest discover -s tests -p 'test_tidb_mlb_readonly_verify.py' -v
+      - name: Read MLB staging and compare every-field fingerprints with the pinned source
+        env:
+          TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
+          TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
+          TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
+        run: python -u -m tools.tidb_mlb_readonly_verify
