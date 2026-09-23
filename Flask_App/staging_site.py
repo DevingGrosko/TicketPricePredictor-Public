@@ -13,7 +13,8 @@ BANNER = (
     '<div id="ticketsignal-staging-banner" role="status" '
     'style="padding:12px;text-align:center;background:#fff3cd;color:#332701;font:14px sans-serif">'
     'STAGING PREVIEW — saved September 21 snapshots; not live prices. '
-    'Read-only: price ingestion and concerts are not enabled here.'</n    '</div>'
+    'Read-only: price ingestion and concerts are not enabled here.'
+    '</div>'
 )
 
 
@@ -31,7 +32,6 @@ def install_preview(app):
             return jsonify(status='not_migrated', message='Concert history is not available in this sports-only preview.'), 503
         return None
 
-    # Run before the original app's request handlers, including ingestion hooks.
     app.before_request_funcs.setdefault(None, []).insert(0, protect_snapshot)
 
     @app.after_request
@@ -47,7 +47,6 @@ def install_preview(app):
 
     @app.get('/healthz')
     def staging_health():
-        # Process health only: frequent host probes must not consume database RUs.
         return jsonify(status='ok', environment='staging-readonly')
 
     @app.get('/readyz')
@@ -68,7 +67,6 @@ def install_preview(app):
 
 
 def create_app():
-    # Fail before importing any original app code when configuration is unsafe.
     settings.validate_environment(website=True)
     os.environ.setdefault('MPLBACKEND', 'Agg')
     app = importlib.import_module('Flask_App.flask_app').app
