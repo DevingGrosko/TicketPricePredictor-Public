@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="theme-color" content="#102b24">
+  <link rel="icon" href="data:,">
+  <title>TicketSignal | Static preview</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <div class="preview-note"><strong>STATIC PREVIEW</strong> Historical snapshots only. Live price collection is not connected.</div>
+  <header><a class="brand" href="./"><span class="brand-mark">TS</span>TicketSignal</a><nav aria-label="Sport"><button data-sport="mlb" aria-pressed="true">MLB</button><button data-sport="nfl" aria-pressed="false">NFL</button><button data-sport="nhl" aria-pressed="false">NHL</button></nav><span class="static-badge">Precomputed data</span></header>
+  <main>
+    <section class="hero"><p class="eyebrow" id="sport-label">MLB · PRICE INTELLIGENCE</p><h1>Read the market.<br><em>Not a loading screen.</em></h1><p class="lede">Explore team reports and recorded game prices. Calculations run before publication, not while you browse.</p><div class="freshness"><span id="data-time">Loading snapshot metadata…</span><span id="build-time"></span></div></section>
+    <p id="status" role="status" aria-live="polite">Loading the static preview…</p>
+    <section id="directory" aria-labelledby="directory-heading"><div class="section-title"><div><p class="eyebrow">TEAM DIRECTORY</p><h2 id="directory-heading">Choose a team.</h2></div><p id="totals"></p></div><label class="search-label" for="team-search">Find a team or venue</label><input id="team-search" type="search" placeholder="Search teams and venues…" autocomplete="off"><div class="team-grid" id="teams"></div><p id="no-teams" hidden>No eligible team reports match this search. Preseason and excluded history do not appear here.</p></section>
+    <section id="detail" hidden aria-labelledby="detail-heading"><button class="back" id="back">← All teams</button><p class="eyebrow" id="detail-venue"></p><h2 id="detail-heading"></h2><p id="detail-meta"></p>
+      <div class="ranking-grid"><article class="ranking-card"><h3>Lowest comparable prices</h3><p class="muted">Fixed-window evidence with the existing sample thresholds.</p><ol id="cheap"></ol></article><article class="ranking-card"><h3>Largest historical declines</h3><p class="muted">Median maximum decline across qualifying completed games.</p><ol id="drops"></ol></article></div>
+      <div class="view-tabs" role="group" aria-label="Analysis"><button data-view="report" aria-pressed="true">Section report</button><button data-view="game" aria-pressed="false">Single-game history</button></div>
+      <article class="chart-card">
+        <div id="report-controls" class="controls"><label for="report-section">Section<select id="report-section"></select></label></div>
+        <div id="game-controls" class="controls" hidden><label for="game">Game<select id="game"></select></label><label for="game-section">Section<select id="game-section"></select></label></div>
+        <div class="chart-top"><div><h3 id="chart-title">Select a section</h3><p id="chart-method" class="muted"></p></div><label for="display">Display<select id="display"><option value="money">Listed price</option><option value="percent">Relative price</option></select></label></div>
+        <div class="plot"><svg id="chart" viewBox="0 0 900 410" role="img" tabindex="0" aria-label="Ticket price history"></svg></div>
+        <output id="chart-tooltip" aria-live="polite">Move over the chart or use the arrow keys to inspect a point.</output>
+        <div class="chart-foot"><p id="chart-sample"></p><p id="window"></p></div>
+      </article>
+      <p class="method-note">Game charts show the stored observations for the selected provider label. Section reports reuse the existing per-game time-window and ranking rules. Missing windows are not interpolated; teams sharing a stadium, separate venues and currencies remain separate.</p>
+    </section>
+  </main>
+  <footer><strong>TicketSignal / static staging</strong><p>Historical listing prices are not guaranteed future prices. This first static preview does not yet replace all legacy tools: seating maps, legacy multi-game tools and concerts are not included. PythonAnywhere remains the production site.</p></footer>
+  <noscript><p>This preview needs JavaScript to load its published chart files. It does not need a live Python server.</p></noscript>
+</body>
+</html>
