@@ -1,0 +1,60 @@
+# A NEW static preview. Do not replace or edit the existing Flask Blueprint.
+# No running Python service, database, disk, cron or paid compute is created.
+# TiDB credentials are build-only inputs; only static-preview-dist is public.
+services:
+  - type: web
+    runtime: static
+    name: ticketsignal-static-preview
+    branch: staging/tidb-free-hosting-2026-09-20
+    autoDeployTrigger: "off"
+    buildCommand: >-
+      pip install --disable-pip-version-check -r requirements-staging.txt &&
+      python -u -m tools.build_static_preview --output static-preview-dist &&
+      python -m tools.check_static_preview static-preview-dist
+    staticPublishPath: ./static-preview-dist
+    envVars:
+      - key: SKIP_INSTALL_DEPS
+        value: "true"
+      - key: TICKETSIGNAL_STAGING_SITE
+        value: "1"
+      - key: TIDB_STAGING_HOST
+        sync: false
+      - key: TIDB_STAGING_USERNAME
+        sync: false
+      - key: TIDB_STAGING_PASSWORD
+        sync: false
+      - key: MPLBACKEND
+        value: Agg
+      - key: MPLCONFIGDIR
+        value: /tmp/ticketsignal-static-matplotlib
+    headers:
+      - path: /*
+        name: X-Robots-Tag
+        value: noindex, nofollow
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
+      - path: /*
+        name: Referrer-Policy
+        value: no-referrer
+      - path: /*
+        name: Content-Security-Policy
+        value: "default-src 'self'; script-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+      - path: /data/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+      - path: /manifest.json
+        name: Cache-Control
+        value: no-cache
+      - path: /index.html
+        name: Cache-Control
+        value: no-cache
+      - path: /
+        name: Cache-Control
+        value: no-cache
+      - path: /app.js
+        name: Cache-Control
+        value: no-cache
+      - path: /styles.css
+        name: Cache-Control
+        value: no-cache
