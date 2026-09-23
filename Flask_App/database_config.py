@@ -39,13 +39,26 @@ _ENGINE_LOCK = RLock()
 _MYSQL_ENGINES: dict[str, Engine] = {}
 
 
+def _staging_site_enabled() -> bool:
+    # No import or behavior change on the normal production path.
+    value = os.environ.get("TICKETSIGNAL_STAGING_SITE", "").strip()
+    if value not in {"", "0", "1"}:
+        raise RuntimeError("TICKETSIGNAL_STAGING_SITE must be 0 or 1.")
+    return value == "1"
+
+
 def _load_environment() -> None:
-    load_dotenv(ENV_PATH, override=False)
+    if not _staging_site_enabled():
+        load_dotenv(ENV_PATH, override=False)
 
 
 def configured_backend() -> str:
-    """Return the selected production backend (``sqlite`` or ``mysql``)."""
+    """Return the selected backend; opt-in staging retains the MySQL dialect."""
 
+    if _staging_site_enabled():
+        from Flask_App.staging_site_config import validate_environment
+        validate_environment()
+        return "mysql"
     _load_environment()
     backend = os.getenv(_BACKEND_ENV, "sqlite").strip().casefold() or "sqlite"
     if backend not in {"sqlite", "mysql"}:
@@ -71,6 +84,9 @@ def _mysql_password() -> str:
 def mysql_url(sport_key: str) -> URL:
     """Build a SQLAlchemy URL without interpolating or logging the password."""
 
+    if _staging_site_enabled():
+        from Flask_App.staging_site_config import validate_environment
+        return validate_environment().url(sport_key.strip().casefold())
     _load_environment()
     sport = sport_key.strip().casefold()
     database_env = _DATABASE_ENV.get(sport)
@@ -106,6 +122,9 @@ def create_mysql_engine(sport_key: str) -> Engine:
     """Return one pooled MySQL engine per sport in the current process."""
 
     sport = sport_key.strip().casefold()
+    if _staging_site_enabled():
+        from Flask_App.staging_site_config import engine_for
+        return engine_for(sport)
     with _ENGINE_LOCK:
         existing = _MYSQL_ENGINES.get(sport)
         if existing is not None:
@@ -135,6 +154,10 @@ def create_ticket_engine(
 ) -> Engine:
     """Create the selected engine while preserving explicit SQLite test paths."""
 
+    if _staging_site_enabled():
+        if force_sqlite:
+            raise RuntimeError("SQLite overrides are disabled in the staging website.")
+        return create_mysql_engine(sport_key)
     path = Path(sqlite_path).expanduser().resolve()
     if force_sqlite or configured_backend() == "sqlite":
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -183,6 +206,8 @@ def end_migration_pause() -> None:
 def update_backend_setting(backend: str) -> None:
     """Safely replace only the backend selector in the server-owned .env."""
 
+    if _staging_site_enabled():
+        raise RuntimeError("The staging website may not rewrite backend settings.")
     normalized = backend.strip().casefold()
     if normalized not in {"sqlite", "mysql"}:
         raise ValueError("backend must be sqlite or mysql")
@@ -212,3 +237,6 @@ def clear_mysql_engine_cache() -> None:
         _MYSQL_ENGINES.clear()
     for engine in engines:
         engine.dispose()
+    if _staging_site_enabled():
+        from Flask_App.staging_site_config import clear_engines
+        clear_engines()
