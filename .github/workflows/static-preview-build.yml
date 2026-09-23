@@ -1,0 +1,104 @@
+name: Static sports snapshot preview
+
+on:
+  push:
+    branches: [staging/tidb-free-hosting-2026-09-20]
+    paths:
+      - .github/workflows/static-preview-build.yml
+      - static_preview/**
+      - tools/build_static_preview.py
+      - tools/check_static_preview.py
+      - tests/test_static_preview.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: static-sports-preview-build
+  cancel-in-progress: false
+
+jobs:
+  offline:
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/staging/tidb-free-hosting-2026-09-20'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --disable-pip-version-check -r requirements-staging.txt
+      - run: |
+          python -m py_compile tools/build_static_preview.py tools/check_static_preview.py
+          node --check static_preview/app.js
+          python -m unittest discover -s tests -p 'test_static_preview.py' -v
+      - name: Full regression suite without live credentials
+        run: |
+          set +e
+          python -m unittest discover -s tests -v > "$RUNNER_TEMP/static-regression.log" 2>&1
+          code=$?
+          tail -n 45 "$RUNNER_TEMP/static-regression.log"
+          exit "$code"
+
+  snapshot:
+    needs: offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: tidb-staging
+    concurrency:
+      group: tidb-staging-schema-and-import
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --disable-pip-version-check -r requirements-staging.txt
+      - name: Read staging snapshots and precompute static output
+        env:
+          TICKETSIGNAL_STAGING_SITE: '1'
+          TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
+          TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
+          TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
+        run: |
+          set -euo pipefail
+          python -u -m tools.build_static_preview --output static-preview-dist | tee "$RUNNER_TEMP/static-build.log"
+      - name: Validate every static file and reference without credentials
+        run: python -u -m tools.check_static_preview static-preview-dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ticketsignal-static-snapshot
+          path: static-preview-dist/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 6
+
+  browser:
+    needs: snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --disable-pip-version-check 'selenium==4.26.1'
+      - uses: actions/download-artifact@v8
+        with:
+          name: ticketsignal-static-snapshot
+          path: static-preview-dist
+      - name: Actual Chrome interactions against a plain static server
+        run: python -u -m tools.check_static_preview static-preview-dist --browser --screenshots static-browser-shots
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: static-preview-browser-screenshots
+          path: static-browser-shots/
+          if-no-files-found: warn
+          retention-days: 7
