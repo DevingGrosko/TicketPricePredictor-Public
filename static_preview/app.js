@@ -32,7 +32,7 @@ async function loadSport(sport, reportId) {
   state.sport = sport; state.index = null; state.report = state.game = state.series = null;
   $('detail').hidden = true; $('directory').hidden = false; $('teams').replaceChildren(); $('team-search').value = '';
   document.body.dataset.sport = sport;
-  document.querySelectorAll('[data-sport]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.sport === sport)));
+  document.querySelectorAll('button[data-sport]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.sport === sport)));
   $('sport-label').textContent = sport.toUpperCase() + ' · PRICE INTELLIGENCE';
   status('Loading the published ' + sport.toUpperCase() + ' directory…');
   try {
@@ -105,7 +105,7 @@ async function loadGame() {
     if (!entry) { clearChart('No game data.'); status(''); return; }
     const game = await data(entry.file); if (version !== state.version) return;
     state.game = game;
-    options($('game-section'), game.sections, s => s.key, s => s.name + ' · ' + s.points + ' points');
+    options($('game-section'), game.sections, s => s.key, s => s.name + ' · ' + s.points + (s.points === 1 ? ' point' : ' points'));
     await loadSeries();
   } catch(error) { if (version === state.version) status(error.message, true); }
 }
@@ -144,7 +144,7 @@ function drawCurrent() {
   if (percentOption.disabled) $('display').value = 'money';
   const relative = $('display').value === 'percent';
   const values = relative ? y.map(p => roundEven(100 * p / y[0])) : y;
-  draw(x, values, relative ? v => v.toFixed(0) + '%' : v => money(v,currency));
+  draw(x, values, relative ? v => v.toFixed(1) + '%' : v => money(v,currency));
 }
 function draw(x, y, format) {
   const svg = $('chart'); svg.replaceChildren();
@@ -153,9 +153,10 @@ function draw(x, y, format) {
   function node(tag, attrs, value) { const e=document.createElementNS(ns,tag); Object.entries(attrs).forEach(([k,v])=>e.setAttribute(k,String(v))); if(value!==undefined)e.textContent=value; svg.append(e); return e; }
   let xmin=Infinity,xmax=-Infinity,ymin=Infinity,ymax=-Infinity;
   x.forEach(v=>{xmin=Math.min(xmin,v);xmax=Math.max(xmax,v);}); y.forEach(v=>{ymin=Math.min(ymin,v);ymax=Math.max(ymax,v);});
+  if (xmin === xmax) { xmin = Math.max(0, xmin - 1); xmax += 1; }
   const pad=Math.max((ymax-ymin)*.12,1); ymin=Math.max(0,ymin-pad); ymax+=pad;
   const sx=v=>86+(xmax-v)/(xmax-xmin||1)*778, sy=v=>340-(v-ymin)/(ymax-ymin||1)*305;
-  for(let i=0;i<5;i++){ const v=ymin+(ymax-ymin)*i/4; node('line',{x1:86,x2:864,y1:sy(v),y2:sy(v),class:'grid'}); node('text',{x:76,y:sy(v)+4,'text-anchor':'end'},format(v)); const h=xmax-(xmax-xmin)*i/4; node('text',{x:sx(h),y:372,'text-anchor':'middle'},Math.round(h)+'h'); }
+  for(let i=0;i<5;i++){ const v=ymin+(ymax-ymin)*i/4; node('line',{x1:86,x2:864,y1:sy(v),y2:sy(v),class:'grid'}); node('text',{x:76,y:sy(v)+4,'text-anchor':'end'},format(v)); const h=xmax-(xmax-xmin)*i/4; node('text',{x:sx(h),y:372,'text-anchor':'middle'},h.toFixed(1)+'h'); }
   node('text',{x:480,y:402,'text-anchor':'middle'},'Hours before the event →');
   node('polyline',{points:x.map((v,i)=>sx(v).toFixed(2)+','+sy(y[i]).toFixed(2)).join(' '),class:'curve'});
   const point=node('circle',{cx:sx(x[0]),cy:sy(y[0]),r:5,class:'point'});
@@ -166,10 +167,16 @@ function draw(x, y, format) {
   svg.setAttribute('aria-label',`${$('chart-title').textContent}; ${x.length} points. Use left and right arrow keys to inspect prices.`);
   inspect(0);
 }
-document.querySelectorAll('[data-sport]').forEach(b=>b.addEventListener('click',()=>loadSport(b.dataset.sport)));
+document.querySelectorAll('button[data-sport]').forEach(b=>b.addEventListener('click',()=>loadSport(b.dataset.sport)));
 document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>changeView(b.dataset.view)));
 $('team-search').addEventListener('input',directory);
 $('back').addEventListener('click',()=>{++state.version;$('detail').hidden=true;$('directory').hidden=false;status('');history.replaceState(null,'','#sport='+state.sport);});
 $('report-section').addEventListener('change',drawCurrent);$('display').addEventListener('change',drawCurrent);
 $('game').addEventListener('change',loadGame);$('game-section').addEventListener('change',loadSeries);
-(async()=>{try{const response=await fetch('manifest.json',{cache:'no-cache'});if(!response.ok)throw new Error('No published snapshot is available yet.');manifest=await response.json();if(manifest.version!==1||manifest.mode!=='historical-snapshot-preview'||manifest.live_updates_enabled!==false)throw new Error('Unsupported publication manifest.');const params=new URLSearchParams(location.hash.slice(1));await loadSport(['mlb','nfl','nhl'].includes(params.get('sport'))?params.get('sport'):'mlb',params.get('report'));}catch(error){status(error.message,true);}})();
+function navigateHash() {
+  if (!manifest) return;
+  const params = new URLSearchParams(location.hash.slice(1));
+  return loadSport(['mlb','nfl','nhl'].includes(params.get('sport')) ? params.get('sport') : 'mlb', params.get('report'));
+}
+window.addEventListener('hashchange', navigateHash);
+(async()=>{try{const response=await fetch('manifest.json',{cache:'no-cache'});if(!response.ok)throw new Error('No published snapshot is available yet.');manifest=await response.json();if(manifest.version!==1||manifest.mode!=='historical-snapshot-preview'||manifest.live_updates_enabled!==false)throw new Error('Unsupported publication manifest.');await navigateHash();}catch(error){status(error.message,true);}})();
