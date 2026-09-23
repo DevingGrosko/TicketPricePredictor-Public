@@ -11,13 +11,13 @@ from pathlib import Path
 import re
 from threading import RLock
 
-from sqlalchemy import event
-from Flask_App.tidb_staging import SCHEMAS, StagingTiDBConfig, create_staging_engine
+from sqlalchemy import create_engine, event
+from Flask_App.tidb_staging import SCHEMAS, StagingTiDBConfig
 
 FLAG = 'TICKETSIGNAL_STAGING_SITE'
 _LOCK = RLock()
 _ENGINES = {}
-BLOCKED_SQL = []  # Statement verbs only, never query values or credentials.
+BLOCKED_SQL = []
 _DANGEROUS = re.compile(
     r';|/\*|--|#|:=|\b(?:INTO|OUTFILE|DUMPFILE|FOR\s+UPDATE|FOR\s+SHARE|'
     r'LOCK\s+IN\s+SHARE|GET_LOCK|RELEASE_LOCK|SLEEP|BENCHMARK|LOAD_FILE|NEXTVAL)\b', re.I
@@ -48,8 +48,6 @@ def validate_environment(*, website=False) -> StagingTiDBConfig:
     ) and os.environ[k]]
     if forbidden:
         raise RuntimeError('Remove production/local database settings from the isolated preview: ' + ', '.join(sorted(forbidden)))
-    # flask_app currently calls load_dotenv(override=True). Refuse any .env it
-    # could discover, rather than letting a copied production file win later.
     root = Path(__file__).resolve().parent
     if any((p / '.env').exists() for p in (root, *root.parents)):
         raise RuntimeError('Staging preview must run in a clean checkout without a discoverable .env.')
@@ -62,7 +60,8 @@ def require_read_sql(statement: str) -> None:
     sql = statement.strip()
     if not re.match(r'\A(?:SELECT|SHOW|DESCRIBE)\s', sql, re.I) or _DANGEROUS.search(sql):
         verb = re.match(r'[A-Za-z]+', sql)
-        BLOCKED_SQL.append(verb[0].upper() if verb else 'OTHER')
+        if len(BLOCKED_SQL) < 100:
+            BLOCKED_SQL.append(verb[0].upper() if verb else 'OTHER')
         raise StagingReadOnlyError('The staging preview permits database reads only.')
 
 
@@ -80,7 +79,16 @@ def engine_for(sport: str):
         raise ValueError('Staging website supports the three verified sports only.')
     with _LOCK:
         if sport not in _ENGINES:
-            engine = create_staging_engine(sport, config=config)
+            # Existing GraphBuilder methods nest independent ORM sessions.
+            # The single-connection import pool would block those requests.
+            # Three connections and one web worker bound the preview resource use.
+            engine = create_engine(
+                config.url(sport), pool_pre_ping=True, pool_recycle=240,
+                pool_size=3, max_overflow=0, pool_timeout=20,
+                echo=False, hide_parameters=True,
+                connect_args={'ssl': config.tls_context(), 'connect_timeout':10,
+                              'read_timeout':90, 'write_timeout':90},
+            )
             schema = SCHEMAS[sport]
 
             @event.listens_for(engine, 'connect')
