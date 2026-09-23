@@ -1,0 +1,61 @@
+name: Render preview public HTTPS checks
+
+# No schedule, secrets, deployment action, database client, or write requests.
+# The exact public preview URL and GET-only route scope are fixed in the helper.
+on:
+  push:
+    branches: [staging/tidb-free-hosting-2026-09-20]
+    paths:
+      - .github/workflows/render-preview-http-check.yml
+      - tools/render_preview_http_check.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ticketsignal-render-public-readonly-check
+  cancel-in-progress: false
+
+jobs:
+  public-https:
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/staging/tidb-free-hosting-2026-09-20'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - name: Check URL boundary and HTML parsing without network access
+        run: |
+          python -m py_compile tools/render_preview_http_check.py
+          python - <<'PY'
+          from tools import render_preview_http_check as m
+          for bad in ('https://bunnyjeff.pythonanywhere.com/', '//evil.example/', '/api/analytics/backfill', '/static/../.env', '/static/%2e%2e/config'):
+              try:
+                  m.target_url(bad)
+              except m.CheckError:
+                  pass
+              else:
+                  raise AssertionError('Unsafe path accepted')
+          for good in ('/', '/healthz', '/graph?event=A&game=1', '/static/js/graph.js?v=1'):
+              assert m.target_url(good).startswith(m.BASE + '/')
+          page = m.Page('<body><div id="ticketsignal-staging-banner"></div><select id="game-place"><option value="">Pick</option><option value="A &amp; B">X</option></select><a href="/baseball/stadium?team=A&amp;venue=B">A</a><script class="interactive-chart__data" type="application/json">{"x":[1,2],"y":[4,5]}</script><script src="/static/js/graph.js?v=1"></script></body>')
+          assert page.banner and page.options['game-place'] == ['A & B']
+          assert page.links == ['/baseball/stadium?team=A&venue=B']
+          assert page.assets == ['/static/js/graph.js?v=1']
+          assert m.validate_chart(page) == 2
+          for payload in ({'x': [], 'y': []}, {'x': [1], 'y': [1,2]}, {'x': [1], 'y': ['bad']}):
+              page.charts = [payload]
+              try:
+                  m.validate_chart(page)
+              except m.CheckError:
+                  pass
+              else:
+                  raise AssertionError('Invalid chart accepted')
+          print('PASS: offline URL-scope, HTML parsing and chart-value checks.')
+          PY
+      - name: Test public preview health, data, assets and representative reports
+        run: python -u -m tools.render_preview_http_check
