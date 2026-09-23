@@ -1,0 +1,75 @@
+name: TiDB read-only Flask preview validation
+
+on:
+  push:
+    branches: [staging/tidb-free-hosting-2026-09-20]
+    paths:
+      - .github/workflows/tidb-staging-flask.yml
+      - Flask_App/database_config.py
+      - Flask_App/staging_site_config.py
+      - Flask_App/staging_site.py
+      - Flask_App/staging_wsgi.py
+      - tests/test_staging_site.py
+      - tools/staging_flask_smoke.py
+      - requirements-staging.txt
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tidb-staging-flask-readonly
+  cancel-in-progress: false
+
+jobs:
+  offline:
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/staging/tidb-free-hosting-2026-09-20'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --disable-pip-version-check -r requirements-staging.txt
+      - name: Isolated preview boundary tests
+        run: python -m unittest discover -s tests -p 'test_staging_site.py' -v
+      - name: Original application and staging regression tests without live secrets
+        run: |
+          set +e
+          python -m unittest discover -s tests -v > "$RUNNER_TEMP/ticketsignal-tests.log" 2>&1
+          code=$?
+          tail -n 70 "$RUNNER_TEMP/ticketsignal-tests.log"
+          exit "$code"
+
+  live-readonly:
+    needs: offline
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/staging/tidb-free-hosting-2026-09-20'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: tidb-staging
+    concurrency:
+      group: tidb-staging-schema-and-import
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --disable-pip-version-check -r requirements-staging.txt
+      - name: Exercise actual Flask pages through read-only staging engines
+        env:
+          TICKETSIGNAL_STAGING_SITE: '1'
+          TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
+          TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
+          TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
+        run: |
+          python -u - <<'PY'
+          import os, secrets
+          os.environ['FLASK_SECRET_KEY'] = secrets.token_urlsafe(32)
+          from tools.staging_flask_smoke import main
+          raise SystemExit(main())
+          PY
