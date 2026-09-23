@@ -1,0 +1,28 @@
+# Creates one independent preview web service, not a production replacement.
+# No Render database, persistent disk, worker, paid plan, or cron is requested.
+services:
+  - type: web
+    name: ticketsignal-staging-preview
+    runtime: python
+    plan: free
+    region: virginia
+    branch: staging/tidb-free-hosting-2026-09-20
+    autoDeployTrigger: "off"
+    buildCommand: pip install -r requirements-staging.txt
+    startCommand: gunicorn --workers 1 --threads 1 --timeout 120 --bind 0.0.0.0:$PORT Flask_App.staging_wsgi:app
+    healthCheckPath: /healthz
+    envVars:
+      - key: TICKETSIGNAL_STAGING_SITE
+        value: "1"
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+      - key: TIDB_STAGING_HOST
+        sync: false
+      - key: TIDB_STAGING_USERNAME
+        sync: false
+      - key: TIDB_STAGING_PASSWORD
+        sync: false
+      - key: MPLBACKEND
+        value: Agg
+      - key: MPLCONFIGDIR
+        value: /tmp/ticketsignal-matplotlib
