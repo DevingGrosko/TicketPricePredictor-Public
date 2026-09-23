@@ -1,14 +1,37 @@
 """Synthetic SQLite regression tests; no staging credentials or network."""
 from datetime import datetime, timedelta
+import importlib.util
+from pathlib import Path
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
-import graph_builder as graphs
-from models import Base, Event, Iteration, Ticket
-from tools.staging_graph_benchmark import legacy_series
+from models import Base, Event, Iteration, Ticket, hours_before_event
+
+# Collector-only tests install a lightweight graph_builder stub during import.
+# Load this implementation under a private name without replacing that stub or
+# changing the modules seen by other tests in full-suite discovery.
+_spec = importlib.util.spec_from_file_location(
+    '_graph_scalar_test_impl', Path(__file__).resolve().parents[1] / 'graph_builder.py')
+graphs = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(graphs)
+
+
+def legacy_series(self, section, event_id):
+    SessionLocal = graphs.CreateModel().getSession()
+    x, y = [], []
+    with SessionLocal() as session:
+        tickets = (session.query(Ticket).join(Ticket.iteration).join(Iteration.event)
+            .filter(Ticket.section == section, Event.id == event_id,
+                    Event.URL.like('%--sports-mlb-baseball/%'))
+            .order_by(Iteration.captured_at.asc()).all())
+        for ticket in tickets:
+            x.append(round(hours_before_event(ticket.iteration.event.event_date,
+                                              ticket.iteration.captured_at), 3))
+            y.append(ticket.price)
+    return x, y
 
 
 class ScalarGraphReadsTests(unittest.TestCase):
