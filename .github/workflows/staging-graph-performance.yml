@@ -1,0 +1,71 @@
+name: Staging graph query performance
+
+on:
+  push:
+    branches: [staging/tidb-free-hosting-2026-09-20]
+    paths:
+      - .github/workflows/staging-graph-performance.yml
+      - graph_builder.py
+      - tools/staging_graph_benchmark.py
+      - tests/test_graph_scalar_reads.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-graph-performance
+  cancel-in-progress: false
+
+jobs:
+  offline:
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/staging/tidb-free-hosting-2026-09-20'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --disable-pip-version-check -r requirements-staging.txt
+      - name: Verify graph values and query counts without network credentials
+        run: python -m unittest discover -s tests -p 'test_graph_scalar_reads.py' -v
+      - name: Full regression suite without live credentials
+        run: |
+          set +e
+          python -m unittest discover -s tests -v > "$RUNNER_TEMP/regression.log" 2>&1
+          code=$?
+          tail -n 75 "$RUNNER_TEMP/regression.log"
+          exit "$code"
+
+  live-readonly:
+    needs: offline
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/staging/tidb-free-hosting-2026-09-20'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment: tidb-staging
+    concurrency:
+      group: tidb-staging-schema-and-import
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --disable-pip-version-check -r requirements-staging.txt
+      - name: Compare graph values and timings on isolated read-only TiDB snapshots
+        env:
+          TICKETSIGNAL_STAGING_SITE: '1'
+          TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
+          TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
+          TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
+        run: |
+          python -u - <<'PY'
+          import os, secrets
+          os.environ['FLASK_SECRET_KEY'] = secrets.token_urlsafe(32)
+          from tools.staging_graph_benchmark import main
+          raise SystemExit(main())
+          PY
