@@ -135,8 +135,7 @@ class GraphBuilder:
 
             usable_pairs = [
                 (hours_until, price)
-                for hours_until, price in zip(x_time, y_price)
-                if 0 < hours_until <= 96
+                for hours_until, price in zip(x_time, y_price) if 0 < hours_until <= 96
             ]
             if not usable_pairs:
                 return [], []
@@ -201,12 +200,17 @@ class GraphBuilder:
         return image_base64
 
     def eachEventGraphList(self, section, event_id):
+        """Read graph values together; do not lazily load each capture/event.
+
+        Keep the original joins, filters, time ordering and UTC/Eastern
+        conversion. Selecting only the three required scalar columns avoids
+        a separate relationship SELECT for every distinct capture timestamp.
+        """
         SessionLocal = CreateModel().getSession()
-        x = []
-        y = []
-        with SessionLocal() as s:
-            tickets = (
-                s.query(Ticket)
+        with SessionLocal() as session:
+            rows = (
+                session.query(Ticket.price, Iteration.captured_at, Event.event_date)
+                .select_from(Ticket)
                 .join(Ticket.iteration)
                 .join(Iteration.event)
                 .filter(
@@ -217,20 +221,10 @@ class GraphBuilder:
                 .order_by(Iteration.captured_at.asc())
                 .all()
             )
-
-            for ticket in tickets:
-                x.append(
-                    round(
-                        hours_before_event(
-                            ticket.iteration.event.event_date,
-                            ticket.iteration.captured_at,
-                        ),
-                        3,
-                    )
-                )
-                y.append(ticket.price)
-
-            return x, y
+        x = [round(hours_before_event(event_date, captured_at), 3)
+             for _price, captured_at, event_date in rows]
+        y = [price for price, _captured_at, _event_date in rows]
+        return x, y
 
 
 class ConcertGraphBuilder:
