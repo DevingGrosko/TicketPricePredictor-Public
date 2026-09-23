@@ -1,0 +1,78 @@
+name: Static preview browser acceptance
+
+on:
+  push:
+    branches: [staging/tidb-free-hosting-2026-09-20]
+    paths:
+      - .github/workflows/static-preview-browser.yml
+      - static_preview/**
+      - tools/check_static_preview.py
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: static-preview-browser-acceptance
+  cancel-in-progress: false
+
+jobs:
+  browser:
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/staging/tidb-free-hosting-2026-09-20'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: |
+          python -m pip install --disable-pip-version-check 'selenium==4.26.1'
+          node --check static_preview/app.js
+          python -m py_compile tools/check_static_preview.py
+          python -m unittest discover -s tests -p 'test_static_preview.py' -v
+      - name: Reuse the completed validated snapshot; do not access TiDB
+        uses: actions/download-artifact@v8
+        with:
+          name: ticketsignal-static-snapshot
+          run-id: 35807163830
+          github-token: ${{ github.token }}
+          path: static-preview-dist
+      - name: Apply the current static UI and test multi-point histories in Chrome
+        run: |
+          cp static_preview/index.html static_preview/app.js static_preview/styles.css static-preview-dist/
+          python -u - <<'PY'
+          import json
+          from pathlib import Path
+          from tools.check_static_preview import check_bundle, check_browser
+          root = Path('static-preview-dist').resolve()
+          manifest, samples, stats = check_bundle(root)
+          print('STATIC_FILES_VERIFIED ' + json.dumps(stats), flush=True)
+          for sample in samples:
+              index_file = next(s['file'] for s in manifest['sports'] if s['sport'] == sample['sport'])
+              index = json.loads((root / index_file).read_bytes())
+              report = next(r for r in index['reports'] if r['id'] == sample['report'])
+              payload = json.loads((root / report['file']).read_bytes())
+              candidates = [g for g in payload['games'] if g['section_count']]
+              chosen = max(candidates, key=lambda g: g['capture_count'])
+              sample['game'] = chosen['id']
+              print('BROWSER_SAMPLE ' + json.dumps({'sport': sample['sport'], 'capture_count': chosen['capture_count']}), flush=True)
+          report = check_browser(root, samples, 'static-browser-shots')
+          print('STATIC_BROWSER_REPORT ' + json.dumps(report), flush=True)
+          PY
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: static-preview-browser-screenshots
+          path: static-browser-shots/
+          if-no-files-found: warn
+          retention-days: 7
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ticketsignal-static-tested-preview
+          path: static-preview-dist/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 6
