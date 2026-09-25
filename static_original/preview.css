@@ -1,0 +1,4 @@
+/* Preview-only additions. The original production stylesheets are unchanged. */
+.static-snapshot-note {max-width:1180px;margin:12px auto 0;padding:8px 12px;border:1px solid #35464d;border-radius:6px;color:#bbc9cb;background:#112025;font:12px/1.5 "DM Sans",sans-serif;}
+body[data-static-pending] main {visibility:hidden;}
+@media (max-width:800px) {.static-snapshot-note {margin:10px 18px 0;}}
