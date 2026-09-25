@@ -157,14 +157,15 @@ def check_browser(samples):
                 'return state.report !== null && !document.getElementById("detail").hidden && !document.getElementById("status").textContent'))
             report_seconds = time.monotonic() - started
             started = time.monotonic()
+            browser.find_element(By.CSS_SELECTOR, '[data-view="game"]').click()
+            wait.until(lambda d: d.execute_script('return state.game !== null && !document.getElementById("status").textContent'))
             Select(browser.find_element(By.ID, 'game')).select_by_value(sample['game'])
             wait.until(lambda d: d.execute_script('return state.game !== null && state.game.id === arguments[0] && state.series !== null', sample['game']))
-            browser.find_element(By.CSS_SELECTOR, '[data-view="game"]').click()
             Select(browser.find_element(By.ID, 'game-section')).select_by_value(sample['section']['key'])
             wait.until(lambda d: d.execute_script('return state.series !== null && document.getElementById("chart-title").textContent === arguments[0] && document.querySelectorAll("#chart .curve").length === 1', sample['section']['name']))
             game_seconds = time.monotonic() - started
             actual = browser.execute_script('return {x:state.series.x, y:state.series.y}')
-            require(actual == sample['series'], 'Browser chart values differ from downloaded publication.')
+            require(actual == {k: sample['series'][k] for k in ('x', 'y')}, 'Browser chart values differ from downloaded publication.')
             if sample['series']['y'][0] != 0:
                 Select(browser.find_element(By.ID, 'display')).select_by_value('percent')
                 require('100.0%' in browser.find_element(By.ID, 'chart-tooltip').text, 'Relative view did not start at 100%.')
@@ -219,8 +220,11 @@ def check_browser(samples):
                                      'observed_compression': sorted(encodings), 'severe_console_errors': len(severe)}
         require(not severe, 'Browser logged a severe error: ' + (severe[0]['message'][:300] if severe else ''))
     except Exception:
-        browser.save_screenshot(str(OUTPUT / 'failure.png'))
-        REPORT['browser_diagnostic'] = {'status': browser.find_element(By.ID, 'status').text[:300]}
+        try:
+            browser.save_screenshot(str(OUTPUT / 'failure.png'))
+            REPORT['browser_diagnostic'] = {'status': browser.find_element(By.ID, 'status').text[:300]}
+        except Exception:
+            REPORT['browser_diagnostic'] = {'status': 'Diagnostic capture unavailable.'}
         raise
     finally:
         browser.quit()
