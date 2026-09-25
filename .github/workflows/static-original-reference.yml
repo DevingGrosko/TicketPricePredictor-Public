@@ -1,0 +1,84 @@
+name: Original interface reference
+on:
+  push:
+    branches: [staging/tidb-free-hosting-2026-09-20]
+    paths: [.github/workflows/static-original-reference.yml]
+permissions:
+  contents: read
+jobs:
+  reference:
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/staging/tidb-free-hosting-2026-09-20'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - name: Prepare source and offline build dependencies
+        run: |
+          mkdir -p reference-output/wheels
+          git archive HEAD > reference-output/source.tar
+          python -m pip download --only-binary=:all: --dest reference-output/wheels 'Flask>=3,<4' 'PyMySQL>=1.1,<2' 'selenium==4.26.1'
+          python -m pip install 'selenium==4.26.1'
+      - name: Capture existing landing pages without submitting forms
+        run: |
+          python -u - <<'PY'
+          import json, pathlib, shutil, time, urllib.request, urllib.parse
+          from selenium import webdriver
+          from selenium.webdriver.chrome.service import Service
+          root=pathlib.Path('reference-output'); base='https://bunnyjeff.pythonanywhere.com'
+          options=webdriver.ChromeOptions()
+          for arg in ['--headless=new','--no-sandbox','--disable-dev-shm-usage','--disable-background-networking','--window-size=1440,1100']:
+              options.add_argument(arg)
+          options.set_capability('goog:loggingPrefs', {'browser':'ALL','performance':'ALL'})
+          driver=webdriver.Chrome(service=Service(shutil.which('chromedriver')), options=options)
+          driver.set_page_load_timeout(75)
+          driver.execute_cdp_cmd('Network.enable', {})
+          driver.execute_cdp_cmd('Network.setBlockedURLs', {'urls':['*/api/collector/*','*/api/analytics/*','*tidbcloud*']})
+          report=[]; assets=set()
+          try:
+              for sport,path in [('mlb','/'),('nfl','/nfl'),('nhl','/nhl'),('concerts','/concerts')]:
+                  driver.set_window_size(1440,1100)
+                  begin=time.monotonic()
+                  try:
+                      driver.get(base+path)
+                      time.sleep(1)
+                      (root/(sport+'.html')).write_text(driver.page_source)
+                      driver.save_screenshot(str(root/(sport+'-desktop.png')))
+                      driver.set_window_size(390,844); time.sleep(.2)
+                      driver.save_screenshot(str(root/(sport+'-mobile.png')))
+                      for url in driver.execute_script('return [...document.querySelectorAll("link[href],script[src],img[src]")].map(x=>x.href||x.src)'):
+                          parsed=urllib.parse.urlsplit(url)
+                          if parsed.netloc=='bunnyjeff.pythonanywhere.com' and parsed.path.startswith('/static/') and '..' not in parsed.path: assets.add(url)
+                      report.append({'sport':sport,'url':driver.current_url,'seconds':round(time.monotonic()-begin,2),'title':driver.title})
+                  except Exception as exc:
+                      report.append({'sport':sport,'error':type(exc).__name__})
+              requests=[]
+              for record in driver.get_log('performance'):
+                  msg=json.loads(record['message'])['message']
+                  if msg.get('method')=='Network.requestWillBeSent':
+                      req=msg['params']['request']; requests.append({'method':req['method'],'url':req['url']})
+              (root/'requests.json').write_text(json.dumps(requests,indent=2))
+              if any(r['method'] not in ('GET','HEAD') for r in requests): raise RuntimeError('Unexpected non-read browser request')
+          finally: driver.quit()
+          for url in sorted(assets):
+              path=urllib.parse.urlsplit(url).path
+              try:
+                  with urllib.request.urlopen(url,timeout=25) as response: data=response.read(5_000_001)
+                  if len(data)>5_000_000: raise RuntimeError('asset exceeds bound')
+                  dest=root/'assets'/path.lstrip('/'); dest.parent.mkdir(parents=True,exist_ok=True); dest.write_bytes(data)
+              except Exception as exc: report.append({'asset':path,'error':type(exc).__name__})
+          (root/'reference.json').write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2))
+          print('Reference only: public landing-page GETs, no form submission, no deploy, no credentials, no collector changes.')
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: original-interface-reference
+          path: reference-output/
+          retention-days: 7
+          if-no-files-found: error
