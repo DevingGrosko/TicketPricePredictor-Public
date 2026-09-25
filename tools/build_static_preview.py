@@ -144,18 +144,20 @@ class Bundle:
                 'manifest_bytes': (self.root / 'manifest.json').stat().st_size}
 
 
-def read_sport(sport, spool, settings, event_utc):
+def read_sport(sport, spool, settings, event_utc, *, include_maps=False):
     """Copy required columns in one source transaction; stream ticket rows."""
     tables = SPORTS[sport]
     spool.execute('CREATE TABLE raw (id INTEGER PRIMARY KEY, event_id INTEGER NOT NULL, '
-                  'section TEXT NOT NULL, price INTEGER NOT NULL, hours REAL NOT NULL, captured TEXT NOT NULL)')
+                  'section TEXT NOT NULL, price INTEGER NOT NULL, hours REAL NOT NULL, captured TEXT NOT NULL'
+                  + (', listing_count INTEGER' if include_maps else '') + ')')
     engine = settings.engine_for(sport)
     with engine.connect() as source:
         # All statements after the driver's transaction start are SELECTs.
         isolation = str(source.exec_driver_sql('SELECT @@transaction_isolation').scalar_one())
         if isolation.replace('-', ' ').upper() != 'REPEATABLE READ':
             raise BuildError('Snapshot build requires repeatable-read isolation.')
-        raw_events = source.exec_driver_sql('SELECT ' + ','.join('`' + k + '`' for k in COLUMNS[sport])
+        columns = COLUMNS[sport] + (['map_geometry'] if include_maps and sport != 'mlb' else [])
+        raw_events = source.exec_driver_sql('SELECT ' + ','.join('`' + k + '`' for k in columns)
                                            + ' FROM `' + tables[0] + '`').mappings().all()
         events = {}
         for row in raw_events:
@@ -185,23 +187,25 @@ def read_sport(sport, spool, settings, event_utc):
             raise BuildError('Snapshot exceeds the initial build row budget.')
         total, batch = 0, []
         result = source.execution_options(stream_results=True).exec_driver_sql(
-            'SELECT id,iteration_id,section,price FROM `' + tables[2] + '`')
-        for rid, iid, section, price in result:
+            'SELECT id,iteration_id,section,price' + (',listing_count' if include_maps and sport != 'mlb' else '') + ' FROM `' + tables[2] + '`')
+        for row in result:
+            rid, iid, section, price = row[:4]
             if int(iid) not in iterations:
                 raise BuildError('Ticket references an unknown iteration.')
             eid, lead, captured = iterations[int(iid)]
             if not isinstance(section, str) or type(price) is not int:
                 raise BuildError('Unexpected ticket column types.')
-            batch.append((int(rid), eid, section, price, lead, captured))
+            batch.append((int(rid), eid, section, price, lead, captured) +
+                         ((row[4] if sport != 'mlb' else None,) if include_maps else ()))
             if len(batch) >= 10000:
-                spool.executemany('INSERT INTO raw VALUES (?,?,?,?,?,?)', batch)
+                spool.executemany('INSERT INTO raw VALUES (' + ','.join('?' for _ in range(7 if include_maps else 6)) + ')', batch)
                 total += len(batch)
                 batch.clear()
                 if total % 500000 == 0:
                     print(f'READ {sport}: {total:,}/{expected:,} ticket rows', flush=True)
         result.close()
         if batch:
-            spool.executemany('INSERT INTO raw VALUES (?,?,?,?,?,?)', batch)
+            spool.executemany('INSERT INTO raw VALUES (' + ','.join('?' for _ in range(7 if include_maps else 6)) + ')', batch)
             total += len(batch)
         if total != expected:
             raise BuildError('Source row count does not match the streamed snapshot.')
@@ -212,7 +216,7 @@ def read_sport(sport, spool, settings, event_utc):
     return events, latest, captures, {'games': len(events), 'captures': len(iterations), 'tickets': total}
 
 
-def build_sport(sport, spool, events, latest, captures, bundle, now, api):
+def build_sport(sport, spool, events, latest, captures, bundle, now, api, *, page_builder=None):
     """Use the existing pure report functions; never run a web request to build."""
     public, prepared, menu = {}, {}, {}
     canonical = api.section_identity
@@ -250,6 +254,14 @@ def build_sport(sport, spool, events, latest, captures, bundle, now, api):
             points = api._bucketed_game_prices(event, ((t, p) for t, p, _ in history), sport)
             if points:
                 prepared[(key, eid)] = [{**point, 'section_name': history[-1][2]} for point in points]
+                if page_builder is not None:
+                    times_by_slot = defaultdict(list)
+                    for captured, _, _ in history:
+                        times_by_slot[api._timeline_bucket_index(sport, api.hours_before_event(event.event_date, captured))].append(captured)
+                    for point in prepared[(key, eid)]:
+                        observed = times_by_slot[point['slot']]
+                        point['first_captured_at'] = min(observed) if observed else None
+                        point['last_captured_at'] = max(observed) if observed else None
         record = {'id': str(eid), 'sport': sport, 'title': event.title, 'venue': venue, 'team': team,
                   'currency': event.currency, 'event_at': api.event_datetime_utc(event.event_date).isoformat(),
                   'captured_through': utc_iso(latest[eid]), 'capture_count': captures[eid]}
@@ -296,6 +308,8 @@ def build_sport(sport, spool, events, latest, captures, bundle, now, api):
     index = {'sport': sport, 'reports': sorted(reports, key=lambda r: (r['team'], r['venue'])),
              'games': sorted(menu.values(), key=lambda g: g['event_at'], reverse=True)}
     path = bundle.blob('index', index)
+    if page_builder is not None:
+        page_builder(sport, spool, events, latest, captures, bundle, now, api, public, prepared, menu, index)
     print(f'BUILT {sport}: {len(menu)} eligible game histories, {len(reports)} reports', flush=True)
     return {'sport': sport, 'file': path, 'eligible_games': len(menu), 'reports': len(reports),
             'captured_through': utc_iso(max((v for v in latest.values() if v), default=None))}
