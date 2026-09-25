@@ -22,7 +22,6 @@ def validate(root):
         if hashlib.sha256((root/'static'/path).read_bytes()).hexdigest()!=expected:raise AssertionError('Original asset mismatch')
     for file in (root/'native').glob('data-*.json'):
         if hashlib.sha256(file.read_bytes()).hexdigest()!=file.stem[5:]:raise AssertionError('Native data hash mismatch')
-    # Bound all generated references, including section detail and map links.
     checked=set();missing=[]
     for file in root.rglob('*.html'):
         text=file.read_text()
@@ -68,6 +67,12 @@ def browser_check(root,output):
     def ready():
         wait.until(lambda d:d.find_element(By.TAG_NAME,'body').get_attribute('data-static-ready')=='true' or d.find_element(By.TAG_NAME,'body').get_attribute('data-static-error')=='true')
         if driver.find_element(By.TAG_NAME,'body').get_attribute('data-static-error')=='true':raise AssertionError(driver.find_element(By.TAG_NAME,'body').text[-1500:])
+    def click(element):
+        # The original CSS scrolls smoothly. Ensure visibility, then make a real
+        # WebDriver click rather than bypassing hit testing with a script click.
+        driver.execute_script("arguments[0].scrollIntoView({block:'center',behavior:'instant'})",element)
+        wait.until(lambda d:d.execute_script("const r=arguments[0].getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight+1",element))
+        element.click()
     try:
         for sport in ['mlb','nfl','nhl']:
             cat=data(manifest['sports'][sport]);entry=next(r for r in cat['reports'] if cat['sections'].get(r['id']))
@@ -79,15 +84,14 @@ def browser_check(root,output):
             assert not driver.execute_script('return document.documentElement.scrollWidth>innerWidth+1')
             driver.set_window_size(1440,1100)
             link=driver.find_element(By.CSS_SELECTOR,'.nfl-stadium-card[href="/reports/'+entry['id']+'.html"]')
-            link.click();ready()
+            click(link);ready()
             assert driver.find_elements(By.ID,'section-jump')
             driver.save_screenshot(str(out/(sport+'-report.png')))
             Select(driver.find_element(By.ID,'section-jump')).select_by_index(1)
-            driver.find_element(By.CSS_SELECTOR,'[data-section-jump-button]').click();ready()
+            click(driver.find_element(By.CSS_SELECTOR,'[data-section-jump-button]'));ready()
             assert driver.find_elements(By.ID,'venue-section-timeline-data')
             assert driver.find_elements(By.CSS_SELECTOR,'#section-games summary')
             driver.save_screenshot(str(out/(sport+'-section.png')))
-            # Exercise native homepage dependent selectors and form submission.
             usable=[]
             for group,path in cat['options'].items():
                 options=data(path)
@@ -99,27 +103,27 @@ def browser_check(root,output):
                 if usable:break
             assert usable,'No browser sample';_,group,game,section=max(usable,key=lambda x:x[0])
             driver.get(base+('/' if sport=='mlb' else '/'+sport+'/'));ready()
-            if sport=='mlb':driver.find_element(By.CSS_SELECTOR,'[data-target="game-panel"]').click()
+            if sport=='mlb':click(driver.find_element(By.CSS_SELECTOR,'[data-target="game-panel"]'))
             form=driver.find_element(By.CSS_SELECTOR,'#game-panel .selection-form' if sport=='mlb' else '.'+sport+'-selection-form')
             Select(form.find_element(By.CSS_SELECTOR,'.place-select')).select_by_value(group)
             wait.until(lambda d:len(form.find_elements(By.CSS_SELECTOR,'.game-select option'))>1)
             Select(form.find_element(By.CSS_SELECTOR,'.game-select')).select_by_value(game['id'])
             Select(form.find_element(By.CSS_SELECTOR,'.section-select')).select_by_value(section['name'])
-            start=time.monotonic();form.find_element(By.CSS_SELECTOR,'.submit-analysis').click();ready()
+            start=time.monotonic();click(form.find_element(By.CSS_SELECTOR,'.submit-analysis'));ready()
             assert driver.find_elements(By.CSS_SELECTOR,'.interactive-chart__line')
             actual=driver.execute_script('return window.__staticChart')
             expected=data(section['file'])['sections'][section['key']]
             assert actual['x']==expected['x'] and actual['y']==expected['y'],'Native chart changed published observations'
             driver.save_screenshot(str(out/(sport+'-graph.png')))
-            driver.find_element(By.CSS_SELECTOR,'.view-toggle' if sport=='mlb' else '.nfl-chart-actions a:last-child').click();ready()
+            click(driver.find_element(By.CSS_SELECTOR,'.view-toggle' if sport=='mlb' else '.nfl-chart-actions a:last-child'));ready()
             relative=driver.execute_script('return window.__staticChart');assert relative['display']=='percentage'
             expected_y=expected['y'] if expected['y'][0]==0 else [100]+[round((v/expected['y'][0])*100) for v in expected['y'][1:]]
             assert relative['y']==expected_y,'Relative normalization differs'
             if sport!='mlb':
-                driver.find_element(By.CSS_SELECTOR,'.nfl-chart-actions a:first-child').click();ready()
+                click(driver.find_element(By.CSS_SELECTOR,'.nfl-chart-actions a:first-child'));ready()
                 assert driver.find_elements(By.CSS_SELECTOR,'[data-stadium-map] path')
                 search=driver.find_element(By.CSS_SELECTOR,'[data-map-search]');search.send_keys(section['name'])
-                driver.find_element(By.CSS_SELECTOR,'[data-map-search-button]').click()
+                click(driver.find_element(By.CSS_SELECTOR,'[data-map-search-button]'))
                 wait.until(lambda d:d.find_element(By.CSS_SELECTOR,'[data-section-name]').text==section['name'])
                 assert driver.find_element(By.CSS_SELECTOR,'[data-section-history]').get_attribute('href')
                 driver.save_screenshot(str(out/(sport+'-map.png')))
