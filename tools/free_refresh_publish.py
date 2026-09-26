@@ -21,6 +21,7 @@ from tools.free_refresh_cache import SnapshotCache
 
 PREFIX = '/TicketPricePredictor-Public'
 CSP = "default-src 'self'; script-src 'self'; connect-src 'self'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src https://fonts.gstatic.com; img-src 'self' data:; object-src 'none'; base-uri 'self'"
+NAV_ATTRS = ('href','src','action','data-map-base','data-base-url','data-options-url','value')
 
 
 def replace_once(text, old, new):
@@ -45,7 +46,6 @@ def adapt_bridge(text):
     text = replace_once(text,'const api = url.pathname.match(','const api = logicalPath(url.pathname).match(')
     text = replace_once(text,"url.pathname.startsWith('/api/')","logicalPath(url.pathname).startsWith('/api/')")
     text = replace_once(text,"back.href = '/';","back.href = sitePath('/');")
-    # Rewrite only existing route transitions, not arbitrary data or calculations.
     for old,new in [
         ("location.replace('/reports/'+report.id+'.html')","navigate('/reports/'+report.id+'.html')"),
         ('location.replace(row.url)','navigate(row.url)'),
@@ -61,8 +61,6 @@ def mount_pages(root, *, scheduled=False):
     root = Path(root)
     bridge = root/'native/bridge.js'
     bridge.write_text(adapt_bridge(bridge.read_text()))
-    # These original form handlers contain hard-coded root navigation. Only
-    # published copies change; CSS, markup and chart calculations stay intact.
     expected_counts = {'script.js':3,'nfl.js':1,'nhl.js':1}
     for name,count in expected_counts.items():
         path = root/'static/js'/name
@@ -76,9 +74,9 @@ def mount_pages(root, *, scheduled=False):
     for path in assets:
         assets[path] = hashlib.sha256((root/'static'/path).read_bytes()).hexdigest()
     (root/'original-assets.json').write_bytes(source.encoded(assets))
-    # Every visible original link/form stays within the project site. Boot/data
-    # attributes remain logical root paths; the adapter resolves them safely.
-    attributes = re.compile(r'(?<![\w-])(href|src|action|data-map-base|data-options-url)="(/(?!/)[^"]*)"')
+    # Section-jump option values and data-base-url are navigation too. Only
+    # absolute root paths are changed; numeric game IDs and labels are untouched.
+    attributes = re.compile(r'(?<![\w-])('+'|'.join(NAV_ATTRS)+r')="(/(?!/)[^"]*)"')
     for path in root.rglob('*.html'):
         text = attributes.sub(lambda m:m[1]+'="'+PREFIX+m[2]+'"',path.read_text())
         text = text.replace('<head>','<head>\n<meta http-equiv="Content-Security-Policy" content="'+html.escape(CSP,quote=True)+'">',1)
@@ -99,6 +97,8 @@ def validate_mounted(root):
     root = Path(root).resolve(); count = total = 0
     seen = set()
     allowed = {'.html','.json','.js','.css','.txt','.svg','.png','.jpg','.jpeg','.webp','.ico'}
+    attrs = NAV_ATTRS+('data-static-json','data-original-script','data-static-boot')
+    pattern = re.compile(r'(?<![\w-])('+'|'.join(attrs)+r')="([^"]+)"')
     for path in root.rglob('*'):
         if path.is_symlink():
             raise source.BuildError('Symlinks are not allowed in public output')
@@ -109,12 +109,12 @@ def validate_mounted(root):
         if total > 700 * 1024**2:
             raise source.BuildError('Publication exceeds the free Pages safety budget')
         if path.suffix != '.html':continue
-        for key,value in re.findall(r'\b(href|src|action|data-static-json|data-original-script|data-static-boot|data-map-base)="([^"]+)"',path.read_text()):
+        for key,value in pattern.findall(path.read_text()):
             parts = urlsplit(html.unescape(value))
             if parts.netloc or parts.scheme or not parts.path.startswith('/'):continue
             raw = unquote(parts.path)
             if raw.startswith(PREFIX+'/'): raw = raw[len(PREFIX):]
-            elif key in ('href','src','action','data-map-base'):
+            elif key in NAV_ATTRS:
                 raise source.BuildError('Unprefixed public navigation target')
             if raw.startswith('/api/') or 'TSVALUE_' in raw:continue
             if raw in seen:continue
