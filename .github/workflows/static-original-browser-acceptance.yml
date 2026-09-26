@@ -1,0 +1,50 @@
+name: Original interface browser acceptance
+on:
+  push:
+    branches: [staging/tidb-free-hosting-2026-09-20]
+    paths: [.github/workflows/static-original-browser-acceptance.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  browser:
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/staging/tidb-free-hosting-2026-09-20'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - name: Check actual formatter and browser test syntax without secrets
+        run: |
+          node --check static_original/bridge.js
+          python -m unittest discover -s tests -p 'test_original_formatting.py' -v
+          pip install --disable-pip-version-check 'selenium==4.26.1'
+      - name: Reuse full completed build; no TiDB access
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: ticketsignal-original-static
+          run-id: 36259599269
+          github-token: ${{ github.token }}
+          path: original-static-dist
+      - name: Apply only the corrected display adapter, then rerun all original browser flows
+        run: |
+          cp static_original/bridge.js original-static-dist/native/bridge.js
+          python -u -m tools.check_original_static original-static-dist --browser --output original-browser-results
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: original-interface-browser-accepted
+          path: original-browser-results/
+          retention-days: 7
+          if-no-files-found: error
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ticketsignal-original-static-accepted
+          path: original-static-dist/
+          retention-days: 7
+          if-no-files-found: error
+          compression-level: 6
