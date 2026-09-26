@@ -17,8 +17,11 @@ class ProjectHandler(SimpleHTTPRequestHandler):
     def do_GET(self):
         if not urlsplit(self.path).path.startswith(PREFIX+'/'):
             self.send_error(404, 'Outside project mount'); return
-        self.path = self.path[len(PREFIX):]
+        # Keep the incoming URL intact so the standard directory-slash redirect
+        # includes the mount prefix, as a real Pages project does.
         super().do_GET()
+    def translate_path(self, path):
+        return super().translate_path(path[len(PREFIX):] if path.startswith(PREFIX+'/') else path)
 
 
 def check(root, output):
