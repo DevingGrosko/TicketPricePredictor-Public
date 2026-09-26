@@ -65,8 +65,17 @@ def browser_check(root,output):
     manifest=json.loads((root/'original-manifest.json').read_bytes())
     def data(path):return json.loads((root/path.lstrip('/')).read_bytes())
     def ready():
-        wait.until(lambda d:d.find_element(By.TAG_NAME,'body').get_attribute('data-static-ready')=='true' or d.find_element(By.TAG_NAME,'body').get_attribute('data-static-error')=='true')
-        if driver.find_element(By.TAG_NAME,'body').get_attribute('data-static-error')=='true':raise AssertionError(driver.find_element(By.TAG_NAME,'body').text[-1500:])
+        # Navigation can replace <body> between WebDriver calls. Read readiness
+        # atomically in page JavaScript so the test does not hold stale elements.
+        state=wait.until(lambda d:d.execute_script(
+            "const b=document.body;if(!b)return '';"
+            "if(b.dataset.staticError==='true')return 'error';"
+            "if(b.dataset.staticReady==='true')return 'ready';"
+            "return '';"
+        ))
+        if state=='error':
+            text=driver.execute_script("return document.body ? document.body.innerText : ''")
+            raise AssertionError(text[-1500:])
     def click(element):
         # The original CSS scrolls smoothly. Ensure visibility, then make a real
         # WebDriver click rather than bypassing hit testing with a script click.
