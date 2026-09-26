@@ -1,0 +1,84 @@
+name: Bounded original UI profile
+on:
+  push:
+    branches: [staging/tidb-free-hosting-2026-09-20]
+    paths: [.github/workflows/original-ui-profile.yml]
+permissions:
+  contents: read
+jobs:
+  profile:
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public'
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    environment: tidb-staging
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: pip install --disable-pip-version-check -r requirements-staging.txt
+      - name: Profile at most twenty section pages for one NFL team, read-only
+        env:
+          TICKETSIGNAL_STAGING_SITE: '1'
+          TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
+          TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
+          TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
+        run: |
+          python -u - <<'PY'
+          import cProfile, pstats, io, json, signal, sqlite3, tempfile, time
+          from pathlib import Path
+          from datetime import datetime, timezone
+          from tools import build_original_static as native
+          from tools import build_static_preview as source
+          from Flask_App import staging_site_config as settings
+          from Flask_App import nfl_stadium_blueprint as api
+          from models import event_datetime_utc
+          settings.validate_environment()
+          Path('profile-results').mkdir()
+          class ProfileLimit(Exception): pass
+          def expired(*args): raise ProfileLimit('150-second profile limit')
+          signal.signal(signal.SIGALRM, expired)
+          with tempfile.TemporaryDirectory() as work:
+              spool=sqlite3.connect(Path(work)/'nfl.sqlite')
+              spool.execute('PRAGMA journal_mode=OFF');spool.execute('PRAGMA synchronous=OFF')
+              events,latest,captures,counts=source.read_sport('nfl',spool,settings,event_datetime_utc,include_maps=True)
+              groups=api._report_groups(list(events.values()),'nfl')
+              cohort=None
+              for rows in groups.values():
+                  eligible,_=api.latest_season_events(rows,'nfl')
+                  if eligible and sum(len(e.sections or []) for e in eligible)>20:
+                      cohort=eligible;break
+              assert cohort,'No representative NFL cohort'
+              events={e.id:e for e in cohort};latest={i:latest[i] for i in events};captures={i:captures[i] for i in events}
+              print('PROFILE_TEAM',api._home_team_for_report(cohort[0],'nfl'),'games',len(events),flush=True)
+              now=datetime.now(timezone.utc);bundle=source.Bundle(Path(work)/'site');renderer=native.OriginalPages(bundle,now)
+              original_page=renderer.page;completed=[]
+              def page(*args,**kwargs):
+                  if str(args[0]).lstrip('/').startswith('sections/') and len(completed)>=20:raise ProfileLimit('20 section page limit')
+                  start=time.monotonic();result=original_page(*args,**kwargs)
+                  if str(args[0]).lstrip('/').startswith('sections/'):
+                      completed.append(time.monotonic()-start);print('SECTION_RENDER',len(completed),round(completed[-1],4),flush=True)
+                  return result
+              renderer.page=page
+              prof=cProfile.Profile();start=time.monotonic();reason='complete'
+              signal.alarm(150);prof.enable()
+              try:
+                  source.build_sport('nfl',spool,events,latest,captures,bundle,now,api,page_builder=renderer.render_sport)
+              except ProfileLimit as exc:reason=str(exc)
+              finally:
+                  prof.disable();signal.alarm(0);renderer.close();spool.close();settings.clear_engines()
+                  output=io.StringIO();pstats.Stats(prof,stream=output).strip_dirs().sort_stats('cumulative').print_stats(45)
+                  print(output.getvalue());Path('profile-results/profile.txt').write_text(output.getvalue())
+                  result={'team_games':len(events),'sections_profiled':len(completed),'section_render_seconds':completed,'seconds':time.monotonic()-start,'stop_reason':reason,'database_writes':0}
+                  print('PROFILE_RESULT',json.dumps(result));Path('profile-results/result.json').write_text(json.dumps(result,indent=2))
+          PY
+      - name: Save reviewed public source for local profiling and testing
+        run: git archive --format=zip HEAD -o profile-results/source.zip
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: original-ui-profile
+          path: profile-results/
+          retention-days: 3
