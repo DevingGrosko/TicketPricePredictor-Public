@@ -5,15 +5,17 @@ on:
     paths:
       - .github/workflows/static-original-build.yml
       - tools/build_original_static.py
+      - tools/build_original_fast.py
       - tools/build_static_preview.py
       - tools/check_original_static.py
       - static_original/**
       - tests/test_original_static.py
+      - tests/test_original_build_cache.py
 permissions:
   contents: read
 concurrency:
   group: static-original-interface
-  cancel-in-progress: false
+  cancel-in-progress: true
 jobs:
   offline:
     if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/staging/tidb-free-hosting-2026-09-20'
@@ -30,7 +32,7 @@ jobs:
       - name: Original template and data regression tests without secrets
         run: |
           node --check static_original/bridge.js
-          python -m py_compile tools/build_original_static.py tools/check_original_static.py
+          python -m py_compile tools/build_original_static.py tools/build_original_fast.py tools/check_original_static.py
           set +e
           python -m unittest discover -s tests -v > "$RUNNER_TEMP/original-tests.log" 2>&1
           code=$?
@@ -40,9 +42,11 @@ jobs:
         run: |
           python -u - <<'PY'
           import importlib.util
+          from tools.build_original_fast import cached_original_analysis
           spec=importlib.util.spec_from_file_location('fixture_module','tests/test_original_static.py')
           mod=importlib.util.module_from_spec(spec);spec.loader.exec_module(mod)
-          print(mod.fixture('original-synthetic-site'))
+          with cached_original_analysis():
+              print(mod.fixture('original-synthetic-site'))
           PY
           python -u -m tools.check_original_static original-synthetic-site --browser --output synthetic-browser-results
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -54,10 +58,7 @@ jobs:
   snapshot:
     needs: offline
     runs-on: ubuntu-latest
-    # Rendering the full legacy route surface (thousands of original-template
-    # pages) is intentionally heavier than the simplified preview. This is a
-    # staging acceptance run, not the eventual incremental publish cadence.
-    timeout-minutes: 60
+    timeout-minutes: 15
     environment: tidb-staging
     concurrency:
       group: tidb-staging-schema-and-import
@@ -78,7 +79,7 @@ jobs:
           TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
         run: |
           set -euo pipefail
-          python -u -m tools.build_original_static --output original-static-dist | tee "$RUNNER_TEMP/original-build.log"
+          python -u -m tools.build_original_fast --output original-static-dist | tee "$RUNNER_TEMP/original-build.log"
       - name: Validate every original-page link and published data file without secrets
         run: python -u -m tools.check_original_static original-static-dist
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
