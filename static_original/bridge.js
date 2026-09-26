@@ -64,6 +64,9 @@
     document.body.dataset.staticError = 'true';
   }
   const roundEven = x => { const a = Math.floor(x); return x-a === .5 ? a+(a%2) : Math.round(x); };
+  // Buying-window inputs are exact quarter-hours. Match the original Python
+  // %.1f formatting at ties (15.25 -> 15.2), rather than JS toFixed's 15.3.
+  const buyingWindowLabel = hours => (roundEven(Number(hours) * 10) / 10).toFixed(1);
   function substitute(values) {
     const replace = value => value.replace(/TSVALUE_([A-Za-z]+)/g, (_, key) => String(values[key] ?? ''));
     const walker = document.createTreeWalker(document.documentElement, NodeFilter.SHOW_TEXT);
@@ -139,7 +142,7 @@
     const payload=await read(directory[section]);
     if (payload.time === null) throw new Error('Not enough overlapping observations for a historical buying window.');
     substitute({place, section});
-    document.querySelector('.time-value strong').textContent=Number(payload.time).toFixed(1);
+    document.querySelector('.time-value strong').textContent=buyingWindowLabel(payload.time);
     document.querySelector('.confidence-row strong').textContent=payload.percentage.total+' game'+(payload.percentage.total===1?'':'s')+' analyzed';
   }
   function selectReport(c, params) {
