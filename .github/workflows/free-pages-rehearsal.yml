@@ -2,7 +2,12 @@ name: Free Pages publisher rehearsal
 on:
   push:
     branches: [feature/free-half-hour-publication]
-    paths: [.github/workflows/free-pages-rehearsal.yml]
+    paths:
+      - .github/workflows/free-pages-rehearsal.yml
+      - tools/free_refresh_publish.py
+      - tools/free_refresh_cache.py
+      - tools/check_free_pages.py
+      - tests/test_free_refresh_publish.py
 permissions:
   contents: read
 concurrency:
@@ -82,13 +87,14 @@ jobs:
           python -u -m tools.free_refresh_publish --output free-pages-dist --cache .free-refresh-cache
           python -u - <<'PY'
           import json, sqlite3
+          from contextlib import closing
           from pathlib import Path
           from models import event_datetime_utc
           from Flask_App import staging_site_config as settings
           from tools.free_refresh_cache import SnapshotCache
           reader=SnapshotCache('.free-refresh-cache')
           for sport in ('mlb','nfl','nhl'):
-              with sqlite3.connect(':memory:') as spool:
+              with closing(sqlite3.connect(':memory:')) as spool:
                   reader.read_sport(sport,spool,settings,event_datetime_utc,include_maps=True)
           assert all(value['ticket_rows_read_from_tidb']==0 for value in reader.metrics.values())
           print('SECOND_READ_NO_RAW_SCAN '+json.dumps(reader.metrics))
@@ -99,7 +105,7 @@ jobs:
           assert sample['captured_through']=='2026-09-26T23:30:00+00:00'
           assert len(record['sections'])==109
           assert all(section['points']==1 for section in record['sections'])
-          print('FRESH_CAPTURE_PUBLISHED '+json.dumps({'event_id':'30313','sections':len(record['sections']),'captured_through':sample['captured_through']}))
+          print('FRESH_CAPTURE_IN_BUILD '+json.dumps({'event_id':'30313','sections':len(record['sections']),'captured_through':sample['captured_through'],'deployed':False}))
           settings.clear_engines()
           PY
       - name: Exercise all sports on the complete mounted static build without credentials
