@@ -19,7 +19,9 @@ jobs:
         with:
           python-version: '3.13'
       - run: pip install --disable-pip-version-check -r requirements-staging.txt
-      - name: Profile at most twenty section pages for one NFL team, read-only
+      - name: Compare cached and original outputs before reading staging
+        run: python -m unittest discover -s tests -p 'test_original_build_cache.py' -v
+      - name: Profile the same twenty section pages for one NFL team, read-only
         env:
           TICKETSIGNAL_STAGING_SITE: '1'
           TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
@@ -32,6 +34,7 @@ jobs:
           from datetime import datetime, timezone
           from tools import build_original_static as native
           from tools import build_static_preview as source
+          from tools.build_original_fast import cached_original_analysis
           from Flask_App import staging_site_config as settings
           from Flask_App import nfl_stadium_blueprint as api
           from models import event_datetime_utc
@@ -52,7 +55,8 @@ jobs:
                       cohort=eligible;break
               assert cohort,'No representative NFL cohort'
               events={e.id:e for e in cohort};latest={i:latest[i] for i in events};captures={i:captures[i] for i in events}
-              print('PROFILE_TEAM',api._home_team_for_report(cohort[0],'nfl'),'games',len(events),flush=True)
+              team=api._home_team_for_report(cohort[0],'nfl')
+              print('PROFILE_TEAM',team,'games',len(events),flush=True)
               now=datetime.now(timezone.utc);bundle=source.Bundle(Path(work)/'site');renderer=native.OriginalPages(bundle,now)
               original_page=renderer.page;completed=[]
               def page(*args,**kwargs):
@@ -62,16 +66,20 @@ jobs:
                       completed.append(time.monotonic()-start);print('SECTION_RENDER',len(completed),round(completed[-1],4),flush=True)
                   return result
               renderer.page=page
-              prof=cProfile.Profile();start=time.monotonic();reason='complete'
+              prof=cProfile.Profile();start=time.monotonic();reason='complete';cache_counts={}
               signal.alarm(150);prof.enable()
               try:
-                  source.build_sport('nfl',spool,events,latest,captures,bundle,now,api,page_builder=renderer.render_sport)
+                  with cached_original_analysis() as caches:
+                      try:
+                          source.build_sport('nfl',spool,events,latest,captures,bundle,now,api,page_builder=renderer.render_sport)
+                      finally:
+                          cache_counts={k:{'hits':v.hits,'misses':v.misses} for k,v in caches.items() if hasattr(v,'hits')}
               except ProfileLimit as exc:reason=str(exc)
               finally:
                   prof.disable();signal.alarm(0);renderer.close();spool.close();settings.clear_engines()
                   output=io.StringIO();pstats.Stats(prof,stream=output).strip_dirs().sort_stats('cumulative').print_stats(45)
                   print(output.getvalue());Path('profile-results/profile.txt').write_text(output.getvalue())
-                  result={'team_games':len(events),'sections_profiled':len(completed),'section_render_seconds':completed,'seconds':time.monotonic()-start,'stop_reason':reason,'database_writes':0}
+                  result={'team':team,'team_games':len(events),'sections_profiled':len(completed),'section_render_seconds':completed,'seconds':time.monotonic()-start,'stop_reason':reason,'database_writes':0,'cache_counts':cache_counts}
                   print('PROFILE_RESULT',json.dumps(result));Path('profile-results/result.json').write_text(json.dumps(result,indent=2))
           PY
       - name: Save reviewed public source for local profiling and testing
