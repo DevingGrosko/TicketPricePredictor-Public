@@ -1,0 +1,47 @@
+name: Restored public static acceptance
+on:
+  push:
+    branches: [staging/tidb-free-hosting-2026-09-20]
+    paths:
+      - .github/workflows/public-original-ui-check.yml
+permissions:
+  contents: read
+concurrency:
+  group: public-original-ui-acceptance
+  cancel-in-progress: false
+jobs:
+  public-original:
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/staging/tidb-free-hosting-2026-09-20'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - name: Compile and check fixed-host boundaries without network
+        run: |
+          python -m py_compile tools/check_public_original_ui.py
+          python - <<'PY'
+          from tools.check_public_original_ui import fixed_url, BASE
+          assert fixed_url('/original-manifest.json') == BASE+'/original-manifest.json'
+          for bad in ('//example.com/a', 'https://example.com/a', '/api/nfl/options', '/static/../secrets', '/native/data-notahash.json'):
+              try:
+                  fixed_url(bad)
+              except AssertionError:
+                  continue
+              raise AssertionError('Unsafe path accepted')
+          print('Fixed-origin path checks passed.')
+          PY
+      - run: python -m pip install --disable-pip-version-check 'selenium==4.26.1'
+      - name: Test only the actual public static site and original Google Fonts
+        run: python -u -m tools.check_public_original_ui
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: always()
+        with:
+          name: public-original-ui-acceptance
+          path: public-original-results/
+          retention-days: 7
+          if-no-files-found: warn
