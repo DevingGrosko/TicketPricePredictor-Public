@@ -54,7 +54,10 @@ jobs:
   snapshot:
     needs: offline
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Rendering the full legacy route surface (thousands of original-template
+    # pages) is intentionally heavier than the simplified preview. This is a
+    # staging acceptance run, not the eventual incremental publish cadence.
+    timeout-minutes: 60
     environment: tidb-staging
     concurrency:
       group: tidb-staging-schema-and-import
