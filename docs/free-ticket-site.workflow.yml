@@ -1,0 +1,179 @@
+# INACTIVE TEMPLATE: this path is not a GitHub Actions workflow.
+# Install as .github/workflows/free-ticket-site.yml on main only after Pages
+# owner setup, zero-dollar billing guards, and first end-to-end acceptance.
+# Do not merge the feature branch's application/production changes into main.
+name: Free TicketSignal half-hour publication
+on:
+  schedule:
+    - cron: '17,47 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/workflows/free-ticket-site.yml]
+permissions:
+  contents: read
+concurrency:
+  group: ticketsignal-free-publication
+  cancel-in-progress: false
+# Replace this placeholder with the final reviewed, tested feature commit.
+env:
+  FREE_SOURCE_REF: REPLACE_WITH_VERIFIED_40_CHARACTER_COMMIT
+jobs:
+  ready:
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/main' && github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      pages: read
+      actions: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.FREE_SOURCE_REF }}
+          persist-credentials: false
+      - name: Require existing Pages workflow source and bounded repository storage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m tools.free_refresh_storage preflight
+  capture:
+    needs: ready
+    strategy:
+      fail-fast: false
+      matrix:
+        sport: [mlb, nfl, nhl]
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    environment: tidb-staging
+    concurrency:
+      group: free-refresh-staging-${{ matrix.sport }}-writer
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.FREE_SOURCE_REF }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: free-capture/${{ matrix.sport }}/pending
+          key: ticketsignal-free-v1-pending-${{ matrix.sport }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ticketsignal-free-v1-pending-${{ matrix.sport }}-
+      - run: python -m pip install --disable-pip-version-check -r requirements-staging.txt
+      - name: Capture and verify committed raw snapshots only in TiDB staging
+        env:
+          SPORT: ${{ matrix.sport }}
+          EVENT_KIND: ${{ github.event_name }}
+          TICKETSIGNAL_STAGING_SITE: '1'
+          TICKETSIGNAL_ENABLE_STAGING_WRITES: '1'
+          TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
+          TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
+          TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
+        run: |
+          extra=()
+          if [[ "$EVENT_KIND" != schedule ]]; then extra+=(--force); fi
+          python -u -m tools.free_refresh_cycle --sport "$SPORT" --directory "free-capture/$SPORT" "${extra[@]}"
+      - name: Bound pending queue storage
+        if: always()
+        env:
+          SPORT: ${{ matrix.sport }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          path=Path('free-capture')/os.environ['SPORT']/'pending'
+          size=sum(p.stat().st_size for p in path.rglob('*') if p.is_file())
+          assert size <= 20*1024**2, 'Pending queue exceeds the recovery safety budget'
+          PY
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        if: always()
+        with:
+          path: free-capture/${{ matrix.sport }}/pending
+          key: ticketsignal-free-v1-pending-${{ matrix.sport }}-${{ github.run_id }}-${{ github.run_attempt }}
+  build:
+    needs: capture
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: tidb-staging
+    permissions:
+      contents: read
+      actions: write
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.FREE_SOURCE_REF }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .free-refresh-cache
+          key: ticketsignal-free-v1-raw-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ticketsignal-free-v1-raw-
+      - run: python -m pip install --disable-pip-version-check -r requirements-staging.txt
+      - name: Read unseen captures and build the original UI on the free runner
+        env:
+          TICKETSIGNAL_STAGING_SITE: '1'
+          TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
+          TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
+          TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
+        run: python -u -m tools.free_refresh_publish --output free-pages-dist --cache .free-refresh-cache --scheduled
+      - name: Validate the mounted site without database credentials
+        run: python -u -m tools.check_free_pages free-pages-dist --output free-browser-results
+      - name: Limit the recoverable raw cache before persisting it
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          size=sum(p.stat().st_size for p in Path('.free-refresh-cache').rglob('*') if p.is_file())
+          assert size <= 1024**3, 'Raw cache exceeds the free pipeline safety budget'
+          PY
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .free-refresh-cache
+          key: ticketsignal-free-v1-raw-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Package public files only and reject excessive artifact storage
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tar -cf "$RUNNER_TEMP/artifact.tar" -C free-pages-dist .
+          python -m tools.free_refresh_storage before-upload --file "$RUNNER_TEMP/artifact.tar"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        id: upload
+        with:
+          name: ticketsignal-free-pages
+          path: ${{ runner.temp }}/artifact.tar
+          compression-level: 6
+          retention-days: 1
+          if-no-files-found: error
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+      actions: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.FREE_SOURCE_REF }}
+          persist-credentials: false
+      - uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e
+        id: deployment
+        with:
+          artifact_name: ticketsignal-free-pages
+      - name: Delete this run's temporary upload after deployment attempt
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ needs.build.outputs.artifact_id }}
+        run: python -m tools.free_refresh_storage remove-current --artifact-id "$ARTIFACT_ID"
