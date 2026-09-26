@@ -1,4 +1,5 @@
-# A NEW static preview. Do not replace or edit the existing Flask Blueprint.
+# Existing static preview: restore the original sports presentation.
+# No production or dynamic service, extra resource, or paid plan is changed.
 # No running Python service, database, disk, cron or paid compute is created.
 # TiDB credentials are build-only inputs; only static-preview-dist is public.
 services:
@@ -9,8 +10,8 @@ services:
     autoDeployTrigger: "off"
     buildCommand: >-
       pip install --disable-pip-version-check -r requirements-staging.txt &&
-      python -u -m tools.build_static_preview --output static-preview-dist &&
-      python -m tools.check_static_preview static-preview-dist
+      python -u -m tools.build_original_fast --output static-preview-dist &&
+      python -m tools.check_original_static static-preview-dist
     staticPublishPath: ./static-preview-dist
     envVars:
       - key: SKIP_INSTALL_DEPS
@@ -39,7 +40,7 @@ services:
         value: no-referrer
       - path: /*
         name: Content-Security-Policy
-        value: "default-src 'self'; script-src 'self'; connect-src 'self'; style-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+        value: "default-src 'self'; script-src 'self'; connect-src 'self'; style-src 'self' https://fonts.googleapis.com 'unsafe-inline'; font-src https://fonts.gstatic.com; img-src 'self' data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
       - path: /data/*
         name: Cache-Control
         value: public, max-age=31536000, immutable
@@ -56,5 +57,32 @@ services:
         name: Cache-Control
         value: no-cache
       - path: /styles.css
+        name: Cache-Control
+        value: no-cache
+      - path: /native/data-*.json
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+      - path: /native/script-*.js
+        name: Cache-Control
+        value: public, max-age=31536000, immutable
+      - path: /original-manifest.json
+        name: Cache-Control
+        value: no-cache
+      - path: /original-assets.json
+        name: Cache-Control
+        value: no-cache
+      - path: /native/bridge.js
+        name: Cache-Control
+        value: no-cache
+      - path: /native/preview.css
+        name: Cache-Control
+        value: no-cache
+      - path: /reports/*
+        name: Cache-Control
+        value: no-cache
+      - path: /sections/*
+        name: Cache-Control
+        value: no-cache
+      - path: /maps/*
         name: Cache-Control
         value: no-cache
