@@ -76,6 +76,7 @@ jobs:
           if [[ "$EVENT_KIND" != schedule ]]; then extra+=(--force); fi
           python -u -m tools.free_refresh_cycle --sport "$SPORT" --directory "free-capture/$SPORT" "${extra[@]}"
       - name: Bound pending queue storage
+        id: queue-budget
         if: always()
         env:
           SPORT: ${{ matrix.sport }}
@@ -88,7 +89,7 @@ jobs:
           assert size <= 20*1024**2, 'Pending queue exceeds the recovery safety budget'
           PY
       - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
-        if: always()
+        if: always() && steps.queue-budget.outcome == 'success'
         with:
           path: free-capture/${{ matrix.sport }}/pending
           key: ticketsignal-free-v1-pending-${{ matrix.sport }}-${{ github.run_id }}-${{ github.run_attempt }}
