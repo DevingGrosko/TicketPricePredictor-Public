@@ -21,7 +21,10 @@ def require(condition, message):
 
 
 def fixed_url(path):
-    require(isinstance(path, str) and path.startswith('/') and not path.startswith('//'), 'Invalid relative path')
+    # Catalogs use both /native/... and data/... references. Normalize only
+    # their optional leading slash, then apply the same strict allowlist.
+    require(isinstance(path, str) and bool(path) and not path.startswith('//'), 'Invalid relative path')
+    path = path if path.startswith('/') else '/'+path
     require('..' not in path and '%' not in path and '\\' not in path and '?' not in path and '#' not in path, 'Noncanonical data path')
     require(path in ('/original-manifest.json', '/original-assets.json', '/manifest.json') or
             re.fullmatch(r'/(?:native|data)/[a-z-]+[0-9a-f]{64}\.json', path) or
