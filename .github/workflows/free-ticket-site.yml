@@ -1,5 +1,5 @@
-# First public acceptance only. No recurring trigger or new capture is enabled.
-# Keep PythonAnywhere and Render unchanged. Only prepared static files are deployed.
+# Independent live-cycle acceptance. Recurrence is enabled only after this passes.
+# PythonAnywhere, Render, production collectors and historical rows are unchanged.
 name: Free TicketSignal publication
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ concurrency:
   group: ticketsignal-free-publication
   cancel-in-progress: false
 env:
-  FREE_SOURCE_REF: ad54b65c28bb0a54a3912542c658177042ce96a5
+  FREE_SOURCE_REF: 13cbb7ada8f1bff4114c40fd09ed8b2bc1ba8e12
 jobs:
   ready:
     if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/main' && github.event.repository.private == false
@@ -41,8 +41,85 @@ jobs:
           print('PAGES_PREFLIGHT '+json.dumps({'build_type':pages.get('build_type'),'url':pages.get('html_url'),'existing_artifact_bytes':existing}),flush=True)
           check_artifact_budget(existing,128*MB)
           PY
-  build:
+  capture:
     needs: ready
+    strategy:
+      fail-fast: false
+      matrix:
+        sport: [mlb, nfl, nhl]
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    environment: tidb-staging
+    concurrency:
+      group: free-refresh-staging-${{ matrix.sport }}-writer
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.FREE_SOURCE_REF }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: free-capture/${{ matrix.sport }}/pending
+          key: ticketsignal-free-v1-pending-${{ matrix.sport }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ticketsignal-free-v1-pending-${{ matrix.sport }}-
+      - run: python -m pip install --disable-pip-version-check -r requirements-staging.txt
+      - name: Capture current prices and verify committed snapshots in TiDB staging
+        env:
+          SPORT: ${{ matrix.sport }}
+          EVENT_KIND: ${{ github.event_name }}
+          TICKETSIGNAL_STAGING_SITE: '1'
+          TICKETSIGNAL_ENABLE_STAGING_WRITES: '1'
+          TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
+          TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
+          TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
+        run: |
+          extra=()
+          if [[ "$EVENT_KIND" != schedule ]]; then extra+=(--force); fi
+          python -u -m tools.free_refresh_cycle --sport "$SPORT" --directory "free-capture/$SPORT" "${extra[@]}"
+      - name: Summarize capture coverage without storing report artifacts
+        if: always()
+        env:
+          SPORT: ${{ matrix.sport }}
+        run: |
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          path=Path('free-capture')/os.environ['SPORT']/'health.json'
+          if path.exists():
+              value=json.loads(path.read_text())
+              keys=('status','event_type','capture_slot','started_at','scheduled_in_window','scheduled_due','discovered','captured','uploaded','queued','replayed','pending','failed','unresolved_count','coverage_percent','errors','uploads','reason')
+              report={k:value[k] for k in keys if k in value}
+              text=json.dumps(report,indent=2)
+              print('INDEPENDENT_CAPTURE_REPORT '+text)
+              with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as out:
+                  out.write('## '+os.environ['SPORT']+' independent collection\n```json\n'+text[:50000]+'\n```\n')
+          else:
+              print('INDEPENDENT_CAPTURE_REPORT unavailable; inspect the preceding failure')
+          PY
+      - name: Bound pending queue storage
+        id: queue-budget
+        if: always()
+        env:
+          SPORT: ${{ matrix.sport }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          path=Path('free-capture')/os.environ['SPORT']/'pending'
+          size=sum(p.stat().st_size for p in path.rglob('*') if p.is_file())
+          assert size <= 20*1024**2, 'Pending queue exceeds the recovery safety budget'
+          PY
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        if: always() && steps.queue-budget.outcome == 'success'
+        with:
+          path: free-capture/${{ matrix.sport }}/pending
+          key: ticketsignal-free-v1-pending-${{ matrix.sport }}-${{ github.run_id }}-${{ github.run_attempt }}
+  build:
+    needs: capture
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: tidb-staging
@@ -51,6 +128,7 @@ jobs:
       actions: write
     outputs:
       artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      generated_at: ${{ steps.build.outputs.generated_at }}
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
@@ -65,13 +143,25 @@ jobs:
           key: ticketsignal-free-v1-raw-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: ticketsignal-free-v1-raw-
       - run: python -m pip install --disable-pip-version-check -r requirements-staging.txt
-      - name: Build original UI from existing staging observations; no writes
+      - name: Read unseen captures and build the original UI on the free runner
+        id: build
         env:
           TICKETSIGNAL_STAGING_SITE: '1'
           TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
           TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
           TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
-        run: python -u -m tools.free_refresh_publish --output free-pages-dist --cache .free-refresh-cache
+        run: |
+          python -u -m tools.free_refresh_publish --output free-pages-dist --cache .free-refresh-cache
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          root=Path('free-pages-dist')
+          value=json.loads((root/'original-manifest.json').read_text())
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:
+              out.write('generated_at='+value['generated_at']+'\n')
+          freshness={sport:json.loads((root/path.lstrip('/')).read_text())['captured_through'] for sport,path in value['sports'].items()}
+          print('INDEPENDENT_BUILD_FRESHNESS '+json.dumps(freshness),flush=True)
+          PY
       - name: Validate original UI and project-path navigation in Chrome
         run: python -u -m tools.check_free_pages free-pages-dist --output free-browser-results
       - name: Bound the recoverable source cache before saving
@@ -121,6 +211,34 @@ jobs:
         id: deployment
         with:
           artifact_name: ticketsignal-free-pages
+      - name: Verify this publication and its data are available at the public URL
+        env:
+          EXPECTED_GENERATED_AT: ${{ needs.build.outputs.generated_at }}
+        run: |
+          python -u - <<'PY'
+          import hashlib,json,os,time
+          from urllib.request import Request,build_opener
+          from urllib.error import URLError
+          from tools.check_public_pages import fixed_url,Redirects
+          opener=build_opener(Redirects())
+          def read(path):
+              with opener.open(Request(fixed_url(path),headers={'Cache-Control':'no-cache'}),timeout=20) as response:
+                  raw=response.read(2*1024*1024+1)
+              assert len(raw)<=2*1024*1024
+              if '/native/' in '/'+path.lstrip('/') or '/data/' in '/'+path.lstrip('/'):
+                  assert hashlib.sha256(raw).hexdigest() in path
+              return json.loads(raw)
+          for attempt in range(8):
+              try:
+                  value=read('/original-manifest.json')
+                  if value.get('generated_at')==os.environ['EXPECTED_GENERATED_AT']:break
+              except URLError:
+                  pass
+              if attempt==7:raise RuntimeError('New publication has not reached the public endpoint')
+              time.sleep(15)
+          freshness={sport:read(path)['captured_through'] for sport,path in value['sports'].items()}
+          print('INDEPENDENT_PUBLIC_FRESHNESS '+json.dumps({'generated_at':value['generated_at'],'sports':freshness,'live_updates_enabled':value['live_updates_enabled']}),flush=True)
+          PY
       - name: Remove this run's temporary upload after the deployment attempt
         if: always()
         env:
