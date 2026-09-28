@@ -153,11 +153,15 @@ def store_payload(engine, sport, payload, *, now=None):
         iteration = Iteration(event_id=stored.id, captured_at=captured)
         session.add(iteration)
         session.flush()
+        # No ticket primary keys are needed here. Core executemany avoids one
+        # network round trip per section to retrieve generated ORM identifiers.
+        # The event, iteration and entire batch still commit atomically.
+        rows = []
         for row in snapshot.sections:
             values = dict(iteration_id=iteration.id, section=row.section, price=row.price)
             values['ticketsPerSection' if sport == 'mlb' else 'listing_count'] = row.listing_count
-            session.add(Ticket(**values))
-        session.flush()
+            rows.append(values)
+        session.execute(Ticket.__table__.insert(), rows)
         result = {'status': 'stored', 'event_id': int(stored.id), 'iteration_id': int(iteration.id),
                   'sections': len(names), 'captured_at': captured.isoformat(), 'sport': sport}
     # Independent post-commit read. A transaction failure cannot masquerade as an upload.
