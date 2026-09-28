@@ -2,6 +2,8 @@
 from pathlib import Path
 import argparse
 import json
+from unittest.mock import patch
+from tools.free_live_mlb_scope import retain_scoped_events, tracked_venues
 from tools import free_refresh_publish as publisher
 
 FRESHNESS_JS = r'''
@@ -40,8 +42,19 @@ def add_freshness(root):
     return publisher.validate_mounted(root)
 
 
+class ScopedSnapshotCache(publisher.SnapshotCache):
+    def read_sport(self, sport, *args, **kwargs):
+        result = super().read_sport(sport, *args, **kwargs)
+        scoped = retain_scoped_events(sport, result)
+        if sport == 'mlb':
+            self.metrics[sport]['out_of_scope_events_hidden'] = len(result[0]) - len(scoped[0])
+        return scoped
+
+
 def build(output, cache, scheduled=False):
-    report = publisher.build(output, cache, scheduled=scheduled)
+    with patch.object(publisher, 'SnapshotCache', ScopedSnapshotCache):
+        report = publisher.build(output, cache, scheduled=scheduled)
+    report['mlb_tracked_venues'] = list(tracked_venues())
     report.update(add_freshness(output), capture_freshness_indicator=True)
     print('FREE_FRESHNESS_BUILD ' + json.dumps(report), flush=True)
     return report
