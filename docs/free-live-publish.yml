@@ -1,0 +1,137 @@
+# Independent publisher: valid committed captures are never gated by collector status.
+name: Free TicketSignal publication
+on:
+  schedule:
+    - cron: '17,47 * * * *'
+  workflow_dispatch:
+  workflow_run:
+    workflows: [Free TicketSignal collection]
+    types: [completed]
+    branches: [main]
+  push:
+    branches: [main]
+    paths: [.github/workflows/free-ticket-site.yml]
+permissions:
+  contents: read
+concurrency:
+  group: ticketsignal-free-publication
+  cancel-in-progress: false
+env:
+  FREE_SOURCE_REF: REPLACE_WITH_TESTED_COMMIT
+jobs:
+  ready:
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/main' && github.event.repository.private == false && (github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      pages: read
+      actions: write
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.FREE_SOURCE_REF }}
+          persist-credentials: false
+      - name: Verify Pages and clean only completed free-pipeline caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m tools.free_live_storage preflight
+  build:
+    needs: ready
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: tidb-staging
+    permissions:
+      contents: read
+      actions: write
+    outputs:
+      artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      generated_at: ${{ steps.build.outputs.generated_at }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.FREE_SOURCE_REF }}
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .free-refresh-cache
+          key: ticketsignal-free-v1-raw-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ticketsignal-free-v1-raw-
+      - run: python -m pip install --disable-pip-version-check -r requirements-staging.txt
+      - name: Publish all valid committed captures, including partially successful runs
+        id: build
+        env:
+          TICKETSIGNAL_STAGING_SITE: '1'
+          TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
+          TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
+          TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
+        run: |
+          python -u -m tools.free_refresh_publish --output free-pages-dist --cache .free-refresh-cache --scheduled
+          python - <<'PY'
+          import json,os
+          from pathlib import Path
+          value=json.loads(Path('free-pages-dist/original-manifest.json').read_text())
+          with open(os.environ['GITHUB_OUTPUT'],'a') as out:
+              out.write('generated_at='+value['generated_at']+'\n')
+          PY
+      - name: Require valid original UI before replacing the last working site
+        run: python -u -m tools.check_free_pages free-pages-dist --output free-browser-results
+      - name: Bound recoverable source cache
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          size=sum(p.stat().st_size for p in Path('.free-refresh-cache').rglob('*') if p.is_file())
+          assert size <= 1024**3, 'Source cache exceeds its free-storage safety budget'
+          PY
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: .free-refresh-cache
+          key: ticketsignal-free-v1-raw-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Package public files only with a strict upload budget
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tar -cf "$RUNNER_TEMP/artifact.tar" -C free-pages-dist .
+          python -m tools.free_refresh_storage before-upload --file "$RUNNER_TEMP/artifact.tar"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        id: upload
+        with:
+          name: ticketsignal-free-pages
+          path: ${{ runner.temp }}/artifact.tar
+          compression-level: 6
+          retention-days: 1
+          if-no-files-found: error
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+      actions: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.FREE_SOURCE_REF }}
+          persist-credentials: false
+      - uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e
+        id: deployment
+        with:
+          artifact_name: ticketsignal-free-pages
+      - name: Verify exact published version and per-sport freshness
+        env:
+          EXPECTED_GENERATED_AT: ${{ needs.build.outputs.generated_at }}
+        run: python -u -m tools.free_live_verify
+      - name: Remove this run's temporary public artifact
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ARTIFACT_ID: ${{ needs.build.outputs.artifact_id }}
+        run: python -m tools.free_refresh_storage remove-current --artifact-id "$ARTIFACT_ID"
