@@ -1,6 +1,6 @@
 """League-wide MLB discovery from official schedule; never trust URL dates.
 
-Only exact, verified game identities are delivered. No source/production writes.
+Only verified game identities are delivered. Production is unchanged.
 The existing 72-hour collection horizon and exclusion of preseason remain.
 """
 from __future__ import annotations
@@ -86,25 +86,36 @@ def capture_game(game, headless, timeout, known_url=None):
     import collector as mlb
     class MetadataBrowser(mlb.VividBrowser):
         def _event_datetime(self, _url):
-            # Retain structured page/DOM metadata, disable legacy URL fallback.
             return super()._event_datetime('')
         def capture(self, url):
-            # With page_load_strategy=none, old event metadata can otherwise
-            # survive briefly while a new candidate's listings arrive.
+            # Clear previous candidate metadata before asynchronous navigation.
             self.driver.get('about:blank')
             return super().capture(url)
     browser = None
-    candidates = [known_url] if known_url else []
-    errors = []
+    errors, attempted = [], set()
     try:
         browser = MetadataBrowser(headless=headless, timeout=timeout)
-        for phase in ('known', 'search'):
-            if phase == 'search':
-                at = datetime.fromisoformat(game['event_date'])
-                query = f"{game['away_team']} at {game['home_team']} {at:%B %d}"
+        # Search matchup words, not a formatted date that may not be indexed.
+        # The actual provider start time is still checked against the schedule.
+        searches = [None, 'matchup', 'teams']
+        for phase in searches:
+            if phase is None:
+                candidates = [known_url] if known_url else []
+            else:
+                query = (f"{game['away_team']} at {game['home_team']}" if phase == 'matchup'
+                         else f"{game['away_team']} {game['home_team']}")
                 search = 'https://www.vividseats.com/search?' + urlencode({'searchTerm': query})
-                candidates = sorted(browser.discover_event_urls(search) - set(candidates))
+                try:
+                    candidates = sorted(set(browser.discover_event_urls(search)) - attempted)
+                    print('FREE_MLB_SEARCH ' + json.dumps({'game': game.get('schedule_id'),
+                          'query': query, 'candidates': len(candidates)}), flush=True)
+                except Exception as exc:
+                    errors.append(type(exc).__name__)
+                    print('FREE_MLB_SEARCH_ERROR ' + json.dumps({'game': game.get('schedule_id'),
+                          'type': type(exc).__name__, 'message': str(exc)[:300]}), flush=True)
+                    continue
             for url in candidates:
+                attempted.add(url)
                 try:
                     url = mlb.validated_vivid_url(url)
                     raw, provider_at = browser.capture(url)
@@ -112,12 +123,14 @@ def capture_game(game, headless, timeout, known_url=None):
                     return url, official, snapshot
                 except Exception as exc:
                     errors.append(type(exc).__name__)
+                    print('FREE_MLB_CANDIDATE_REJECTED ' + json.dumps({'game': game.get('schedule_id'),
+                          'url': url, 'type': type(exc).__name__, 'message': str(exc)[:300]}), flush=True)
     finally:
         if browser is not None:
             try: browser.close()
             except Exception: pass
     if errors and all(e in ('TimeoutError', 'TimeoutException') for e in errors):
-        raise TimeoutError('Provider pages timed out')
+        raise TimeoutError('Provider discovery or listing requests timed out')
     raise RuntimeError('No verified provider game: ' + ','.join(sorted(set(errors))))
 
 
