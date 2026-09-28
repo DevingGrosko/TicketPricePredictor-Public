@@ -17,7 +17,7 @@ concurrency:
   group: ticketsignal-free-publication
   cancel-in-progress: false
 env:
-  FREE_SOURCE_REF: 0d087c75be5c552d63ec610446e078d1854aef9e
+  FREE_SOURCE_REF: 07eb7b9d12f549083cf6150600de68e25f7c177d
 jobs:
   ready:
     if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/main' && github.event.repository.private == false && (github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)
@@ -36,6 +36,12 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python -m tools.free_live_storage preflight
+      - name: Recover a missed collection tick without blocking publication
+        if: github.event_name != 'workflow_run'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m tools.free_live_watchdog
   build:
     needs: ready
     runs-on: ubuntu-latest
@@ -69,7 +75,7 @@ jobs:
           TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
           TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
         run: |
-          python -u -m tools.free_refresh_publish --output free-pages-dist --cache .free-refresh-cache --scheduled
+          python -u -m tools.free_live_publication --output free-pages-dist --cache .free-refresh-cache --scheduled
           python - <<'PY'
           import json,os
           from pathlib import Path
@@ -77,8 +83,8 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'],'a') as out:
               out.write('generated_at='+value['generated_at']+'\n')
           PY
-      - name: Require valid original UI before replacing the last working site
-        run: python -u -m tools.check_free_pages free-pages-dist --output free-browser-results
+      - name: Require valid original UI and capture-freshness labels before publishing
+        run: python -u -m tools.free_live_browser_checks free-pages-dist --output free-browser-results
       - name: Bound recoverable source cache
         run: |
           python - <<'PY'
