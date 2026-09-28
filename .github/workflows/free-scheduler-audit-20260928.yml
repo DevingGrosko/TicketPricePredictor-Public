@@ -1,0 +1,60 @@
+name: Free scheduler read-only audit
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/free-half-hour-publication]
+    paths: [.github/workflows/free-scheduler-audit-20260928.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Inspect registered workflows, default-branch definitions and actual starts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 -u - <<'PY'
+          import base64,json,os,re
+          from datetime import datetime,timezone
+          from urllib.request import Request,urlopen
+          from urllib.error import HTTPError
+          repo='DevingGrosko/TicketPricePredictor-Public'
+          assert os.environ['GITHUB_REPOSITORY']==repo
+          root='https://api.github.com/repos/'+repo
+          headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],
+                   'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'}
+          def get(path):
+              with urlopen(Request(root+path,headers=headers),timeout=25) as r:
+                  return json.load(r)
+          def emit(label,value):
+              print(label+' '+json.dumps(value,sort_keys=True),flush=True)
+          now=datetime.now(timezone.utc)
+          emit('AUDIT_TIME',now.isoformat())
+          info=get('')
+          emit('REPOSITORY',{k:info.get(k) for k in ('default_branch','private','archived','disabled','pushed_at')})
+          for filename in ('free-ticket-collect.yml','free-ticket-site.yml','collect-ticket-prices.yml'):
+              meta=get('/actions/workflows/'+filename)
+              emit('WORKFLOW',{k:meta.get(k) for k in ('id','name','path','state','created_at','updated_at')})
+              source=get('/contents/.github/workflows/'+filename+'?ref=main')
+              text=base64.b64decode(source['content']).decode()
+              emit('TRIGGER_DEFINITION',{'file':filename,'sha':source['sha'],'prefix':text.split('jobs:',1)[0]})
+              rows=get('/actions/workflows/'+filename+'/runs?branch=main&per_page=100')['workflow_runs']
+              recent=[r for r in rows if r['created_at']>='2026-09-28T00:00:00Z']
+              emit('RUNS',{'file':filename,'fetched':len(rows),'since':'2026-09-28T00:00:00Z',
+                  'earliest_fetched':min((r['created_at'] for r in rows),default=None),
+                  'runs':[{k:r.get(k) for k in ('id','event','status','conclusion','created_at','run_started_at','updated_at','head_sha')} for r in recent]})
+          for status in ('queued','pending','in_progress','waiting','requested'):
+              data=get('/actions/runs?status='+status+'&per_page=100')
+              emit('ACTIVE',{'status':status,'total':data['total_count'],
+                   'runs':[{k:r.get(k) for k in ('id','name','event','status','created_at')} for r in data['workflow_runs']]})
+          base='https://devinggrosko.github.io/TicketPricePredictor-Public/'
+          for path in ('original-manifest.json',):
+              try:
+                  with urlopen(Request(base+path+'?audit='+str(int(now.timestamp())),headers={'Cache-Control':'no-cache'}),timeout=25) as r:
+                      data=json.load(r)
+                  emit('PUBLIC_MANIFEST',data)
+              except Exception as exc:emit('PUBLIC_READ_ERROR',{'type':type(exc).__name__})
+          PY
