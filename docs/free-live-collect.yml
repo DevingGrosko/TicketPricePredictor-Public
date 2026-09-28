@@ -1,0 +1,87 @@
+# Separate from publishing. Failed games remain visible in health, not a deploy gate.
+name: Free TicketSignal collection
+on:
+  schedule:
+    - cron: '7,37 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [.github/workflows/free-ticket-collect.yml]
+permissions:
+  contents: read
+jobs:
+  capture:
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/main' && github.event.repository.private == false
+    strategy:
+      fail-fast: false
+      matrix:
+        sport: [mlb, nfl, nhl]
+    runs-on: ubuntu-latest
+    timeout-minutes: 22
+    environment: tidb-staging
+    permissions:
+      contents: read
+      actions: read
+    concurrency:
+      group: free-refresh-staging-${{ matrix.sport }}-writer
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: REPLACE_WITH_TESTED_COMMIT
+          persist-credentials: false
+      - name: Check free cache allowance without touching production caches
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m tools.free_live_storage preflight --collector
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - name: Restore this sport's pending payloads and completion receipts
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: free-capture/${{ matrix.sport }}
+          key: ticketsignal-free-v1-state-${{ matrix.sport }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ticketsignal-free-v1-state-${{ matrix.sport }}-
+      - run: python -m pip install --disable-pip-version-check -r requirements-staging.txt
+      - name: Capture independently with two NFL browsers and atomic batch writes
+        env:
+          SPORT: ${{ matrix.sport }}
+          TICKETSIGNAL_STAGING_SITE: '1'
+          TICKETSIGNAL_ENABLE_STAGING_WRITES: '1'
+          TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
+          TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
+          TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
+        run: timeout --signal=TERM --kill-after=30s 18m python -u -m tools.free_live_collect --sport "$SPORT" --directory "free-capture/$SPORT"
+      - name: Report partial progress even when a game fails
+        if: always()
+        env:
+          SPORT: ${{ matrix.sport }}
+        run: |
+          python - <<'PY'
+          import os,json
+          from pathlib import Path
+          path=Path('free-capture')/os.environ['SPORT']/'health.json'
+          value=json.loads(path.read_text()) if path.exists() else {'status':'report-unavailable'}
+          text=json.dumps(value,indent=2)
+          print('FREE_LIVE_CAPTURE_REPORT '+text,flush=True)
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a') as out:
+              out.write('## '+os.environ['SPORT']+' collection\n```json\n'+text[:50000]+'\n```\n')
+          PY
+      - name: Bound saved state and pending queue
+        id: budget
+        if: always()
+        env:
+          SPORT: ${{ matrix.sport }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          path=Path('free-capture')/os.environ['SPORT']
+          assert sum(p.stat().st_size for p in path.rglob('*') if p.is_file()) <= 20*1024**2
+          PY
+      - uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830
+        if: always() && steps.budget.outcome == 'success'
+        with:
+          path: free-capture/${{ matrix.sport }}
+          key: ticketsignal-free-v1-state-${{ matrix.sport }}-${{ github.run_id }}-${{ github.run_attempt }}
