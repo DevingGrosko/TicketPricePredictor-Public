@@ -30,8 +30,8 @@ def retain_scoped_events(sport, result):
     events, latest, captures, counts = result
     selected = {eid: event for eid, event in events.items()
                 if venue_in_scope(getattr(event, 'Place', None) or getattr(event, 'venue', None))}
-    return (selected, {eid: at for eid, at in latest.items() if eid in selected},
-            {eid: count for eid, count in captures.items() if eid in selected}, counts)
+    return (selected, {eid: latest.get(eid) for eid in selected},
+            {eid: captures.get(eid, 0) for eid in selected}, counts)
 
 
 def quarantine_out_of_scope(pending_dir):
