@@ -28,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
-          ref: 07eb7b9d12f549083cf6150600de68e25f7c177d
+          ref: a226513bbcb71ead3526135302ce83fd2697e168
           persist-credentials: false
       - name: Check free cache allowance without touching production caches
         env:
