@@ -1,0 +1,42 @@
+name: Free MLB discovery diagnostics
+on:
+  push:
+    branches: [feature/free-half-hour-publication]
+    paths: [.github/workflows/free-mlb-discovery-probe.yml]
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --disable-pip-version-check -r requirements-staging.txt
+      - name: Inspect public discovery only; no database or credentials
+        run: |
+          python -u - <<'PY'
+          from datetime import datetime,timezone
+          from urllib.parse import urlencode
+          import json,time,re
+          from collector import VividBrowser,extract_mlb_event_urls
+          from tools.free_live_mlb_schedule import fetch_schedule
+          games,source=fetch_schedule(datetime.now(timezone.utc))
+          print('MLB_OFFICIAL_GAMES '+json.dumps(games),flush=True)
+          if games:
+              game=games[0]
+              browser=VividBrowser(headless=True,timeout=35)
+              try:
+                  url='https://www.vividseats.com/search?'+urlencode({'searchTerm':game['away_team']+' at '+game['home_team']})
+                  browser.driver.get(url)
+                  time.sleep(12)
+                  print('MLB_SEARCH_PAGE '+json.dumps({'url':browser.driver.current_url,'title':browser.driver.title,
+                      'text':browser.driver.execute_script('return document.body.innerText').strip()[:3500],
+                      'links':browser.driver.execute_script('return [...document.querySelectorAll("a[href]")].map(a=>({href:a.href,text:a.innerText})).filter(a=>a.href.includes("/production/"))'),
+                      'typed_mlb_links':list(extract_mlb_event_urls(browser.driver.page_source,url))}),flush=True)
+              finally:browser.close()
+          PY
