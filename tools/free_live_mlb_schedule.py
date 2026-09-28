@@ -77,8 +77,6 @@ def validate_match(game, url, raw, provider_at):
     if min(a, h) < 0 or a >= h:
         raise ValueError('Provider teams or home/away order do not match')
     official = datetime.fromisoformat(game['event_date'])
-    # Exact start-time comparison disambiguates doubleheaders. Date-only pages
-    # are unresolved rather than silently assigned to the wrong game.
     if provider_at.tzinfo is None or abs((provider_at-official).total_seconds()) > 90*60:
         raise ValueError('Provider start does not match official schedule')
     return snapshot, official
@@ -86,11 +84,15 @@ def validate_match(game, url, raw, provider_at):
 
 def capture_game(game, headless, timeout, known_url=None):
     import collector as mlb
+    class MetadataBrowser(mlb.VividBrowser):
+        def _event_datetime(self, _url):
+            # Retain structured page/DOM metadata, disable legacy URL fallback.
+            return super()._event_datetime('')
     browser = None
     candidates = [known_url] if known_url else []
     errors = []
     try:
-        browser = mlb.VividBrowser(headless=headless, timeout=timeout)
+        browser = MetadataBrowser(headless=headless, timeout=timeout)
         for phase in ('known', 'search'):
             if phase == 'search':
                 at = datetime.fromisoformat(game['event_date'])
