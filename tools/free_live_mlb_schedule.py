@@ -1,6 +1,6 @@
-"""League-wide MLB discovery from official schedule; never trust URL dates.
+"""Configured-venue MLB discovery with official identity verification.
 
-Only verified game identities are delivered. Production is unchanged.
+Only games at the original collector.VENUE_FEEDS are delivered. Production is unchanged.
 The existing 72-hour collection horizon and exclusion of preseason remain.
 """
 from __future__ import annotations
@@ -12,6 +12,9 @@ import json
 import re
 import time
 import unicodedata
+
+from tools.free_live_mlb_scope import (quarantine_out_of_scope, tracked_venues,
+                                      venue_in_scope, venue_key)
 
 UTC = timezone.utc
 
@@ -28,6 +31,8 @@ def schedule_games(payload, now):
     games = {}
     for day in payload['dates']:
         for game in day.get('games', []):
+            if not venue_in_scope(game.get('venue', {}).get('name', '')):
+                continue
             if game.get('gameType') not in ('R', 'F', 'D', 'L', 'W'):
                 continue
             if game.get('status', {}).get('abstractGameState') != 'Preview':
@@ -68,6 +73,9 @@ def fetch_schedule(now):
 def validate_match(game, url, raw, provider_at):
     import collector as mlb
     snapshot = mlb.SnapshotParser.parse(raw)
+    if (not venue_in_scope(game.get('venue'))
+            or venue_key(snapshot.venue) != venue_key(game.get('venue'))):
+        raise ValueError('Provider venue does not match the configured MLB home-venue scope')
     source = re.search(r'/production/(\d+)', url)
     if source is None or source[1] != snapshot.source_id:
         raise ValueError('Provider returned the wrong production')
@@ -154,8 +162,15 @@ def run_mlb(endpoint, token, headless, timeout, health_output, pending_dir):
     backlog, done = state.setdefault('pending', {}), state.setdefault('completed', {})
     now = datetime.now(UTC)
     slot = now.replace(minute=(now.minute//30)*30, second=0, microsecond=0).isoformat()
+    outside = [identity for identity, game in backlog.items()
+               if not venue_in_scope(game.get('venue'))]
+    for identity in outside:
+        del backlog[identity]
+    quarantined = quarantine_out_of_scope(pending_dir)
     replayed, _, errors = mlb.replay_pending_snapshots(endpoint, token, Path(pending_dir))
-    report = dict(status='running', event_type='mlb', coverage_mode='official-MLB-schedule',
+    report = dict(status='running', event_type='mlb', coverage_mode='configured-MLB-venues',
+                  tracked_venues=list(tracked_venues()), out_of_scope_games=outside,
+                  quarantined_payloads=quarantined,
                   started_at=now.isoformat(), capture_slot=slot, captured=0, uploaded=0,
                   duplicates=0, committed=0, failed=0, replayed=replayed, errors=list(errors),
                   limited_inventory_captures=[], uploads=[], no_longer_collectible=[])
@@ -167,6 +182,7 @@ def run_mlb(endpoint, token, headless, timeout, health_output, pending_dir):
     checkpoint()
     try:
         games, source = fetch_schedule(now)
+        games = [game for game in games if venue_in_scope(game.get('venue'))]
     except Exception as exc:
         report['status'] = 'degraded'
         report['errors'].append('MLB schedule: ' + type(exc).__name__)
