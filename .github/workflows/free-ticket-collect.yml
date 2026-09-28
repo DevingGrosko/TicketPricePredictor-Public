@@ -28,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
-          ref: a5cea8679db7c40a21fb9d7f7011f64e82cd0b05
+          ref: 07eb7b9d12f549083cf6150600de68e25f7c177d
           persist-credentials: false
       - name: Check free cache allowance without touching production caches
         env:
@@ -44,7 +44,7 @@ jobs:
           key: ticketsignal-free-v1-state-${{ matrix.sport }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: ticketsignal-free-v1-state-${{ matrix.sport }}-
       - run: python -m pip install --disable-pip-version-check -r requirements-staging.txt
-      - name: Capture independently with two NFL browsers and atomic batch writes
+      - name: Capture all due games with independent delivery and persistent recovery
         env:
           SPORT: ${{ matrix.sport }}
           TICKETSIGNAL_STAGING_SITE: '1'
@@ -52,7 +52,7 @@ jobs:
           TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
           TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
           TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
-        run: python -u -m tools.free_live_collect --sport "$SPORT" --directory "free-capture/$SPORT"
+        run: python -u -m tools.free_live_hardening --sport "$SPORT" --directory "free-capture/$SPORT"
       - name: Report partial progress even when a game fails
         if: always()
         env:
