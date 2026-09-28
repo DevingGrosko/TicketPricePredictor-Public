@@ -17,7 +17,7 @@ jobs:
       matrix:
         sport: [mlb, nfl, nhl]
     runs-on: ubuntu-latest
-    timeout-minutes: 22
+    # Drain all work; only individual provider requests retain timeouts.
     environment: tidb-staging
     permissions:
       contents: read
@@ -28,7 +28,7 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
-          ref: 0d087c75be5c552d63ec610446e078d1854aef9e
+          ref: a5cea8679db7c40a21fb9d7f7011f64e82cd0b05
           persist-credentials: false
       - name: Check free cache allowance without touching production caches
         env:
@@ -52,7 +52,7 @@ jobs:
           TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
           TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
           TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
-        run: timeout --signal=TERM --kill-after=30s 18m python -u -m tools.free_live_collect --sport "$SPORT" --directory "free-capture/$SPORT"
+        run: python -u -m tools.free_live_collect --sport "$SPORT" --directory "free-capture/$SPORT"
       - name: Report partial progress even when a game fails
         if: always()
         env:
