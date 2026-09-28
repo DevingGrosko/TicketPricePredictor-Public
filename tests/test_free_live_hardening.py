@@ -62,21 +62,23 @@ class PolicyTests(unittest.TestCase):
         self.assertFalse(should_dispatch([{**row,'status':'in_progress'}],NOW)[0])
         self.assertFalse(should_dispatch([{**row,'created_at':NOW.isoformat()}],NOW)[0])
 
-    def test_mlb_schedule_is_league_wide_not_venue_or_url_date_filtered(self):
+    def test_mlb_schedule_retains_original_home_venues_and_existing_horizon(self):
         game=dict(gamePk=100,gameType='R',gameDate=(NOW+timedelta(hours=8)).isoformat(),
-                  status={'abstractGameState':'Preview'},venue={'name':'Coors Field'},
-                  teams={'away':{'team':{'name':'San Diego Padres'}},'home':{'team':{'name':'Colorado Rockies'}}})
+                  status={'abstractGameState':'Preview'},venue={'name':'Nationals Park'},
+                  teams={'away':{'team':{'name':'San Diego Padres'}},'home':{'team':{'name':'Washington Nationals'}}})
         data={'dates':[{'games':[game,{**game,'gamePk':101,'gameType':'S'},
-                                    {**game,'gamePk':102,'gameDate':(NOW-timedelta(hours=2)).isoformat()}]}]}
+                                    {**game,'gamePk':102,'gameDate':(NOW-timedelta(hours=2)).isoformat()},
+                                    {**game,'gamePk':103,'venue':{'name':'Coors Field'}}]}]}
         actual=schedule_games(data,NOW)
-        self.assertEqual(len(actual),1);self.assertEqual(actual[0]['venue'],'Coors Field')
+        self.assertEqual(len(actual),1);self.assertEqual(actual[0]['venue'],'Nationals Park')
         with self.assertRaises(ValueError): schedule_games({},NOW)
 
     def test_wrong_game_and_doubleheader_times_are_not_mixed(self):
         import collector
-        game={'away_team':'San Diego Padres','home_team':'Colorado Rockies',
+        game={'away_team':'San Diego Padres','home_team':'Washington Nationals', 'venue':'Nationals Park',
               'event_date':(NOW+timedelta(hours=8)).isoformat()}
-        snapshot=SimpleNamespace(source_id='123',title='San Diego Padres at Colorado Rockies')
+        snapshot=SimpleNamespace(source_id='123',title='San Diego Padres at Washington Nationals',
+                                 venue='Nationals Park')
         url='https://www.vividseats.com/incorrect-01-01-2000--sports-mlb-baseball/production/123'
         with patch.object(collector.SnapshotParser,'parse',return_value=snapshot):
             self.assertEqual(validate_match(game,url,{},NOW+timedelta(hours=8))[0],snapshot)
