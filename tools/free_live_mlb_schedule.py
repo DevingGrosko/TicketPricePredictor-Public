@@ -82,23 +82,34 @@ def validate_match(game, url, raw, provider_at):
     return snapshot, official
 
 
+def provider_order(browser, candidates):
+    """Keep the provider's upcoming-first order; do not sort by URL slug.
+
+    This only prioritizes candidates: none are removed for lacking a DOM link.
+    The actual production identity and start time still must be verified.
+    """
+    candidates = set(candidates)
+    try:
+        links = browser.driver.execute_script(
+            'return [...document.querySelectorAll("a[href]")].map(a=>a.href);')
+    except Exception:
+        links = []
+    return list(dict.fromkeys([u for u in links if u in candidates] + sorted(candidates)))
+
+
 def capture_game(game, headless, timeout, known_url=None):
     import collector as mlb
     class MetadataBrowser(mlb.VividBrowser):
         def _event_datetime(self, _url):
             return super()._event_datetime('')
         def capture(self, url):
-            # Clear previous candidate metadata before asynchronous navigation.
             self.driver.get('about:blank')
             return super().capture(url)
     browser = None
     errors, attempted = [], set()
     try:
         browser = MetadataBrowser(headless=headless, timeout=timeout)
-        # Search matchup words, not a formatted date that may not be indexed.
-        # The actual provider start time is still checked against the schedule.
-        searches = [None, 'matchup', 'teams']
-        for phase in searches:
+        for phase in (None, 'matchup', 'teams'):
             if phase is None:
                 candidates = [known_url] if known_url else []
             else:
@@ -106,7 +117,7 @@ def capture_game(game, headless, timeout, known_url=None):
                          else f"{game['away_team']} {game['home_team']}")
                 search = 'https://www.vividseats.com/search?' + urlencode({'searchTerm': query})
                 try:
-                    candidates = sorted(set(browser.discover_event_urls(search)) - attempted)
+                    candidates = provider_order(browser, set(browser.discover_event_urls(search)) - attempted)
                     print('FREE_MLB_SEARCH ' + json.dumps({'game': game.get('schedule_id'),
                           'query': query, 'candidates': len(candidates)}), flush=True)
                 except Exception as exc:
