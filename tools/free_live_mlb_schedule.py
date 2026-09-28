@@ -88,6 +88,11 @@ def capture_game(game, headless, timeout, known_url=None):
         def _event_datetime(self, _url):
             # Retain structured page/DOM metadata, disable legacy URL fallback.
             return super()._event_datetime('')
+        def capture(self, url):
+            # With page_load_strategy=none, old event metadata can otherwise
+            # survive briefly while a new candidate's listings arrive.
+            self.driver.get('about:blank')
+            return super().capture(url)
     browser = None
     candidates = [known_url] if known_url else []
     errors = []
