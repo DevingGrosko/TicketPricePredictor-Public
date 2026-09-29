@@ -28,7 +28,8 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
-          ref: 6be41c6a82ba8161784cb005f1974d82e5498f7d
+          # NHL-only exception; MLB/NFL keep their existing tested source.
+          ref: ${{ matrix.sport == 'nhl' && '3c9e98362e39b4835bb2a9261deec62983fda9ad' || '6be41c6a82ba8161784cb005f1974d82e5498f7d' }}
           persist-credentials: false
       - name: Check free cache allowance without touching production caches
         env:
