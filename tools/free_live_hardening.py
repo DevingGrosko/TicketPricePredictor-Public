@@ -85,6 +85,7 @@ def run_nhl(endpoint, token, headless, timeout, health_output, pending_dir):
     """Keep NHL matching/cadence; save successes independently of any failure."""
     import nhl_schedule_collector as nhl
     from tools.free_live_collect import read_json, write_json
+    from tools.free_live_nhl_exclusions import apply_exclusions
     pending_dir = Path(pending_dir)
     root = pending_dir.parent
     state_path = root / 'nhl-progress.json'
@@ -97,7 +98,7 @@ def run_nhl(endpoint, token, headless, timeout, health_output, pending_dir):
     report = dict(status='running', event_type='nhl', started_at=now.isoformat(),
                   captured=0, uploaded=0, duplicates=0, committed=0, failed=0,
                   replayed=replayed, errors=list(errors), uploads=[], unresolved=[],
-                  no_longer_collectible=[])
+                  no_longer_collectible=[], excluded_games=[])
     def checkpoint():
         report['pending'] = len(list(pending_dir.glob('*.json'))) + len(list(pending_dir.glob('*.rejected')))
         report['unfinished_games'] = sorted(backlog)
@@ -111,6 +112,8 @@ def run_nhl(endpoint, token, headless, timeout, health_output, pending_dir):
         report['errors'].append('Schedule: ' + type(exc).__name__)
         checkpoint()
         return 1
+    raw_schedule_count = len(schedule)
+    schedule, report['excluded_games'] = apply_exclusions(schedule, backlog)
     scheduled = {str(g.schedule_id): g for g in schedule}
     for game in due_since(schedule, slot, previous, nhl.schedule_games_due):
         identity = str(game.schedule_id)
@@ -133,7 +136,8 @@ def run_nhl(endpoint, token, headless, timeout, health_output, pending_dir):
         else:
             work.append(game)
     work.sort(key=lambda g: (backlog[str(g.schedule_id)]['first_due'], g.event_date))
-    report.update(scheduled_in_window=len(schedule), scheduled_due=len(work), schedule_sources=sources)
+    report.update(scheduled_in_window=raw_schedule_count, scheduled_in_scope=len(schedule),
+                  scheduled_due=len(work), schedule_sources=sources)
     state['last_slot'] = slot.isoformat()
     checkpoint()
     if work:
