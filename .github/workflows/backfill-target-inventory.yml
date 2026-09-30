@@ -1,0 +1,74 @@
+name: Historical backfill target inventory
+on:
+  push:
+    branches: [feature/free-half-hour-publication]
+    paths: [.github/workflows/backfill-target-inventory.yml]
+permissions:
+  contents: read
+jobs:
+  inventory:
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: tidb-staging
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: 28dd58507d6f09f6d92d8ce4d3165db98e87cd38
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --disable-pip-version-check 'PyMySQL>=1.1.1,<2'
+      - name: Read identities, schemas and timestamps only
+        env:
+          TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
+          TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
+          TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
+        run: |
+          python -u - <<'PY'
+          import os,json,gzip,ssl
+          from pathlib import Path
+          from datetime import datetime,timezone
+          import pymysql
+          host=os.environ['TIDB_STAGING_HOST']
+          assert host=='gateway01.us-east-1.prod.aws.tidbcloud.com'
+          report={'mode':'read-only','rows_written':0,'started_at':datetime.now(timezone.utc).isoformat(),'sports':{}}
+          for sport,prefix in [('mlb',''),('nfl','nfl_'),('nhl','nhl_')]:
+              schema='ticketsignal_staging_'+sport
+              connection=pymysql.connect(host=host,port=4000,user=os.environ['TIDB_STAGING_USERNAME'],password=os.environ['TIDB_STAGING_PASSWORD'],database=schema,ssl=ssl.create_default_context(),charset='utf8mb4',connect_timeout=15,read_timeout=90,write_timeout=30,autocommit=False)
+              try:
+                  with connection.cursor() as c:
+                      c.execute('SELECT DATABASE(), VERSION(), @@foreign_key_checks, @@transaction_isolation')
+                      identity=c.fetchone()
+                      assert identity[0]==schema and 'tidb' in identity[1].lower() and int(identity[2])==1
+                      c.execute('SELECT TABLE_NAME,COLUMN_NAME,COLUMN_TYPE,IS_NULLABLE,EXTRA FROM information_schema.columns WHERE table_schema=%s ORDER BY TABLE_NAME,ORDINAL_POSITION',(schema,))
+                      columns=c.fetchall()
+                      c.execute('SELECT TABLE_NAME,INDEX_NAME,NON_UNIQUE,SEQ_IN_INDEX,COLUMN_NAME FROM information_schema.statistics WHERE table_schema=%s ORDER BY TABLE_NAME,INDEX_NAME,SEQ_IN_INDEX',(schema,))
+                      indexes=c.fetchall()
+                      c.execute('SELECT TABLE_NAME,DATA_LENGTH,INDEX_LENGTH FROM information_schema.tables WHERE table_schema=%s',(schema,))
+                      sizes=c.fetchall()
+                      c.execute('SELECT id,title,event_date,URL,Place,event_sections FROM event' if sport=='mlb' else 'SELECT id,source_id,title,event_date,source_url,venue,schedule_id,away_team,home_team,canonical_venue FROM '+prefix+'event')
+                      names=[x[0] for x in c.description];events=[dict(zip(names,row)) for row in c.fetchall()]
+                      c.execute('SELECT id,event_id,captured_at FROM '+prefix+'iterations ORDER BY id')
+                      iterations=c.fetchall()
+                      assert len(iterations)<200000
+                      c.execute('SELECT COUNT(*) FROM '+prefix+'tickets')
+                      tickets=c.fetchone()[0]
+                  report['sports'][sport]={'schema':schema,'identity':identity,'columns':columns,'indexes':indexes,'sizes':sizes,'events':events,'iterations':iterations,'ticket_count':tickets}
+                  print('BACKFILL_TARGET '+json.dumps({'sport':sport,'events':len(events),'iterations':len(iterations),'tickets':tickets,'earliest':min(str(x[2]) for x in iterations),'latest':max(str(x[2]) for x in iterations)}),flush=True)
+              finally:
+                  connection.rollback();connection.close()
+          report['finished_at']=datetime.now(timezone.utc).isoformat()
+          raw=json.dumps(report,default=str,separators=(',',':')).encode()
+          packed=gzip.compress(raw,mtime=0)
+          assert len(packed)<4*1024**2
+          Path('target-inventory.json.gz').write_bytes(packed)
+          print('PASS: read-only TiDB inventory. PythonAnywhere was not accessed; no credentials exported.')
+          PY
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: backfill-target-inventory
+          path: target-inventory.json.gz
+          retention-days: 1
+          if-no-files-found: error
