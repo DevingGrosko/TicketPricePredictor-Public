@@ -1,0 +1,139 @@
+# One-off public GET-only check. No database secrets, writes, deploys or collector changes.
+name: Historical backfill public verification
+on:
+  push:
+    branches: [feature/free-half-hour-publication]
+    paths: [.github/workflows/backfill-public-verification.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify-public-history:
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Check post-import publication and report-derived historical samples
+        run: |
+          python3 -u - <<'PY'
+          import hashlib, json, math, re, time
+          from datetime import datetime, timezone
+          from pathlib import Path
+          from urllib.error import HTTPError, URLError
+          from urllib.parse import urlsplit
+          from urllib.request import Request, build_opener, HTTPRedirectHandler
+
+          BASE = 'https://devinggrosko.github.io/TicketPricePredictor-Public'
+          PREFIX = '/TicketPricePredictor-Public/'
+          HOST = 'devinggrosko.github.io'
+          # Target event IDs, minimum capture counts, and exact appended timestamps
+          # are from the owner's verified backfill-report.json; no credentials or
+          # private SQL data are stored in this workflow. This is a sample, not a
+          # claim that every source row or every chart point was reverified here.
+          SAMPLES = {
+              'mlb': [
+                  ('240318', 147, ['2026-09-22T00:00:00+00:00','2026-09-23T00:00:00+00:00','2026-09-24T00:00:00+00:00']),
+                  ('240326', 145, ['2026-09-24T00:00:00+00:00','2026-09-25T00:00:00+00:00','2026-09-26T00:00:00+00:00']),
+                  ('240313', 144, ['2026-09-22T00:00:00+00:00','2026-09-23T00:00:00+00:00','2026-09-24T00:00:00+00:00'])],
+              'nfl': [
+                  ('35', 184, ['2026-09-21T02:00:00+00:00','2026-09-24T00:00:00+00:00','2026-09-26T00:00:00+00:00']),
+                  ('28', 176, ['2026-09-22T00:00:00+00:00','2026-09-24T00:00:00+00:00','2026-09-26T00:00:00+00:00']),
+                  ('20', 175, ['2026-09-21T00:00:00+00:00','2026-09-24T00:00:00+00:00','2026-09-26T00:00:00+00:00'])],
+              'nhl': [
+                  ('18', 94, ['2026-09-21T07:00:00+00:00','2026-09-24T01:00:00+00:00','2026-09-26T01:00:00+00:00']),
+                  ('82', 93, ['2026-09-21T05:00:00+00:00','2026-09-24T05:00:00+00:00','2026-09-26T05:00:00+00:00']),
+                  ('10', 93, ['2026-09-21T05:00:00+00:00','2026-09-24T05:00:00+00:00','2026-09-26T05:00:00+00:00'])]
+          }
+          def require(value, message):
+              if not value:
+                  raise AssertionError(message)
+          class Redirects(HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  p = urlsplit(newurl)
+                  require(p.scheme == 'https' and p.netloc == HOST and p.path.startswith(PREFIX), 'Redirect outside public project')
+                  return super().redirect_request(req, fp, code, msg, headers, newurl)
+          opener = build_opener(Redirects())
+          cache, requests, byte_count = {}, [], 0
+          def read(path):
+              global byte_count
+              require(isinstance(path,str) and path and not path.startswith('//'), 'Invalid public path')
+              path = '/' + path.lstrip('/')
+              require(path == '/original-manifest.json' or re.fullmatch(r'/(native|data)/[a-z-]+[0-9a-f]{64}\.json', path), 'Unapproved public path')
+              if path in cache:
+                  return cache[path]
+              require(len(cache) < 100, 'Public request budget exceeded')
+              for attempt in range(3):
+                  try:
+                      request = Request(BASE+path, headers={'User-Agent':'TicketSignal-public-backfill-audit','Cache-Control':'no-cache'})
+                      with opener.open(request, timeout=20) as response:
+                          raw = response.read(2*1024**2+1)
+                      break
+                  except (URLError, TimeoutError):
+                      if attempt == 2:
+                          raise
+                      time.sleep(2**attempt)
+              byte_count += len(raw)
+              require(len(raw) <= 2*1024**2 and byte_count <= 25*1024**2, 'Public byte budget exceeded')
+              digest = hashlib.sha256(raw).hexdigest()
+              expected = re.search(r'([0-9a-f]{64})\.json$', path)
+              if expected:
+                  require(digest == expected[1], 'Public content hash mismatch')
+              value = json.loads(raw)
+              cache[path] = value
+              requests.append({'path':path,'sha256':digest,'bytes':len(raw)})
+              return value
+          result = {'passed':False,'mode':'public-GET-only','base_url':BASE+'/',
+                    'tested_at':datetime.now(timezone.utc).isoformat(),'samples':[],
+                    'database_connections':0,'database_writes':0,
+                    'limitation':'Report-derived capture-count and timestamp samples, not full price-row equivalence or complete source coverage.'}
+          try:
+              manifest = read('/original-manifest.json')
+              generated = manifest['generated_at']
+              require(datetime.fromisoformat(generated) > datetime.fromisoformat('2026-09-30T01:58:55.881420+00:00'), 'Public build predates completed backfill')
+              require(manifest.get('live_updates_enabled') is True, 'Live updates not enabled')
+              require(set(manifest['sports']) == set(SAMPLES), 'Missing sport catalog')
+              result['generated_at'] = generated
+              result['live_updates_enabled'] = manifest['live_updates_enabled']
+              for sport, samples in SAMPLES.items():
+                  catalog = read(manifest['sports'][sport])
+                  for eid, minimum, stamps in samples:
+                      require(eid in catalog['games'], sport+': expected sampled game not public: '+eid)
+                      game = catalog['games'][eid]
+                      require(int(game['capture_count']) >= minimum, sport+': capture count too small: '+eid)
+                      event_at = datetime.fromisoformat(game['event_at'])
+                      record = read(game['file'])
+                      require(record['id'] == eid, 'Wrong public game record')
+                      points = set()
+                      for section in record['sections']:
+                          chart = read(section['file'])['sections'][section['key']]
+                          require(len(chart['x']) == len(chart['y']), 'Mismatched chart axes')
+                          require(all(isinstance(v,(int,float)) and math.isfinite(v) for v in chart['x']), 'Invalid chart hours')
+                          points.update(round(v,3) for v in chart['x'])
+                      matched = []
+                      for stamp in stamps:
+                          lead = round((event_at-datetime.fromisoformat(stamp)).total_seconds()/3600,3)
+                          require(0 < lead <= (96 if sport == 'mlb' else 720), 'Fixture outside existing chart window')
+                          require(lead in points, sport+': imported timestamp absent from chart: '+eid+' '+stamp)
+                          matched.append({'captured_at':stamp,'hours_before_event':lead})
+                      row = {'sport':sport,'event_id':eid,'title':game['title'],
+                             'minimum_expected_captures':minimum,'published_capture_count':game['capture_count'],
+                             'matched_historical_timestamps':matched}
+                      result['samples'].append(row)
+                      print('BACKFILL_PUBLIC_SAMPLE '+json.dumps(row),flush=True)
+              result['passed'] = True
+          except Exception as error:
+              result['error'] = type(error).__name__+': '+str(error)[:500]
+              raise
+          finally:
+              result.update(http_files=len(cache),http_bytes=byte_count,requests=requests)
+              Path('backfill-public-verification.json').write_text(json.dumps(result,indent=2))
+              print('BACKFILL_PUBLIC_RESULT '+json.dumps(result),flush=True)
+          PY
+      - name: Save small verification report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: backfill-public-verification
+          path: backfill-public-verification.json
+          retention-days: 1
+          if-no-files-found: error
