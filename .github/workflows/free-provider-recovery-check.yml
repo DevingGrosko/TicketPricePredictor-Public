@@ -1,0 +1,118 @@
+name: Free provider recovery checks
+on:
+  push:
+    branches: [fix/free-provider-recovery-20260930]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: free-provider-recovery-checks
+  cancel-in-progress: false
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --disable-pip-version-check -r requirements-staging.txt pytest pyyaml
+      - run: python -m pytest tests/test_free_live*.py tests/test_free_refresh*.py tests/test_nfl_schedule_capture_resilience.py tests/test_nhl_schedule_collector.py -q
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --disable-pip-version-check -r requirements-staging.txt
+      - name: Trace four recently failed games; no credentials or database writes
+        run: |
+          python -u - <<'PY'
+          import json,time
+          from datetime import datetime,timezone
+          from unittest.mock import patch
+          from contextlib import ExitStack
+          from pathlib import Path
+          from urllib.parse import urlsplit
+          import nfl_schedule_collector as nfl
+          import nhl_schedule_collector as nhl
+          from nfl_collector import VividNFLBrowser
+          from tools.free_live_map_cache import cached_map_matching
+          def emit(label,value):
+              print(label+' '+json.dumps(value,default=str),flush=True)
+          original_init=VividNFLBrowser.__init__
+          original_capture=VividNFLBrowser.capture
+          def instrument(self,*args,**kwargs):
+              original_init(self,*args,**kwargs)
+              self.audit=[]
+              original_log=self.driver.get_log
+              def get_log(kind):
+                  entries=original_log(kind)
+                  for entry in entries:
+                      try:
+                          message=json.loads(entry['message'])['message']; p=message['params']
+                          if message['method']=='Network.responseReceived':
+                              r=p.get('response',{}); u=urlsplit(r.get('url',''))
+                              if 'listings' in u.path.casefold() or p.get('type')=='Document':
+                                  self.audit.append({'request_id':p.get('requestId'),'path':u.netloc+u.path,'status':r.get('status'),'mime':r.get('mimeType'),'cache':r.get('fromDiskCache'),'service_worker':r.get('fromServiceWorker')})
+                          elif message['method']=='Network.loadingFailed':
+                              self.audit.append({'request_id':p.get('requestId'),'error':p.get('errorText'),'blocked_reason':p.get('blockedReason')})
+                      except (ValueError,KeyError,TypeError):
+                          pass
+                  return entries
+              self.driver.get_log=get_log
+              original_json=self._response_json
+              def response_json(request_id):
+                  value=original_json(request_id)
+                  if value is None:
+                      try:
+                          raw=self.driver.execute_cdp_cmd('Network.getResponseBody',{'requestId':request_id})
+                          self.audit.append({'body_id':request_id,'body_length':len(raw.get('body','')),'base64':raw.get('base64Encoded')})
+                      except Exception as exc:
+                          self.audit.append({'body_id':request_id,'body_error':str(exc).splitlines()[0][:300]})
+                  else:
+                      self.audit.append({'body_id':request_id,'keys':list(value)[:15],'tickets':len(value.get('tickets') or []),'global_rows':len(value.get('global') or [])})
+                  return value
+              self._response_json=response_json
+          def capture(self,url):
+              started=time.monotonic()
+              try:
+                  return original_capture(self,url)
+              finally:
+                  try:
+                      emit('BROWSER_TRACE',{'url_path':urlsplit(url).path,'seconds':round(time.monotonic()-started,2),'title':self.driver.title[:180],'current_path':urlsplit(self.driver.current_url).path,'network':self.audit[-40:]})
+                  except Exception as exc:
+                      emit('TRACE_ERROR',{'type':type(exc).__name__})
+          outcomes=[]
+          with ExitStack() as stack:
+              stack.enter_context(cached_map_matching())
+              if Path('tools/free_live_provider_recovery.py').exists():
+                  from tools.free_live_provider_recovery import provider_recovery
+                  stack.enter_context(provider_recovery())
+                  emit('RECOVERY_MODE','enabled')
+              else:
+                  stack.enter_context(patch.object(VividNFLBrowser,'__init__',instrument))
+                  stack.enter_context(patch.object(VividNFLBrowser,'capture',capture))
+                  emit('RECOVERY_MODE','baseline')
+              for sport,module,ids in [('nfl',nfl,{'401872964','401872968'}),('nhl',nhl,{'2026020012','2026020020'})]:
+                  schedule,_=module.fetch_schedule_games(datetime.now(timezone.utc))
+                  games=[g for g in schedule if str(g.schedule_id) in ids]
+                  resolutions,errors=module.resolve_schedule_games(games,[],headless=True,timeout=35)
+                  emit('RESOLVED',{'sport':sport,'requested':sorted(ids),'found':[g.schedule_id for g in games],'errors':errors})
+                  for resolution in resolutions:
+                      item={'sport':sport,'game':str(resolution.game.schedule_id)}
+                      try:
+                          url,at,snapshot=module._capture_resolution(resolution,headless=True,timeout=35)
+                          item.update(status='captured',title=snapshot.title,sections=len(snapshot.sections),event_at=at.isoformat())
+                      except Exception as exc:
+                          item.update(status='failed',type=type(exc).__name__,message=str(exc)[:2500])
+                      outcomes.append(item);emit('PROBE_GAME',item)
+          emit('READ_ONLY_PROBE_RESULT',{'games':outcomes,'database_writes':0,'production_changed':False})
+          PY
