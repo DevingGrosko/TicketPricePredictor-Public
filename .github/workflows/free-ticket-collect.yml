@@ -30,9 +30,9 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
-          # Immutable tested free-pipeline source; preserves the NHL single-game exclusion.
-          # Verified by read-only live probes and regression run 36804099733.
-          ref: 7fabf2a764161977f9e370a1c803b270e208b827
+          # Immutable free-pipeline source plus sanitized HTTP observation only.
+          # Regression run 36893019342: 126 tests and 43 subtests passed.
+          ref: 178afaa3ab824212511544f1571bbe8855968c0c
           persist-credentials: false
       - name: Check free cache allowance without touching production caches
         env:
@@ -56,7 +56,7 @@ jobs:
           TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
           TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
           TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
-        run: python -u -m tools.free_live_provider_recovery --sport "$SPORT" --directory "free-capture/$SPORT"
+        run: python -u -m tools.free_live_http_diagnostics --sport "$SPORT" --directory "free-capture/$SPORT"
       - name: Report partial progress even when a game fails
         if: always()
         env:
