@@ -15,7 +15,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        sport: [mlb, nfl, nhl]
+        # MLB paused by user request. Keep stored history and its public catalog.
+        # Resume only by explicitly adding mlb back to this matrix.
+        sport: [nfl, nhl]
     runs-on: ubuntu-latest
     # Drain all work; only individual provider requests retain timeouts.
     environment: tidb-staging
