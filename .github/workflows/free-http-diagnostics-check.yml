@@ -1,0 +1,74 @@
+name: Free HTTP diagnostics checks
+on:
+  push:
+    branches: [fix/free-http-diagnostics-20261001]
+    paths:
+      - tools/free_live_http_diagnostics.py
+      - tests/test_free_live_http_diagnostics.py
+      - .github/workflows/free-http-diagnostics-check.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: free-http-diagnostics-checks
+  cancel-in-progress: false
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --disable-pip-version-check -r requirements-staging.txt pytest pyyaml
+      - run: python -m pytest tests/test_free_live*.py tests/test_free_refresh*.py tests/test_nfl_schedule_capture_resilience.py tests/test_nhl_schedule_collector.py -q
+  probe:
+    needs: offline
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --disable-pip-version-check -r requirements-staging.txt
+      - name: Compare three affected games with no database credentials or writes
+        run: |
+          python -u - <<'PY'
+          import json
+          from contextlib import ExitStack
+          from datetime import datetime, timezone
+          from pathlib import Path
+          import nfl_schedule_collector as nfl
+          import nhl_schedule_collector as nhl
+          from tools.free_live_map_cache import cached_map_matching
+          from tools.free_live_provider_recovery import provider_recovery
+          from tools.free_live_http_diagnostics import http_diagnostics
+          outcomes = []
+          with ExitStack() as stack:
+              stack.enter_context(cached_map_matching())
+              stack.enter_context(http_diagnostics())
+              events = stack.enter_context(provider_recovery())
+              for sport, module, ids in [('nfl', nfl, {'401872971','401872985'}), ('nhl', nhl, {'2026020068'})]:
+                  schedule, _ = module.fetch_schedule_games(datetime.now(timezone.utc))
+                  games = [g for g in schedule if str(g.schedule_id) in ids]
+                  resolutions, errors = module.resolve_schedule_games(games, [], headless=True, timeout=35)
+                  print('HTTP_PROBE_RESOLVED '+json.dumps({'sport':sport,'requested':sorted(ids),'found':[str(g.schedule_id) for g in games],'resolved':len(resolutions),'resolution_error_count':len(errors)}), flush=True)
+                  for resolution in resolutions:
+                      item = {'sport':sport,'schedule_id':str(resolution.game.schedule_id)}
+                      try:
+                          url, at, snapshot = module._capture_resolution(resolution, headless=True, timeout=35)
+                          item.update(status='captured', sections=len(snapshot.sections), event_at=at.isoformat())
+                      except Exception as exc:
+                          item.update(status='failed', error_type=type(exc).__name__, category=getattr(exc,'category',None))
+                      outcomes.append(item)
+                      print('HTTP_PROBE_GAME '+json.dumps(item), flush=True)
+          result = {'tested_at':datetime.now(timezone.utc).isoformat(), 'games':outcomes, 'attempts':len(events),'database_writes':0,'schedules_changed':False}
+          Path('http-probe-result.json').write_text(json.dumps(result,indent=2))
+          print('HTTP_PROBE_RESULT '+json.dumps(result), flush=True)
+          PY
