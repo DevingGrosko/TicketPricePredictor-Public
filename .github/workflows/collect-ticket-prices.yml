@@ -29,6 +29,9 @@ permissions:
 
 jobs:
   collect-baseball:
+    # Paused by user request on 2026-10-01; preserve history and pending files.
+    # Applies to PythonAnywhere dispatches, scheduled fallback, and manual runs.
+    if: ${{ false }}
     concurrency:
       group: baseball-ticket-price-collector
       cancel-in-progress: false
