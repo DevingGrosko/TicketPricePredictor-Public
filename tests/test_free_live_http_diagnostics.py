@@ -98,6 +98,7 @@ class HttpDiagnosticsTests(unittest.TestCase):
         self.assertEqual(proxy.requests,{})
 
     def test_driver_and_original_error_restored_even_if_final_logs_fail(self):
+        import tools
         recovery = ModuleType('tools.free_live_provider_recovery')
         driver = Driver(); browser = SimpleNamespace(driver=driver)
         original_error = ValueError('original capture failure')
@@ -106,7 +107,7 @@ class HttpDiagnosticsTests(unittest.TestCase):
             driver.get_log = lambda kind: (_ for _ in ()).throw(RuntimeError('diagnostic failure'))
             raise original_error
         recovery.capture = capture
-        with patch.dict(sys.modules, {'tools.free_live_provider_recovery': recovery}):
+        with patch.dict(sys.modules, {'tools.free_live_provider_recovery': recovery}), patch.object(tools, 'free_live_provider_recovery', recovery, create=True):
             with http_diagnostics():
                 with self.assertRaises(ValueError) as raised:
                     recovery.capture(browser,'https://www.vividseats.com/production/123')
