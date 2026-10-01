@@ -1,0 +1,61 @@
+name: Vivid error text diagnostic
+on:
+  push:
+    branches: [fix/free-http-diagnostics-20261001]
+    paths: [.github/workflows/free-http-error-text-check.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --disable-pip-version-check -r requirements-staging.txt
+      - name: Read one anonymous error; no database access or request manipulation
+        run: |
+          python -u - <<'PY'
+          import base64,json,re,time
+          from unittest.mock import patch
+          from tools import free_live_http_diagnostics as d
+          from tools.free_live_provider_recovery import provider_recovery
+          from nfl_collector import VividNFLBrowser
+          words = set('a an the this that there here we you your our is are was were be been being have has had do does did not no yes for with from at in on and or if of to as it its by can cannot could failed failure error errors occurred occur while fetching loading retrieving processing request requests unable load fetch retrieve process listings listing tickets ticket inventory data origin upstream backend service server internal external unavailable available temporarily found invalid missing parameter id production event retry please try again later unexpected timeout timed out access denied forbidden authorized unauthorized bad too many rate limit exceeded security blocked bot detected protection resource exist validation format required connection response empty unauthenticated expired token valid provided time support contact suspended account must enable javascript cookies unsupported method query search down system problem encountered authentication authorization denial entity database message code something went wrong getting get listing information'.split())
+          original = d.body_summary
+          seen = []
+          def summary(body, encoded=False):
+              result = original(body,encoded)
+              if result.get('format') == 'json':
+                  try:
+                      value = json.loads(base64.b64decode(body).decode() if encoded else body)
+                      safe = {}
+                      for k in ('error','message','detail','title'):
+                          if isinstance(value,dict) and isinstance(value.get(k),str):
+                              tokens = re.findall(r'[A-Za-z]+|[^A-Za-z\s]+',value[k])[:60]
+                              safe[k] = ' '.join(t.lower() if t.lower() in words else '[redacted]' for t in tokens)
+                      result['word_allowlisted_error'] = safe
+                  except (ValueError,TypeError):
+                      pass
+              seen.append(result)
+              return result
+          url = 'https://www.vividseats.com/buffalo-bills-tickets-orchard-park-highmark-stadium-3-5-2026/production/6488357'
+          with patch.object(d,'body_summary',summary), d.http_diagnostics(), provider_recovery():
+              for attempt in (1,2):
+                  browser = VividNFLBrowser(headless=True,timeout=35)
+                  try:
+                      browser.capture(url)
+                      print('ERROR_TEXT_PROBE_ATTEMPT '+json.dumps({'attempt':attempt,'status':'captured'}),flush=True)
+                  except Exception as exc:
+                      print('ERROR_TEXT_PROBE_ATTEMPT '+json.dumps({'attempt':attempt,'type':type(exc).__name__,'category':getattr(exc,'category',None)}),flush=True)
+                  finally:
+                      browser.close()
+                  if seen:
+                      break
+                  time.sleep(5)
+          print('ERROR_TEXT_PROBE_RESULT '+json.dumps({'error_bodies':seen,'database_writes':0}),flush=True)
+          PY
