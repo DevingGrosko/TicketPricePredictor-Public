@@ -10,7 +10,7 @@ on:
 permissions:
   contents: read
 env:
-  FREE_SOURCE_REF: 223510aa123b977e7afe63603c4259202143da60
+  FREE_SOURCE_REF: 48735f3dd9d70c193e370e8d34cbee9a347f3376
 jobs:
   timer:
     if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/main' && github.event.repository.private == false
