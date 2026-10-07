@@ -500,6 +500,8 @@ def validate_captured_match(
 
 def _retryable_capture_error(exc: Exception) -> bool:
     """Retry only timeout-like provider failures, never validation mismatches."""
+    if hasattr(exc, "retryable"):
+        return bool(exc.retryable)
     return isinstance(exc, TimeoutError) or type(exc).__name__ == "TimeoutException"
 
 

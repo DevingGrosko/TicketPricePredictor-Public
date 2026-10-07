@@ -23,7 +23,7 @@ import re
 import sys
 import time
 from typing import Any
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlsplit
 
 from collector import (
     DISCOVERY_SETTLE_SECONDS,
@@ -665,23 +665,50 @@ return best;
 
     def capture(self, url: str) -> tuple[dict[str, Any], datetime]:
         from selenium.common.exceptions import TimeoutException
+        from vivid_inventory import (
+            InventoryView, MAX_INVENTORY_BYTES, VividCaptureError, http_category,
+            inventory_request, read_inventory, unfiltered_request, validate_inventory,
+        )
 
+        url = validated_vivid_url(url)
+        production_id = urlsplit(url).path.rstrip("/").split("/")[-1]
+        diagnostics = {"production_id": production_id, "responses": [], "body_read_retries": 0}
+        self.capture_diagnostics = diagnostics
+        self.driver.execute_cdp_cmd("Network.enable", {
+            "maxTotalBufferSize": MAX_INVENTORY_BYTES * 2,
+            "maxResourceBufferSize": MAX_INVENTORY_BYTES,
+        })
         self.driver.get_log("performance")
         try:
             self.driver.get(url)
         except TimeoutException:
-            self.driver.execute_script("window.stop();")
+            # The inventory request can still finish after navigation times out.
+            diagnostics["navigation_timeout"] = True
 
         deadline = time.monotonic() + self.timeout
-        listing_ids: set[str] = set()
+        listing_requests: dict[str, dict[str, Any]] = {}
         map_requests: dict[str, tuple[str, str]] = {}
         map_bodies: list[tuple[str, str, str]] = []
         event_date: datetime | None = None
         captured_payload: dict[str, Any] | None = None
         listings_ready_at: float | None = None
         map_view_opened = False
+        inventory_view = InventoryView()
+        next_view_check = 0.0
+        view_action_at = 0.0
+        http_failure: tuple[int, float] | None = None
 
         while time.monotonic() < deadline:
+            if time.monotonic() >= next_view_check:
+                next_view_check = time.monotonic() + 0.5
+                try:
+                    before_actions = len(inventory_view.actions)
+                    inventory_view.prepare(self.driver)
+                    if len(inventory_view.actions) != before_actions:
+                        view_action_at = time.monotonic()
+                except Exception as exc:
+                    diagnostics["inventory_view_error"] = type(exc).__name__
+                diagnostics["inventory_view_actions"] = list(inventory_view.actions)
             if event_date is None:
                 try:
                     event_date = self._event_datetime(url)
@@ -702,8 +729,22 @@ return best;
                     response_url = str(response.get("url") or "")
                     mime_type = str(response.get("mimeType") or "")
                     request_id = str(params.get("requestId") or "")
-                    if "listings" in response_url.casefold():
-                        listing_ids.add(request_id)
+                    status = int(response.get("status") or 0)
+                    if params.get("type") == "Document":
+                        diagnostics["document_status"] = status
+                        if status in (401, 403, 429):
+                            raise VividCaptureError(http_category(status), diagnostics)
+                    if inventory_request(response_url):
+                        diagnostics["responses"].append({"path": urlsplit(response_url).path, "status": status})
+                        if status in (401, 403, 429):
+                            raise VividCaptureError(http_category(status), diagnostics)
+                        if status >= 400:
+                            http_failure = (status, time.monotonic())
+                        elif 200 <= status < 300:
+                            if unfiltered_request(response_url):
+                                listing_requests[request_id] = {"attempts": 0, "next_read": 0.0}
+                            else:
+                                diagnostics["filtered_responses_rejected"] = diagnostics.get("filtered_responses_rejected", 0) + 1
                     if self._looks_like_map_response(response_url, mime_type):
                         map_requests[request_id] = (response_url, mime_type)
                     continue
@@ -711,16 +752,43 @@ return best;
                 if method != "Network.loadingFinished":
                     continue
                 request_id = str(params.get("requestId") or "")
-                if request_id in listing_ids:
-                    payload = self._response_json(request_id)
-                    if payload and payload.get("tickets") and payload.get("global"):
-                        captured_payload = payload
-                        listings_ready_at = listings_ready_at or time.monotonic()
                 if request_id in map_requests:
                     response_url, mime_type = map_requests.pop(request_id)
                     body = self._response_text(request_id)
                     if body:
                         map_bodies.append((body, mime_type, response_url))
+
+            # CDP can report a response before its body is available. Retry the
+            # local read instead of losing the only completion event/reloading.
+            for request_id, request in list(listing_requests.items()):
+                if time.monotonic() < request["next_read"]:
+                    continue
+                request["attempts"] += 1
+                request["next_read"] = time.monotonic() + min(1.0, 0.15 * request["attempts"])
+                try:
+                    payload = read_inventory(self.driver, request_id)
+                except Exception as exc:
+                    diagnostics["body_read_retries"] += 1
+                    diagnostics["last_body_error"] = type(exc).__name__
+                    continue
+                del listing_requests[request_id]
+                try:
+                    validate_inventory(payload, production_id)
+                except VividCaptureError as exc:
+                    if exc.category == "inventory-identity-mismatch":
+                        diagnostics["identity_responses_rejected"] = diagnostics.get("identity_responses_rejected", 0) + 1
+                        continue
+                    raise
+                captured_payload = payload
+                listings_ready_at = listings_ready_at or time.monotonic()
+
+            # Give ordinary quantity controls and v1/v2 transitions a short
+            # chance to produce inventory; deterministic 4xx failures must not
+            # consume the entire per-game timeout or trigger fresh-browser retries.
+            if captured_payload is None and http_failure and not inventory_view.selected_quantity:
+                status, failed_at = http_failure
+                if time.monotonic() - max(failed_at, view_action_at) >= 5.0 and not listing_requests:
+                    raise VividCaptureError(http_category(status), diagnostics, retryable=status >= 500)
 
             if captured_payload is not None and event_date is not None:
                 known_sections = sorted(
@@ -786,7 +854,11 @@ return best;
                 f"Listings loaded, but the event date and time did not appear "
                 f"within {self.timeout} seconds."
             )
-        raise TimeoutError(f"No Vivid listings response appeared within {self.timeout} seconds.")
+        if http_failure:
+            status = http_failure[0]
+            raise VividCaptureError(http_category(status), diagnostics, retryable=status >= 500)
+        category = "filtered-inventory-only" if diagnostics.get("filtered_responses_rejected") else "provider-inventory-timeout"
+        raise VividCaptureError(category, diagnostics, retryable=category == "provider-inventory-timeout")
 
     def discover_games(self, feed_url: str = NFL_FEED_URL) -> list[DiscoveredNFLGame]:
         from selenium.common.exceptions import TimeoutException
@@ -1083,6 +1155,8 @@ def run_smoke_capture(
                 "title": snapshot.title,
                 "venue": snapshot.venue,
                 "section_count": len(snapshot.sections),
+                "inventory_listing_count": len(raw_payload.get("tickets") or []),
+                "capture_diagnostics": getattr(browser, "capture_diagnostics", {}),
                 "lowest_section_price": min(row.price for row in snapshot.sections),
                 "highest_section_price": max(row.price for row in snapshot.sections),
                 "map_geometry_source": (
