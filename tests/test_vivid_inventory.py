@@ -3,9 +3,10 @@ from datetime import datetime, timezone
 import json
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from nfl_collector import VividNFLBrowser
+from collector import VividBrowser
 from nfl_schedule_collector import _retryable_capture_error
 from vivid_inventory import InventoryView, VividCaptureError, inventory_request, read_inventory, unfiltered_request
 
@@ -151,6 +152,18 @@ class RequestTests(unittest.TestCase):
         driver = SimpleNamespace(execute_cdp_cmd=lambda *_args: {
             "body": base64.b64encode(json.dumps(payload()).encode()).decode(), "base64Encoded": True})
         self.assertEqual(read_inventory(driver, "inventory"), payload())
+
+    def test_driver_transport_timeout_is_set_after_client_configuration_exists(self):
+        config = SimpleNamespace(timeout=120)
+        driver = Mock(command_executor=SimpleNamespace(_client_config=config))
+        def start_driver(**_kwargs):
+            config.timeout = 120  # Chrome construction creates the configuration.
+            return driver
+        with patch("selenium.webdriver.Chrome", side_effect=start_driver):
+            browser = VividBrowser(headless=True, timeout=7)
+        self.assertIs(browser.driver, driver)
+        self.assertEqual(config.timeout, 12)
+        driver.set_page_load_timeout.assert_called_once_with(7)
 
 
 class ViewTests(unittest.TestCase):

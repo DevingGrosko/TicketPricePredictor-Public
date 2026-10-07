@@ -82,6 +82,8 @@ class InventoryView:
     def __init__(self):
         self.selected_quantity = False
         self.actions: list[str] = []
+        self.modal_seen = False
+        self.clear_seen = False
 
     @staticmethod
     def visible(elements):
@@ -92,6 +94,7 @@ class InventoryView:
         for dialog in dialogs:
             if "how many tickets" not in dialog.text.casefold():
                 continue
+            self.modal_seen = True
             controls = self.visible(dialog.find_elements("css selector", 'label, [role="checkbox"], input[type="checkbox"], button'))
             for wanted in ("any quantity", "2"):
                 target = next((control for control in controls if (
@@ -113,6 +116,7 @@ class InventoryView:
         if not self.selected_quantity and not filtered_url:
             return
         clear = self.visible(driver.find_elements("css selector", '[data-testid="clear-filters-button"]'))
+        self.clear_seen = self.clear_seen or bool(clear)
         target = clear[0] if clear else None
         if target is not None:
             target.click()
