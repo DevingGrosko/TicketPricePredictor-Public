@@ -12,6 +12,22 @@ from pathlib import Path
 from unittest.mock import patch
 
 UTC = timezone.utc
+NHL_RECOVERY_BATCH_SIZE = 20
+
+
+def nhl_capture_batches(work, backlog, slot, is_due):
+    """Keep current observations ahead of a fair, bounded recovery cohort."""
+    current, recovery = [], []
+    for game in work:
+        (current if is_due(game.event_date, slot, game.schedule_id) else recovery).append(game)
+    current.sort(key=lambda g: (backlog[str(g.schedule_id)]['first_due'],
+                                g.event_date, str(g.schedule_id)))
+    # Untouched games go first, then least recently attempted games. Failed
+    # batches keep their checkpoint and cannot monopolize later recovery runs.
+    recovery.sort(key=lambda g: (backlog[str(g.schedule_id)].get('last_attempt') or '',
+                                 backlog[str(g.schedule_id)]['first_due'],
+                                 g.event_date, str(g.schedule_id)))
+    return current, recovery[:NHL_RECOVERY_BATCH_SIZE], recovery[NHL_RECOVERY_BATCH_SIZE:]
 
 
 def due_since(schedule, slot, previous, select_due):
@@ -117,14 +133,19 @@ def run_nhl(endpoint, token, headless, timeout, health_output, pending_dir):
     raw_schedule_count = len(schedule)
     schedule, report['excluded_games'] = apply_exclusions(schedule, backlog)
     scheduled = {str(g.schedule_id): g for g in schedule}
+    def completed_this_slot(game):
+        receipt = done.get(str(game.schedule_id), {})
+        return (receipt.get('slot') == slot.isoformat()
+                and receipt.get('event_date') == game.event_date.isoformat())
     for game in due_since(schedule, slot, previous, nhl.schedule_games_due):
         identity = str(game.schedule_id)
-        if done.get(identity, {}).get('slot') == slot.isoformat():
+        if completed_this_slot(game):
             continue
         row = asdict(game)
         row['event_date'] = game.event_date.isoformat()
-        first = backlog.get(identity, {}).get('first_due', slot.isoformat())
-        backlog[identity] = {'game': row, 'first_due': first}
+        existing = backlog.get(identity, {})
+        first = existing.get('first_due', slot.isoformat())
+        backlog[identity] = {**existing, 'game': row, 'first_due': first}
     work = []
     for identity, row in list(backlog.items()):
         game = scheduled.get(identity)
@@ -135,60 +156,73 @@ def run_nhl(endpoint, token, headless, timeout, health_output, pending_dir):
         if not nhl.nhl_is_within_capture_window(game.event_date, now):
             report['no_longer_collectible'].append(identity)
             del backlog[identity]
+        elif completed_this_slot(game):
+            del backlog[identity]
         else:
             work.append(game)
-    # Current due work comes first; recovery takes new observations, never backdated prices.
-    work.sort(key=lambda g: (not nhl.nhl_capture_is_due(g.event_date, slot, g.schedule_id),
-                             backlog[str(g.schedule_id)]['first_due'], g.event_date))
+    current, recovery, deferred = nhl_capture_batches(work, backlog, slot, nhl.nhl_capture_is_due)
+    due_now = nhl.schedule_games_due(schedule, slot)
     report.update(scheduled_in_window=raw_schedule_count, scheduled_in_scope=len(schedule),
-                  scheduled_due=len(work), schedule_sources=sources)
+                  scheduled_due=len(work), schedule_sources=sources,
+                  current_due=len(due_now), current_due_selected=len(current),
+                  already_committed=sum(completed_this_slot(game) for game in due_now),
+                  recovery_selected=len(recovery), scheduled_selected=len(current) + len(recovery),
+                  deferred=len(deferred), deferred_games=[str(g.schedule_id) for g in deferred])
     state['last_slot'] = slot.isoformat()
     checkpoint()
-    if work:
+    if current or recovery:
         try:
             feed, warnings = nhl.discover_nhl_games(headless, timeout)
         except Exception as exc:
             feed, warnings = [], ['Feed: ' + type(exc).__name__]
-        resolutions, search_errors = nhl.resolve_schedule_games(work, feed, headless=headless, timeout=timeout)
-        report['errors'].extend(warnings + search_errors)
-    else:
-        resolutions = []
-    resolved = {str(r.game.schedule_id): r for r in resolutions}
-    for game in work:
-        identity = str(game.schedule_id)
-        resolution = resolved.get(identity)
-        if resolution is None or not resolution.candidates:
-            report['unresolved'].append(identity)
-            checkpoint()
+        report['errors'].extend(warnings)
+    # Finish delivery for the current cadence cohort before even resolving old
+    # recovery games. Every unselected game stays in the durable backlog.
+    for batch in (current, recovery):
+        if not batch:
             continue
-        try:
-            url, event_at, snapshot = nhl._capture_resolution(resolution, headless=headless, timeout=timeout)
-            observed = datetime.now(UTC)
-            if not nhl.nhl_is_within_capture_window(event_at, observed):
-                raise ValueError('Event is no longer collectible')
-            payload = nhl.nhl_snapshot_to_payload(url, event_at, observed, snapshot,
-                         schedule=game.snapshot_metadata(snapshot.venue))
-            pending = nhl.queue_snapshot(payload, pending_dir)
-            report['captured'] += 1
-            # No endpoint_available latch. EACH saved game gets a delivery attempt.
-            response = nhl.post_snapshot_with_retry(endpoint, token, payload)
-            if response.get('status') not in ('stored', 'duplicate'):
-                raise ValueError('Unacknowledged game')
-            done[identity] = {'slot': nhl.half_hour_capture_slot(observed).isoformat(),
-                              'event_date': event_at.isoformat()}
-            backlog.pop(identity, None)
-            report['committed'] += 1
-            report['uploaded' if response['status'] == 'stored' else 'duplicates'] += 1
-            item = dict(schedule_id=identity, result=response['status'], sections=len(snapshot.sections),
-                        captured_at=observed.isoformat())
-            report['uploads'].append(item)
-            checkpoint()
-            pending.unlink(missing_ok=True)
-            print('FREE_NHL_GAME ' + json.dumps(item), flush=True)
-        except Exception as exc:
-            report['failed'] += 1
-            report['errors'].append(identity + ': ' + type(exc).__name__)
+        attempted_at = datetime.now(UTC).isoformat()
+        for game in batch:
+            backlog[str(game.schedule_id)]['last_attempt'] = attempted_at
         checkpoint()
+        resolutions, search_errors = nhl.resolve_schedule_games(batch, feed, headless=headless, timeout=timeout)
+        report['errors'].extend(search_errors)
+        resolved = {str(r.game.schedule_id): r for r in resolutions}
+        for game in batch:
+            identity = str(game.schedule_id)
+            resolution = resolved.get(identity)
+            if resolution is None or not resolution.candidates:
+                report['unresolved'].append(identity)
+                checkpoint()
+                continue
+            try:
+                url, event_at, snapshot = nhl._capture_resolution(resolution, headless=headless, timeout=timeout)
+                observed = datetime.now(UTC)
+                if not nhl.nhl_is_within_capture_window(event_at, observed):
+                    raise ValueError('Event is no longer collectible')
+                payload = nhl.nhl_snapshot_to_payload(url, event_at, observed, snapshot,
+                             schedule=game.snapshot_metadata(snapshot.venue))
+                pending = nhl.queue_snapshot(payload, pending_dir)
+                report['captured'] += 1
+                # No endpoint_available latch. EACH saved game gets a delivery attempt.
+                response = nhl.post_snapshot_with_retry(endpoint, token, payload)
+                if response.get('status') not in ('stored', 'duplicate'):
+                    raise ValueError('Unacknowledged game')
+                done[identity] = {'slot': nhl.half_hour_capture_slot(observed).isoformat(),
+                                  'event_date': event_at.isoformat()}
+                backlog.pop(identity, None)
+                report['committed'] += 1
+                report['uploaded' if response['status'] == 'stored' else 'duplicates'] += 1
+                item = dict(schedule_id=identity, result=response['status'], sections=len(snapshot.sections),
+                            captured_at=observed.isoformat())
+                report['uploads'].append(item)
+                checkpoint()
+                pending.unlink(missing_ok=True)
+                print('FREE_NHL_GAME ' + json.dumps(item), flush=True)
+            except Exception as exc:
+                report['failed'] += 1
+                report['errors'].append(identity + ': ' + type(exc).__name__)
+            checkpoint()
     state['completed'] = {key: row for key, row in done.items()
                           if datetime.fromisoformat(row['event_date']) > now - timedelta(days=1)}
     report['status'] = 'degraded' if backlog or report['pending'] or report['errors'] else 'healthy'
