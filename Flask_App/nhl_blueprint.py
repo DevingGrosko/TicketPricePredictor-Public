@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from Flask_App.collection_cadence import half_hour_capture_slot
+
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 import hmac
@@ -362,10 +364,6 @@ class CreateNHLModel:
         return self.SessionLocal
 
 
-def hourly_capture_slot(value: datetime) -> datetime:
-    return value.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
-
-
 def nhl_matchup_teams(title: str) -> tuple[str, str] | None:
     normalized = " ".join(str(title or "").split()).casefold()
     if not normalized or any(marker in normalized for marker in NON_GAME_MARKERS):
@@ -578,7 +576,7 @@ def store_nhl_snapshot(
     model = CreateNHLModel(db_path)
     stored_event_date = event_datetime_for_storage(event_date)
     stored_captured_at = captured_datetime_for_storage(
-        hourly_capture_slot(captured_at)
+        half_hour_capture_slot(captured_at)
     )
     metadata = normalize_nhl_schedule_metadata(
         schedule_metadata,
@@ -749,7 +747,7 @@ def write_nhl_audit(
     currency: str = "USD",
 ) -> Path:
     audit_dir.mkdir(parents=True, exist_ok=True)
-    normalized_capture = hourly_capture_slot(captured_at)
+    normalized_capture = half_hour_capture_slot(captured_at)
     local_capture = normalized_capture.astimezone(EASTERN)
     path = audit_dir / f"{local_capture:%Y-%m-%d}.jsonl"
     record = {
@@ -1010,7 +1008,7 @@ def ingest_nhl_snapshot():
                 "sections": len(snapshot.sections),
                 "map_geometry_sections": geometry_section_count(map_geometry),
                 "currency": schedule_metadata["currency"],
-                "captured_at": eastern_iso(hourly_capture_slot(captured_at)),
+                "captured_at": eastern_iso(half_hour_capture_slot(captured_at)),
                 "compaction": compaction_report,
             }
         ),

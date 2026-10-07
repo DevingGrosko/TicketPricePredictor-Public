@@ -1,6 +1,10 @@
 from datetime import datetime, timezone
 from pathlib import Path
 import unittest
+import os
+import subprocess
+import tempfile
+import textwrap
 
 from nfl_schedule_collector import fetch_schedule_games
 
@@ -75,6 +79,20 @@ class TicketCollectionWorkflowCadenceTests(unittest.TestCase):
             "Skipping NHL on the best-effort GitHub baseball recovery schedule.",
             workflow,
         )
+
+    def test_late_half_hour_dispatch_evaluates_both_leagues(self):
+        workflow = Path('.github/workflows/collect-ticket-prices.yml').read_text()
+        for sport in ('NFL', 'NHL'):
+            step = workflow.split(f'Select the half-hour {sport} slot', 1)[1].split('      - if:', 1)[0]
+            shell = textwrap.dedent(step.split('        run: |\n', 1)[1])
+            with self.subTest(sport=sport), tempfile.TemporaryDirectory() as directory:
+                output = Path(directory)/'output'
+                result = subprocess.run(['bash', '-c', "date() { printf '37\\n'; }; " + shell],
+                    env={**os.environ, 'EVENT_NAME':'workflow_dispatch',
+                         'DISPATCH_SOURCE':'pythonanywhere', 'GITHUB_OUTPUT':str(output)},
+                    text=True, capture_output=True, check=True)
+                self.assertEqual(output.read_text().strip(), 'run=true')
+                self.assertIn('30-minute cycle', result.stdout)
 
 
 if __name__ == "__main__":

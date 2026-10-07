@@ -165,7 +165,7 @@ class NFLScheduleParsingTests(unittest.TestCase):
         self.assertIn("final-week", {game.schedule_id for game in due})
         self.assertLess(len(due), len(games))
         summary = schedule_cadence_summary(games, slot)
-        self.assertEqual(summary["in_window"]["1h"], 1)
+        self.assertEqual(summary["in_window"]["30m"], 1)
         self.assertEqual(summary["in_window"]["6h"], 12)
         self.assertEqual(sum(summary["due_now"].values()), len(due))
 

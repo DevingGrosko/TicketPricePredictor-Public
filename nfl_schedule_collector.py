@@ -38,7 +38,7 @@ from nfl_collector import (
     DiscoveredNFLGame,
     discover_nfl_games,
     extract_nfl_game_rows,
-    hourly_capture_slot,
+    half_hour_capture_slot,
     nfl_capture_interval_hours,
     nfl_capture_is_due,
     nfl_capture_tier,
@@ -316,13 +316,13 @@ def schedule_cadence_summary(
     schedule: list[ScheduledNFLGame],
     capture_slot: datetime,
 ) -> dict[str, dict[str, int]]:
-    in_window = {"1h": 0, "3h": 0, "6h": 0}
-    due = {"1h": 0, "3h": 0, "6h": 0}
+    in_window = {"30m": 0, "3h": 0, "6h": 0}
+    due = {"30m": 0, "3h": 0, "6h": 0}
     for game in schedule:
         interval = nfl_capture_interval_hours(game.event_date, capture_slot)
         if interval is None:
             continue
-        label = f"{interval}h"
+        label = "30m" if interval == 0.5 else f"{interval}h"
         in_window[label] += 1
         if nfl_capture_is_due(game.event_date, capture_slot, game.schedule_id):
             due[label] += 1
@@ -613,7 +613,7 @@ def run_schedule_collector(
         endpoint, token, pending_dir
     )
 
-    capture_slot = hourly_capture_slot(started_at)
+    capture_slot = half_hour_capture_slot(started_at)
     try:
         schedule, schedule_source = fetch_schedule_games(started_at)
     except Exception as exc:
@@ -689,7 +689,7 @@ def run_schedule_collector(
             payload = nfl_snapshot_to_payload(
                 url,
                 event_date,
-                capture_slot,
+                datetime.now(timezone.utc),
                 snapshot,
                 schedule=game.snapshot_metadata(snapshot.venue),
             )
@@ -776,7 +776,7 @@ def run_schedule_collector(
         "cadence_policy": {
             "days_15_to_30_hours": 6,
             "days_8_to_14_hours": 3,
-            "final_7_days_hours": 1,
+            "final_7_days_hours": 0.5,
             "staggering": "deterministic per schedule ID",
         },
         "scheduled_in_window": len(schedule),
