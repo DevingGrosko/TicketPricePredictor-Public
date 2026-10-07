@@ -19,7 +19,7 @@ jobs:
         # Resume only by explicitly adding mlb back to this matrix.
         sport: [nfl, nhl]
     runs-on: ubuntu-latest
-    # Drain all work; only individual provider requests retain timeouts.
+    # Capture due games first; persist and rotate bounded recovery batches.
     environment: tidb-staging
     permissions:
       contents: read
@@ -31,7 +31,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           # Immutable source with half-hour slots and validated full inventory.
-          ref: aab4a320e84d1ecc79dcdda3715f1065500f96c3
+          ref: 223510aa123b977e7afe63603c4259202143da60
           persist-credentials: false
       - name: Check free cache allowance without touching production caches
         env:
