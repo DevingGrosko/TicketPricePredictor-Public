@@ -30,9 +30,8 @@ jobs:
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
-          # Immutable free-pipeline source plus sanitized HTTP observation only.
-          # Regression run 36893019342: 126 tests and 43 subtests passed.
-          ref: 178afaa3ab824212511544f1571bbe8855968c0c
+          # Immutable source with half-hour slots and validated full inventory.
+          ref: 656e4350717c42d3cdf327dc225e7be94e0bca61
           persist-credentials: false
       - name: Check free cache allowance without touching production caches
         env:
@@ -51,12 +50,13 @@ jobs:
       - name: Capture all due games with independent delivery and persistent recovery
         env:
           SPORT: ${{ matrix.sport }}
+          TICKETSIGNAL_BROWSER_MODE: headed
           TICKETSIGNAL_STAGING_SITE: '1'
           TICKETSIGNAL_ENABLE_STAGING_WRITES: '1'
           TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
           TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
           TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
-        run: python -u -m tools.free_live_http_diagnostics --sport "$SPORT" --directory "free-capture/$SPORT"
+        run: xvfb-run --auto-servernum python -u -m tools.free_live_http_diagnostics --sport "$SPORT" --directory "free-capture/$SPORT"
       - name: Report partial progress even when a game fails
         if: always()
         env:

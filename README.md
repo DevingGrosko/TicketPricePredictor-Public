@@ -2,12 +2,13 @@
 
 Full-stack Flask project for collecting ticket listings, storing historical price snapshots, and turning price history into market trends and buying-window signals.
 
-Live app: https://bunnyjeff.pythonanywhere.com/
+Live apps: https://bunnyjeff.pythonanywhere.com/ and https://devinggrosko.github.io/TicketPricePredictor-Public/
 
 ## Active tracking
 
-- MLB games: every 30 minutes during the final 72 hours.
-- NFL games: every 6 hours from days 30–15, every 3 hours from days 14–8, and hourly during the final 7 days.
+- MLB collection is paused; existing history remains available.
+- NFL games: every 6 hours from days 30–15, every 3 hours from days 14–8, and every 30 minutes during the final 7 days.
+- NHL games: every 24 hours from days 30–15, every 12 hours from days 14–8, every 6 hours from days 7–4, and every 30 minutes during the final 72 hours.
 - Each category has its own collector job, API route, pending queue, audit records, backups, SQLAlchemy tables, and SQLite database.
 - NFL analysis is organized by designated home team, game, and section. Teams that share a venue, such as the Giants/Jets or Rams/Chargers, remain separate in the website.
 - Upcoming and completed NFL games remain in one selectable history, so completed games continue feeding cross-game and future stadium-level analysis.
@@ -75,13 +76,13 @@ flask --app Flask_App.flask_app run
 
 ## Collection workflows
 
-PythonAnywhere dispatches GitHub Actions on its reliable 30-minute cadence.
+PythonAnywhere dispatches the legacy GitHub Actions workflow at :08 and :38. The independent free pipeline uses GitHub Actions scheduling and stores its own snapshots in TiDB before publishing GitHub Pages.
 
-- Baseball runs on every dispatch.
-- NFL evaluates its schedule on the first dispatch of each UTC hour.
+- Baseball collection is paused on every trigger.
+- NFL and NHL evaluate their schedules on both half-hour dispatches.
 - The NFL collector first loads the complete scheduled slate inside the exact 30-day window.
-- Each game receives a deterministic phase so 6-hour and 3-hour captures are spread across hourly runs instead of arriving in one large batch.
-- Games 15–30 days out run every 6 hours, games 8–14 days out run every 3 hours, and games in the final 7 days run every hour.
+- Each game receives a deterministic phase so 6-hour and 3-hour captures are spread across scheduled runs instead of arriving in one large batch.
+- Games 15–30 days out run every 6 hours, games 8–14 days out run every 3 hours, and games in the final 7 days run every 30 minutes.
 - Each scheduled matchup is matched to Vivid's NFL feed. A missing feed link is recovered through a targeted Vivid search for the two teams.
 - Feed and search results are candidate links only. The title and kickoff parsed from the individual Vivid event page must match the scheduled matchup before anything is stored.
 - The health report records the number scheduled, matched from the feed, recovered through search, unresolved, captured, queued, and uploaded, plus an explicit coverage percentage.

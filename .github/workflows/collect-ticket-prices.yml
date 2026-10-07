@@ -131,9 +131,8 @@ jobs:
         env:
           COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
         run: |
-          python nfl_schedule_collector.py remote-run \
+          xvfb-run --auto-servernum python nfl_schedule_collector.py remote-run \
             --endpoint https://bunnyjeff.pythonanywhere.com/api/nfl/snapshot \
-            --headless \
             --timeout 45 \
             --health-output nfl_remote_health.json \
             --pending-dir nfl_pending
@@ -202,9 +201,8 @@ jobs:
         env:
           COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
         run: |
-          python nhl_schedule_collector.py remote-run \
+          xvfb-run --auto-servernum python nhl_schedule_collector.py remote-run \
             --endpoint https://bunnyjeff.pythonanywhere.com/api/nhl/snapshot \
-            --headless \
             --timeout 45 \
             --health-output nhl_remote_health.json \
             --pending-dir nhl_pending
