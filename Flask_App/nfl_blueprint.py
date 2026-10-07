@@ -1059,6 +1059,12 @@ def nfl_snapshot_from_payload(payload: dict[str, Any]):
     )
 
 
+def _validate_event_schedule_id(event: NFLEvent, schedule_metadata: dict[str, Any]) -> None:
+    incoming_schedule_id = schedule_metadata.get("schedule_id")
+    if event.schedule_id and incoming_schedule_id and event.schedule_id != incoming_schedule_id:
+        raise ValueError("NFL schedule ID changed for an existing provider event.")
+
+
 def _apply_event_metadata(
     event: NFLEvent,
     snapshot: Any,
@@ -1066,9 +1072,8 @@ def _apply_event_metadata(
     map_geometry: dict[str, Any] | None,
     stored_capture: datetime,
 ) -> None:
+    _validate_event_schedule_id(event, schedule_metadata)
     incoming_schedule_id = schedule_metadata.get("schedule_id")
-    if event.schedule_id and incoming_schedule_id and event.schedule_id != incoming_schedule_id:
-        raise ValueError("NFL schedule ID changed for an existing provider event.")
 
     event.schedule_id = event.schedule_id or incoming_schedule_id
     event.away_team = schedule_metadata.get("away_team") or event.away_team
@@ -1084,13 +1089,11 @@ def _apply_event_metadata(
     if schedule_metadata.get("neutral_site") is not None:
         event.neutral_site = schedule_metadata["neutral_site"]
 
-    if map_geometry is not None:
-        previous_count = geometry_section_count(event.map_geometry)
-        incoming_count = geometry_section_count(map_geometry)
-        if incoming_count >= previous_count:
-            event.map_geometry = map_geometry
-            event.map_source = str(map_geometry.get("source") or "provider")
-            event.geometry_updated_at = stored_capture
+    if geometry_section_count(map_geometry) > 0:
+        # A newer accurate map can cover fewer sections than an older bad match.
+        event.map_geometry = map_geometry
+        event.map_source = str(map_geometry.get("source") or "provider")
+        event.geometry_updated_at = stored_capture
 
 
 def store_nfl_snapshot(
@@ -1134,6 +1137,28 @@ def store_nfl_snapshot(
                 )
                 .first()
             )
+            latest_capture = None
+            if event is not None:
+                _validate_event_schedule_id(event, normalized_metadata)
+                existing = (
+                    session.query(NFLIteration)
+                    .filter(
+                        NFLIteration.event_id == event.id,
+                        NFLIteration.captured_at == stored_captured_at,
+                    )
+                    .first()
+                )
+                if existing is not None:
+                    session.commit()
+                    return event.id, existing.id, False
+                latest = (
+                    session.query(NFLIteration.captured_at)
+                    .filter(NFLIteration.event_id == event.id)
+                    .order_by(NFLIteration.captured_at.desc())
+                    .first()
+                )
+                latest_capture = latest[0] if latest is not None else None
+
             if event is None:
                 event = NFLEvent(
                     source_id=snapshot.source_id,
@@ -1145,7 +1170,8 @@ def store_nfl_snapshot(
                 )
                 session.add(event)
                 session.flush()
-            else:
+            # Older pending prices remain history; only current observations update the event.
+            if latest_capture is None or stored_captured_at >= latest_capture:
                 event.title = snapshot.title
                 event.event_date = stored_event_date
                 event.source_url = url
@@ -1158,25 +1184,13 @@ def store_nfl_snapshot(
                     if row.section not in known_sections
                 ]
 
-            _apply_event_metadata(
-                event,
-                snapshot,
-                normalized_metadata,
-                normalized_geometry,
-                stored_captured_at,
-            )
-
-            existing = (
-                session.query(NFLIteration)
-                .filter(
-                    NFLIteration.event_id == event.id,
-                    NFLIteration.captured_at == stored_captured_at,
+                _apply_event_metadata(
+                    event,
+                    snapshot,
+                    normalized_metadata,
+                    normalized_geometry,
+                    stored_captured_at,
                 )
-                .first()
-            )
-            if existing is not None:
-                session.commit()
-                return event.id, existing.id, False
 
             iteration = NFLIteration(event=event, captured_at=stored_captured_at)
             session.add(iteration)
