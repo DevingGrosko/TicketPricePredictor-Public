@@ -2,11 +2,14 @@
 from __future__ import annotations
 
 import base64
+from datetime import datetime, timezone
 import json
+import time
 from urllib.parse import parse_qs, urlsplit
 
 MAX_INVENTORY_BYTES = 16 * 1024 * 1024
 INVENTORY_PATHS = {"/hermes/api/v1/listings", "/hermes/api/v2/listings"}
+CURRENT_INVENTORY_COOLDOWN_SECONDS = 15
 
 
 class VividCaptureError(RuntimeError):
@@ -70,6 +73,103 @@ def http_category(status: int) -> str:
     if status >= 500:
         return "provider-server-error"
     return "provider-http-error"
+
+
+def _attempt_diagnostics(raw: dict) -> dict:
+    """Retain response evidence without headers, bodies, or session fields."""
+    result = {}
+    production_id = str(raw.get("production_id") or "")
+    if production_id.isdigit() and len(production_id) <= 12:
+        result["production_id"] = production_id
+    if isinstance(raw.get("document_status"), int):
+        result["document_status"] = raw["document_status"]
+    result["responses"] = [
+        {"path": row["path"], "status": row["status"]}
+        for row in raw.get("responses", []) or []
+        if isinstance(row, dict) and row.get("path") in INVENTORY_PATHS
+        and isinstance(row.get("status"), int)
+    ][:10]
+    for key in ("body_read_retries", "inventory_modal_seen", "inventory_clear_seen",
+                "navigation_timeout", "filtered_responses_rejected"):
+        if isinstance(raw.get(key), (int, bool)):
+            result[key] = raw[key]
+    result["inventory_view_actions"] = [
+        action for action in raw.get("inventory_view_actions", []) or []
+        if action in {"quantity-modal-all", "quantity-modal-two", "quantity-filter-all"}
+    ][:10]
+    return result
+
+
+class CurrentInventoryRecovery:
+    """Allow one ordinary reload per current-tier game, across its candidates.
+
+    A 404 remains globally nonretryable. This exception is restricted to a
+    future scheduled game, a successful document, and inventory HTTP 404.
+    """
+
+    def __init__(self, event_date: datetime, maximum_lead_hours: float, *, now=None, sleep=None):
+        self.event_date = event_date
+        self.maximum_lead_hours = maximum_lead_hours
+        self.now = now or (lambda: datetime.now(timezone.utc))
+        self.sleep = sleep or time.sleep
+        self.used = False
+        self.attempts: list[dict] = []
+        self.recovered = False
+
+    def _eligible(self) -> bool:
+        event_date = self.event_date
+        if event_date.tzinfo is None:
+            event_date = event_date.replace(tzinfo=timezone.utc)
+        return 0 < (event_date - self.now()).total_seconds() <= self.maximum_lead_hours * 3600
+
+    def _attach(self, browser) -> dict:
+        raw = getattr(browser, "capture_diagnostics", {})
+        diagnostics = dict(raw) if isinstance(raw, dict) else {}
+        if self.used:
+            diagnostics = _attempt_diagnostics(diagnostics)
+            diagnostics["inventory_recovery"] = {
+                "cooldown_seconds": CURRENT_INVENTORY_COOLDOWN_SECONDS,
+                "recovered": self.recovered,
+                "attempts": list(self.attempts),
+            }
+        browser.capture_diagnostics = diagnostics
+        return diagnostics
+
+    def capture(self, browser, url: str):
+        try:
+            result = browser.capture(url)
+        except Exception as first:
+            raw = getattr(first, "diagnostics", {})
+            evidence = _attempt_diagnostics(raw if isinstance(raw, dict) else {})
+            statuses = [row["status"] for row in evidence["responses"]]
+            if (self.used or not self._eligible()
+                or getattr(first, "category", None) != "provider-inventory-not-found"
+                or evidence.get("production_id") != urlsplit(url).path.rstrip("/").split("/")[-1]
+                or evidence.get("document_status") != 200 or 404 not in statuses
+                or any(status in (401, 403, 429) for status in statuses)):
+                raise
+            self.used = True
+            self.attempts.append({"attempt": 1, "status": "failed", "category": first.category,
+                                  "diagnostics": evidence})
+            self.sleep(CURRENT_INVENTORY_COOLDOWN_SECONDS)
+            if not self._eligible():
+                diagnostics = self._attach(browser)
+                raise VividCaptureError(first.category, diagnostics) from first
+            try:
+                result = browser.capture(url, reload_page=True)
+            except Exception as second:
+                raw = getattr(second, "diagnostics", {})
+                self.attempts.append({"attempt": 2, "status": "failed",
+                                      "category": getattr(second, "category", "provider-recovery-failed"),
+                                      "diagnostics": _attempt_diagnostics(raw if isinstance(raw, dict) else {})})
+                diagnostics = self._attach(browser)
+                # An exhausted reload must not fall into a broad transport retry.
+                raise VividCaptureError(getattr(second, "category", "provider-recovery-failed"), diagnostics) from second
+            self.recovered = True
+            self.attempts.append({"attempt": 2, "status": "captured",
+                                  "diagnostics": _attempt_diagnostics(getattr(browser, "capture_diagnostics", {}) or {})})
+        self._attach(browser)
+        return result
 
 
 class InventoryView:

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import argparse
 import base64
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from html.parser import HTMLParser
@@ -158,6 +158,8 @@ class DiscoveredNFLGame:
 @dataclass(frozen=True)
 class NFLEventSnapshot(EventSnapshot):
     map_geometry: dict[str, Any] | None = None
+    inventory_listing_count: int | None = field(default=None, compare=False)
+    capture_diagnostics: dict[str, Any] | None = field(default=None, compare=False)
 
 
 def is_nfl_game_title(title: str) -> bool:
@@ -674,7 +676,7 @@ return best;
             return None
         return sanitize_map_geometry(raw, known_sections)
 
-    def capture(self, url: str) -> tuple[dict[str, Any], datetime]:
+    def capture(self, url: str, *, reload_page: bool = False) -> tuple[dict[str, Any], datetime]:
         from selenium.common.exceptions import TimeoutException
         from vivid_inventory import (
             InventoryView, MAX_INVENTORY_BYTES, VividCaptureError, http_category,
@@ -691,7 +693,10 @@ return best;
         })
         self.driver.get_log("performance")
         try:
-            self.driver.get(url)
+            if reload_page:
+                self.driver.refresh()
+            else:
+                self.driver.get(url)
         except TimeoutException:
             # The inventory request can still finish after navigation times out.
             diagnostics["navigation_timeout"] = True

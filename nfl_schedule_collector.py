@@ -9,7 +9,7 @@ Vivid search. Every in-scope game is either captured or reported as unresolved.
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 import json
 import os
@@ -34,6 +34,7 @@ from nfl_collector import (
     NFL_CAPTURE_WINDOW_HOURS,
     NFL_TEAM_NAMES,
     NFLSnapshotParser,
+    NFLEventSnapshot,
     VividNFLBrowser,
     DiscoveredNFLGame,
     discover_nfl_games,
@@ -48,6 +49,7 @@ from nfl_collector import (
     run_smoke_capture as run_feed_smoke_capture,
 )
 from nfl_metadata import canonical_venue_name, eastern_iso, geometry_section_count
+from vivid_inventory import CurrentInventoryRecovery
 from Flask_App.report_policy import preseason_title
 
 
@@ -512,6 +514,7 @@ def _capture_resolution(
     timeout: int,
 ) -> tuple[str, datetime, Any]:
     errors: list[str] = []
+    recovery = CurrentInventoryRecovery(resolution.game.event_date, 7 * 24)
     for candidate in resolution.candidates:
         try:
             url = validated_vivid_url(candidate.url)
@@ -523,8 +526,12 @@ def _capture_resolution(
             browser: VividNFLBrowser | None = None
             try:
                 browser = VividNFLBrowser(headless=headless, timeout=timeout)
-                raw_payload, provider_event_date = browser.capture(url)
+                raw_payload, provider_event_date = recovery.capture(browser, url)
                 snapshot = NFLSnapshotParser.parse(raw_payload)
+                if isinstance(snapshot, NFLEventSnapshot):
+                    snapshot = replace(snapshot,
+                        inventory_listing_count=len(raw_payload.get("tickets") or []),
+                        capture_diagnostics=dict(getattr(browser, "capture_diagnostics", {}) or {}))
                 validate_captured_match(
                     resolution.game,
                     provider_event_date,
@@ -730,6 +737,8 @@ def run_schedule_collector(
                             "map_geometry_sections": geometry_section_count(
                                 getattr(snapshot, "map_geometry", None)
                             ),
+                            "inventory_listing_count": getattr(snapshot, "inventory_listing_count", None),
+                            "capture_diagnostics": getattr(snapshot, "capture_diagnostics", None),
                             "resolution_source": resolution.source,
                             "result": response["status"],
                         }
@@ -882,6 +891,8 @@ def run_schedule_smoke(
                 resolution.game.venue or snapshot.venue
             ),
             "section_count": len(snapshot.sections),
+            "inventory_listing_count": getattr(snapshot, "inventory_listing_count", None),
+            "capture_diagnostics": getattr(snapshot, "capture_diagnostics", None),
             "map_geometry_sections": geometry_section_count(
                 getattr(snapshot, "map_geometry", None)
             ),

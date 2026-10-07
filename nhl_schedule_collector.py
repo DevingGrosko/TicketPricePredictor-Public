@@ -53,6 +53,7 @@ from nhl_collector import (
     ordered_matchup_from_title,
 )
 from nfl_metadata import canonical_venue_name, eastern_iso, geometry_section_count
+from vivid_inventory import CurrentInventoryRecovery
 
 
 NHL_SCHEDULE_URL = "https://api-web.nhle.com/v1/schedule/{date}"
@@ -596,12 +597,13 @@ def _capture_resolution(
 ) -> tuple[str, datetime, Any]:
     provider_gap_errors: list[str] = []
     capture_errors: list[str] = []
+    recovery = CurrentInventoryRecovery(resolution.game.event_date, 72)
     for candidate in resolution.candidates:
         browser: VividNFLBrowser | None = None
         try:
             url = validated_vivid_url(candidate.url)
             browser = VividNFLBrowser(headless=headless, timeout=timeout)
-            raw_payload, provider_event_date = browser.capture(url)
+            raw_payload, provider_event_date = recovery.capture(browser, url)
             snapshot = NHLSnapshotParser.parse(raw_payload)
             if isinstance(snapshot, NHLEventSnapshot):
                 snapshot = replace(
@@ -832,6 +834,8 @@ def run_schedule_collector(
                             "map_geometry_sections": geometry_section_count(
                                 getattr(snapshot, "map_geometry", None)
                             ),
+                            "inventory_listing_count": getattr(snapshot, "inventory_listing_count", None),
+                            "capture_diagnostics": getattr(snapshot, "capture_diagnostics", None),
                             "resolution_source": resolution.source,
                             "result": response["status"],
                         }
