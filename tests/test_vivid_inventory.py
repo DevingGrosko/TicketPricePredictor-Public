@@ -37,12 +37,16 @@ class Driver:
         self.bodies = iter(bodies)
         self.reads = 0
         self.last = None
+        self.navigations = []
 
     def get_log(self, _kind):
         return next(self.batches, [])
 
     def get(self, _url):
-        pass
+        self.navigations.append("get")
+
+    def refresh(self):
+        self.navigations.append("refresh")
 
     def find_elements(self, *_args):
         return []
@@ -59,7 +63,7 @@ class Driver:
 
 
 class CaptureTests(unittest.TestCase):
-    def capture(self, batches, bodies):
+    def capture(self, batches, bodies, *, reload_page=False):
         browser = VividNFLBrowser.__new__(VividNFLBrowser)
         browser.timeout = 35
         browser.driver = Driver(batches, bodies)
@@ -76,7 +80,12 @@ class CaptureTests(unittest.TestCase):
         with patch("nfl_collector.time.monotonic", side_effect=lambda: self.clock), \
              patch("nfl_collector.time.sleep", side_effect=sleep), \
              patch("nfl_collector.MAP_GEOMETRY_SETTLE_SECONDS", 0):
-            return browser.capture(URL)
+            return browser.capture(URL, reload_page=reload_page)
+
+    def test_reload_uses_only_the_existing_browser_refresh(self):
+        result, _stamp = self.capture([[response()]], [payload()], reload_page=True)
+        self.assertTrue(result["tickets"])
+        self.assertEqual(self.browser.driver.navigations, ["refresh"])
 
     def test_completed_body_is_retried_locally_without_another_request(self):
         result, stamp = self.capture([[response()], [message("Network.loadingFinished", requestId="inventory")]],

@@ -5,6 +5,9 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+from unittest.mock import Mock
+from datetime import timedelta
+from vivid_inventory import CurrentInventoryRecovery, VividCaptureError
 
 from nhl_collector import (
     DiscoveredNHLGame,
@@ -25,6 +28,31 @@ from nhl_schedule_collector import (
 
 
 class NHLResilienceTests(unittest.TestCase):
+    def test_current_404_uses_one_same_browser_reload_before_parsing(self):
+        game = self._scheduled_game()
+        candidate = DiscoveredNHLGame("https://www.vividseats.com/game/production/7227372",
+                                      game.name, game.local_date)
+        raw = self._thin_payload()
+        raw["tickets"] = [{"l": f"Section {100 + index}", "p": "45", "q": "2"} for index in range(12)]
+        browser = Mock()
+        diagnostics = {"production_id": "7227372", "document_status": 200,
+                       "responses": [{"path": "/hermes/api/v1/listings", "status": 404}]}
+        browser.capture_diagnostics = diagnostics
+        browser.capture.side_effect = [VividCaptureError("provider-inventory-not-found", diagnostics), (raw, game.event_date)]
+        sleep = Mock()
+        with patch("nhl_schedule_collector.CurrentInventoryRecovery", side_effect=lambda date, tier:
+                   CurrentInventoryRecovery(date, tier, now=lambda: game.event_date - timedelta(days=2), sleep=sleep)), \
+             patch("nhl_schedule_collector.VividNFLBrowser", return_value=browser) as factory:
+            _url, _date, snapshot = _capture_resolution(
+                ScheduleResolution(game, (candidate,), "test"), headless=False, timeout=45)
+        self.assertEqual(factory.call_count, 1)
+        self.assertEqual(browser.capture.call_count, 2)
+        self.assertEqual(browser.capture.call_args.kwargs, {"reload_page": True})
+        sleep.assert_called_once_with(15)
+        browser.close.assert_called_once_with()
+        self.assertTrue(snapshot.capture_diagnostics["inventory_recovery"]["recovered"])
+        self.assertEqual(len(snapshot.capture_diagnostics["inventory_recovery"]["attempts"]), 2)
+
     def _scheduled_game(self):
         return ScheduledNHLGame(
             schedule_id="2026010001",
