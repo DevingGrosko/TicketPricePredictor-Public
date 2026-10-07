@@ -28,7 +28,17 @@ FRESHNESS_JS = r'''
       if (boot.sport === 'nfl') interval = lead <= 168 ? 0.5 : lead <= 336 ? 3 : 6;
       if (boot.sport === 'nhl') interval = lead <= 72 ? 0.5 : lead <= 168 ? 6 : lead <= 336 ? 12 : 24;
     }
-    if (interval && date && Date.now() - date.getTime() > (interval * 2 + 0.25) * 3600000) {
+    let deadline = date && interval ? date.getTime() + (interval * 2 + 0.25) * 3600000 : null;
+    const boundaries = boot.sport === 'nfl' ? [[336, 6], [168, 3]]
+                     : boot.sport === 'nhl' ? [[336, 24], [168, 12], [72, 6]] : [];
+    for (const [hoursBefore, previousInterval] of boundaries) {
+      const boundary = game ? new Date(game.event_at).getTime() - hoursBefore * 3600000 : null;
+      if (deadline && date.getTime() < boundary && boundary <= Date.now() &&
+          boundary - date.getTime() <= (previousInterval * 2 + 0.25) * 3600000) {
+        deadline = Math.max(deadline, boundary + (interval * 2 + 0.25) * 3600000);
+      }
+    }
+    if (interval && (!date || !Number.isFinite(date.getTime()) || Date.now() > deadline || date.getTime() > Date.now() + 300000)) {
       label += ' · updates delayed';
       node.dataset.updatesDelayed = 'true';
     }

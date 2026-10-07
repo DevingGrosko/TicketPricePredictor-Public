@@ -263,6 +263,7 @@ def build_sport(sport, spool, events, latest, captures, bundle, now, api, *, pag
                         point['first_captured_at'] = min(observed) if observed else None
                         point['last_captured_at'] = max(observed) if observed else None
         record = {'id': str(eid), 'sport': sport, 'title': event.title, 'venue': venue, 'team': team,
+                  'schedule_id': str(getattr(event, 'schedule_id', '') or ''),
                   'currency': event.currency, 'event_at': api.event_datetime_utc(event.event_date).isoformat(),
                   'captured_through': utc_iso(latest[eid]), 'capture_count': captures[eid]}
         file = bundle.blob('game', {**record, 'sections': bundle.series(raw_series)})
