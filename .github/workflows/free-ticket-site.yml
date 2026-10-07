@@ -23,6 +23,8 @@ jobs:
     if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/main' && github.event.repository.private == false && (github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 3
+    outputs:
+      run: ${{ steps.decision.outputs.run }}
     permissions:
       contents: read
       pages: read
@@ -32,18 +34,26 @@ jobs:
         with:
           ref: ${{ env.FREE_SOURCE_REF }}
           persist-credentials: false
+      - name: Ignore completion of a skipped duplicate collection timer
+        id: decision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COLLECTION_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: python -m tools.free_live_watchdog --publication-gate
       - name: Verify Pages and clean only completed free-pipeline caches
+        if: steps.decision.outputs.run == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: python -m tools.free_live_storage preflight
       - name: Recover a missed collection tick without blocking publication
-        if: github.event_name != 'workflow_run'
+        if: steps.decision.outputs.run == 'true' && github.event_name != 'workflow_run'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: python -m tools.free_live_watchdog
   build:
     needs: ready
+    if: needs.ready.outputs.run == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment: tidb-staging

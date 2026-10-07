@@ -9,9 +9,31 @@ on:
     paths: [.github/workflows/free-ticket-collect.yml]
 permissions:
   contents: read
+env:
+  FREE_SOURCE_REF: 223510aa123b977e7afe63603c4259202143da60
 jobs:
-  capture:
+  timer:
     if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/main' && github.event.repository.private == false
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run: ${{ steps.decision.outputs.run }}
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.FREE_SOURCE_REF }}
+          persist-credentials: false
+      - name: Skip only a redundant GitHub collection timer
+        id: decision
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m tools.free_live_watchdog --collection-gate
+  capture:
+    needs: timer
+    if: needs.timer.outputs.run == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -31,7 +53,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
           # Immutable source with half-hour slots and validated full inventory.
-          ref: 223510aa123b977e7afe63603c4259202143da60
+          ref: ${{ env.FREE_SOURCE_REF }}
           persist-credentials: false
       - name: Check free cache allowance without touching production caches
         env:
