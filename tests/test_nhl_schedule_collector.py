@@ -185,7 +185,7 @@ class NHLScheduleCollectorTests(unittest.TestCase):
         summary = schedule_cadence_summary(games, slot)
         self.assertEqual(
             summary["in_window"],
-            {"1h": 1, "6h": 12, "12h": 12, "24h": 24},
+            {"30m": 1, "6h": 12, "12h": 12, "24h": 24},
         )
         self.assertEqual(sum(summary["due_now"].values()), len(due))
 

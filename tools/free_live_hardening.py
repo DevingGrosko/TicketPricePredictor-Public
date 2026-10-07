@@ -5,6 +5,7 @@ import argparse
 from contextlib import ExitStack
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
+from Flask_App.collection_cadence import half_hour_capture_slot
 from decimal import Decimal
 import json
 from pathlib import Path
@@ -19,17 +20,17 @@ def due_since(schedule, slot, previous, select_due):
     One full daily cadence covers every existing NHL tier. Older missing prices
     cannot be reconstructed by a live scrape and remain historical gaps.
     """
-    slot = slot.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
+    slot = half_hour_capture_slot(slot)
     start = slot
     if previous:
         previous = datetime.fromisoformat(previous).astimezone(UTC)
-        start = min(slot, max(slot - timedelta(hours=23),
-                             previous.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)))
+        start = min(slot, max(slot - timedelta(hours=23, minutes=30),
+                             half_hour_capture_slot(previous) + timedelta(minutes=30)))
     chosen = {}
     while start <= slot:
         for game in select_due(schedule, start):
             chosen[str(game.schedule_id)] = game
-        start += timedelta(hours=1)
+        start += timedelta(minutes=30)
     return sorted(chosen.values(), key=lambda g: (g.event_date, str(g.schedule_id)))
 
 
@@ -92,10 +93,11 @@ def run_nhl(endpoint, token, headless, timeout, health_output, pending_dir):
     state = read_json(state_path)
     backlog, done = state.setdefault('pending', {}), state.setdefault('completed', {})
     now = datetime.now(UTC)
-    slot = nhl.hourly_capture_slot(now)
+    slot = nhl.half_hour_capture_slot(now)
     previous = state.get('last_slot') or read_json(root / 'completed-slot.json').get('slot')
     replayed, _, errors = nhl.replay_pending_snapshots(endpoint, token, pending_dir)
     report = dict(status='running', event_type='nhl', started_at=now.isoformat(),
+                  capture_slot=slot.isoformat(),
                   captured=0, uploaded=0, duplicates=0, committed=0, failed=0,
                   replayed=replayed, errors=list(errors), uploads=[], unresolved=[],
                   no_longer_collectible=[], excluded_games=[])
@@ -135,7 +137,9 @@ def run_nhl(endpoint, token, headless, timeout, health_output, pending_dir):
             del backlog[identity]
         else:
             work.append(game)
-    work.sort(key=lambda g: (backlog[str(g.schedule_id)]['first_due'], g.event_date))
+    # Current due work comes first; recovery takes new observations, never backdated prices.
+    work.sort(key=lambda g: (not nhl.nhl_capture_is_due(g.event_date, slot, g.schedule_id),
+                             backlog[str(g.schedule_id)]['first_due'], g.event_date))
     report.update(scheduled_in_window=raw_schedule_count, scheduled_in_scope=len(schedule),
                   scheduled_due=len(work), schedule_sources=sources)
     state['last_slot'] = slot.isoformat()
@@ -170,7 +174,7 @@ def run_nhl(endpoint, token, headless, timeout, health_output, pending_dir):
             response = nhl.post_snapshot_with_retry(endpoint, token, payload)
             if response.get('status') not in ('stored', 'duplicate'):
                 raise ValueError('Unacknowledged game')
-            done[identity] = {'slot': nhl.hourly_capture_slot(observed).isoformat(),
+            done[identity] = {'slot': nhl.half_hour_capture_slot(observed).isoformat(),
                               'event_date': event_at.isoformat()}
             backlog.pop(identity, None)
             report['committed'] += 1
@@ -225,7 +229,7 @@ def run(sport, directory):
     health = read_json(root / 'health.json')
     if result == 0 and health.get('status') == 'healthy':
         write_json(root / 'completed-slot.json', {'sport': sport,
-                   'slot': datetime.now(UTC).replace(minute=0, second=0, microsecond=0).isoformat()})
+                   'slot': health.get('capture_slot', half_hour_capture_slot(datetime.now(UTC)).isoformat())})
     return result
 
 

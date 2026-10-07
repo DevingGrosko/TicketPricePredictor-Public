@@ -1,5 +1,6 @@
 """Regression tests for complete, resumable capture rather than timed batches."""
 from datetime import datetime, timedelta, timezone
+from dataclasses import asdict, replace
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -63,14 +64,43 @@ class DrainTests(ParallelTests):
             self.assertEqual(report['current_cadence_due'], 2)
             self.assertEqual(report['scheduled_due'], 3)
             # Newly captured prices use this hour, not the missed hour.
-            self.assertTrue(all(nfl.hourly_capture_slot(datetime.fromisoformat(row['captured_at']))
-                                == nfl.hourly_capture_slot(Clock.current) for row in report['uploads']))
+            self.assertTrue(all(nfl.half_hour_capture_slot(datetime.fromisoformat(row['captured_at']))
+                                == nfl.half_hour_capture_slot(Clock.current) for row in report['uploads']))
+
+    def test_current_half_hour_games_precede_old_slow_tier_retries(self):
+        with tempfile.TemporaryDirectory() as directory:
+            nfl, stack, games, captured = self.fixture(directory, 2)
+            initial = datetime.now(timezone.utc).replace(minute=35, second=0, microsecond=0)
+            class Clock(datetime):
+                @classmethod
+                def now(cls, tz=None):
+                    return initial.astimezone(tz) if tz else initial.replace(tzinfo=None)
+            stack.enter_context(patch.object(live, 'datetime', Clock))
+            games[0] = replace(games[0], event_date=initial + timedelta(hours=600))
+            stack.enter_context(patch.object(nfl, 'schedule_games_due', return_value=[games[1]]))
+            stack.enter_context(patch.object(nfl, 'resolve_schedule_games', side_effect=lambda items,*a,**k:
+                ([SimpleNamespace(game=g,candidates=[1],source='test') for g in items],[])))
+            root = Path(directory)
+            old = asdict(games[0]); old['event_date'] = games[0].event_date.isoformat()
+            live.write_json(root/'nfl-backlog.json', {'pending': {'0': {
+                'game': old, 'first_due': (initial-timedelta(hours=5)).isoformat()}}})
+            attempts = []
+            def record(resolution,*args):
+                attempts.append(resolution.game.schedule_id)
+                return captured(resolution)
+            stack.enter_context(patch.object(live,'capture_one',side_effect=record))
+            stack.enter_context(patch.object(nfl,'post_snapshot_with_retry',
+                return_value={'status':'stored','iteration_id':1}))
+            self.assertEqual(live.run_parallel_nfl('','',True,1,root/'health.json',root/'pending',workers=1),0)
+            self.assertEqual(attempts,['1','0'])
+            self.assertTrue(all(row['captured_at'] == initial.isoformat()
+                                for row in live.read_json(root/'health.json')['uploads']))
 
     def test_old_receipts_recover_previously_deferred_games(self):
         with tempfile.TemporaryDirectory() as directory:
             nfl, stack, games, capture = self.fixture(directory, 3)
             root = Path(directory)
-            prior = nfl.hourly_capture_slot(datetime.now(timezone.utc)) - timedelta(hours=1)
+            prior = nfl.half_hour_capture_slot(datetime.now(timezone.utc)) - timedelta(hours=1)
             live.write_json(root/'nfl-committed.json', {'slot': prior.isoformat(), 'completed': {
                 '0|' + games[0].event_date.isoformat(): {'iteration_id': 1, 'url': 'unused'}}})
             stack.enter_context(patch.object(nfl, 'schedule_games_due', side_effect=lambda items, slot:

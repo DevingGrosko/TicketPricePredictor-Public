@@ -8,7 +8,7 @@ from nfl_collector import (
     date_hint_from_url,
     extract_nfl_game_rows,
     adaptive_due_nfl_games,
-    hourly_capture_slot,
+    half_hour_capture_slot,
     is_nfl_game_title,
     nfl_capture_interval_hours,
     nfl_capture_is_due,
@@ -101,11 +101,11 @@ class NFLCadenceTests(unittest.TestCase):
         )
         self.assertFalse(nfl_is_within_capture_window(now, now))
 
-    def test_interval_tiers_use_six_three_and_one_hours(self):
+    def test_interval_tiers_use_six_three_and_half_hours(self):
         now = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
         self.assertEqual(nfl_capture_interval_hours(now + timedelta(hours=720), now), 6)
         self.assertEqual(nfl_capture_interval_hours(now + timedelta(hours=336), now), 3)
-        self.assertEqual(nfl_capture_interval_hours(now + timedelta(hours=168), now), 1)
+        self.assertEqual(nfl_capture_interval_hours(now + timedelta(hours=168), now), 0.5)
         self.assertIsNone(
             nfl_capture_interval_hours(now + timedelta(hours=720, seconds=1), now)
         )
@@ -141,12 +141,12 @@ class NFLCadenceTests(unittest.TestCase):
         self.assertTrue(any("1000001" in game.url for game in due))
         self.assertLessEqual(len(due), len(rows))
 
-    def test_every_run_in_an_hour_maps_to_one_capture_slot(self):
+    def test_second_half_hour_has_a_distinct_capture_slot(self):
         first = datetime(2026, 9, 1, 12, 1, 4, tzinfo=timezone.utc)
         second = datetime(2026, 9, 1, 12, 58, 59, tzinfo=timezone.utc)
         expected = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
-        self.assertEqual(hourly_capture_slot(first), expected)
-        self.assertEqual(hourly_capture_slot(second), expected)
+        self.assertEqual(half_hour_capture_slot(first), expected)
+        self.assertEqual(half_hour_capture_slot(second), expected + timedelta(minutes=30))
 
 
 class NFLSnapshotParserTests(unittest.TestCase):

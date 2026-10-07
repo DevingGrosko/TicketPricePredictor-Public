@@ -15,6 +15,8 @@ from pathlib import Path
 import re
 from unittest.mock import patch
 
+from Flask_App.collection_cadence import half_hour_capture_slot
+
 from sqlalchemy import event as sql_event, func, or_, select
 from sqlalchemy.orm import Session
 
@@ -102,7 +104,7 @@ def parse_payload(sport, payload, now=None):
         raise ValueError('Event is outside the sport capture window')
     if not 1 <= len(snapshot.sections) <= 2000:
         raise ValueError('Invalid bounded section count')
-    slot = captured.replace(minute=0 if captured.minute < 30 else 30, second=0, microsecond=0)
+    slot = half_hour_capture_slot(captured)
     return url, event_datetime_for_storage(at), captured_datetime_for_storage(slot), snapshot, metadata, geometry
 
 

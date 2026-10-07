@@ -87,14 +87,21 @@ class StorageTests(unittest.TestCase):
                         self.assertEqual(session.scalars(select(Event)).one().currency, 'CAD')
 
     def test_next_slot_adds_history_without_replacing_it(self):
-        engine, Event, Iteration, Ticket = self.setup_db('mlb')
-        p = payload(); store_payload(engine, 'mlb', p, now=NOW)
-        p['captured_at'] = (NOW+timedelta(minutes=30)).isoformat()
-        store_payload(engine, 'mlb', p, now=NOW+timedelta(minutes=30))
-        with Session(engine) as s:
-            self.assertEqual(s.scalar(select(func.count()).select_from(Event)), 1)
-            self.assertEqual(s.scalar(select(func.count()).select_from(Iteration)), 2)
-            self.assertEqual(s.scalar(select(func.count()).select_from(Ticket)), 20)
+        for sport in ('mlb', 'nfl', 'nhl'):
+            with self.subTest(sport=sport):
+                engine, Event, Iteration, Ticket = self.setup_db(sport)
+                p = payload(sport); first = store_payload(engine, sport, p, now=NOW)
+                p['captured_at'] = (NOW+timedelta(minutes=30)).isoformat()
+                second = store_payload(engine, sport, p, now=NOW+timedelta(minutes=30))
+                p['captured_at'] = (NOW+timedelta(minutes=59)).isoformat()
+                duplicate = store_payload(engine, sport, p, now=NOW+timedelta(minutes=59))
+                self.assertNotEqual(first['iteration_id'], second['iteration_id'])
+                self.assertEqual(duplicate['iteration_id'], second['iteration_id'])
+                self.assertEqual(duplicate['status'], 'duplicate')
+                with Session(engine) as s:
+                    self.assertEqual(s.scalar(select(func.count()).select_from(Event)), 1)
+                    self.assertEqual(s.scalar(select(func.count()).select_from(Iteration)), 2)
+                    self.assertEqual(s.scalar(select(func.count()).select_from(Ticket)), 20)
 
     def test_partial_failure_rolls_back_event_iteration_and_tickets(self):
         engine, Event, Iteration, Ticket = self.setup_db('mlb')

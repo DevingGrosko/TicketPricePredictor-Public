@@ -1,7 +1,7 @@
 """Run an independent capture cycle, without modifying production collectors.
 
 MLB is evaluated each half-hour. NFL and NHL preserve their existing adaptive
-per-game schedules and are evaluated once an hour. Publishing is separate.
+per-game schedules and are evaluated every 30 minutes. Publishing is separate.
 """
 from __future__ import annotations
 import argparse
@@ -13,7 +13,7 @@ from unittest.mock import patch
 
 def due(sport, moment, force=False):
     if sport not in ('mlb','nfl','nhl'):raise ValueError('Unsupported sport')
-    return force or sport=='mlb' or moment.minute<30
+    return True
 
 
 def run(sport, directory, *, force=False):
@@ -22,7 +22,7 @@ def run(sport, directory, *, force=False):
     now=datetime.now(timezone.utc)
     if not due(sport,now,force):
         report={'status':'not-due','sport':sport,'evaluated_at':now.isoformat(),
-                'reason':'Preserving hourly evaluation of adaptive per-game capture tiers.'}
+                'reason':'Evaluating both half-hour slots with adaptive per-game capture tiers.'}
         (directory/'health.json').write_text(json.dumps(report,indent=2))
         print('FREE_CAPTURE_CADENCE '+json.dumps(report),flush=True)
         return 0

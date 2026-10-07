@@ -2,10 +2,12 @@
 
 NFL history is intentionally isolated from both the existing baseball database
 and the archived concert database. Games are accepted during the final 30 days
-before kickoff, with the collector choosing a 6-hour, 3-hour, or hourly cadence.
+before kickoff, with the collector choosing a 6-hour, 3-hour, or 30-minute cadence.
 """
 
 from __future__ import annotations
+
+from Flask_App.collection_cadence import half_hour_capture_slot
 
 from collections import defaultdict
 from dataclasses import asdict
@@ -920,10 +922,6 @@ class CreateNFLModel:
         return self.SessionLocal
 
 
-def hourly_capture_slot(value: datetime) -> datetime:
-    return value.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
-
-
 def nfl_matchup_teams(title: str) -> tuple[str, str] | None:
     """Return the two NFL teams in title order: away/first, then home/second."""
     normalized = " ".join(str(title or "").split()).casefold()
@@ -1114,7 +1112,7 @@ def store_nfl_snapshot(
 
     model = CreateNFLModel(db_path)
     stored_event_date = event_datetime_for_storage(event_date)
-    stored_captured_at = captured_datetime_for_storage(hourly_capture_slot(captured_at))
+    stored_captured_at = captured_datetime_for_storage(half_hour_capture_slot(captured_at))
     normalized_metadata = normalize_nfl_schedule_metadata(
         schedule_metadata,
         title=snapshot.title,
@@ -1279,7 +1277,7 @@ def write_nfl_audit(
     map_geometry: dict[str, Any] | None = None,
 ) -> Path:
     audit_dir.mkdir(parents=True, exist_ok=True)
-    normalized_capture = hourly_capture_slot(captured_at)
+    normalized_capture = half_hour_capture_slot(captured_at)
     local_capture = normalized_capture.astimezone(EASTERN)
     path = audit_dir / f"{local_capture:%Y-%m-%d}.jsonl"
     record = {
@@ -1393,7 +1391,7 @@ def ingest_nfl_snapshot():
             "iteration_id": iteration_id,
             "sections": len(snapshot.sections),
             "map_geometry_sections": geometry_section_count(map_geometry),
-            "captured_at": eastern_iso(hourly_capture_slot(captured_at)),
+            "captured_at": eastern_iso(half_hour_capture_slot(captured_at)),
         }
     ), 201 if stored else 200
 

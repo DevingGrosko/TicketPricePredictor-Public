@@ -20,7 +20,7 @@ class OrchestrationTests(unittest.TestCase):
         second=first.replace(minute=47)
         for sport in ('mlb','nfl','nhl'):
             self.assertTrue(due(sport,first))
-            self.assertEqual(due(sport,second),sport=='mlb')
+            self.assertTrue(due(sport,second))
             self.assertTrue(due(sport,second,True))
 
     def test_independent_nhl_schedule_does_not_take_production_recovery_skip(self):

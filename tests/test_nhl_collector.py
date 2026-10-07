@@ -92,7 +92,7 @@ class NHLCollectorTests(unittest.TestCase):
             720: (24, "days_15_to_30_daily"),
             336: (12, "days_8_to_14_every_12_hours"),
             168: (6, "days_4_to_7_every_6_hours"),
-            72: (1, "final_72_hours_hourly"),
+            72: (0.5, "final_72_hours_every_30_minutes"),
         }
         for lead_hours, (interval, tier) in expected.items():
             event_date = slot + timedelta(hours=lead_hours)

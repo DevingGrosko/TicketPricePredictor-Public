@@ -55,13 +55,13 @@ def run_parallel_nfl(endpoint, token, headless, timeout, health_output, pending_
         raise ValueError('Only one or two independent browser workers are allowed')
     started = datetime.now(timezone.utc)
     clock = time.monotonic()
-    slot = nfl.hourly_capture_slot(started)
+    slot = nfl.half_hour_capture_slot(started)
     pending_dir = Path(pending_dir)
     receipts_path = pending_dir.parent / 'nfl-committed.json'
     receipts = read_json(receipts_path)
     previous_slot = receipts.get('slot')
     completed = receipts.setdefault('completed', {})
-    # Upgrade the old one-hour receipts without forgetting what was saved.
+    # Upgrade the old hourly receipts without forgetting what was saved.
     for entry in completed.values():
         entry.setdefault('captured_at', previous_slot)
     backlog_path = pending_dir.parent / 'nfl-backlog.json'
@@ -83,10 +83,10 @@ def run_parallel_nfl(endpoint, token, headless, timeout, health_output, pending_
     def key(game):
         return str(game.schedule_id) + '|' + game.event_date.isoformat()
 
-    def done_this_hour(game):
+    def done_this_slot(game):
         entry = completed.get(key(game), {})
         stamp = entry.get('captured_at')
-        return bool(stamp and nfl.hourly_capture_slot(datetime.fromisoformat(stamp)) == slot)
+        return bool(stamp and nfl.half_hour_capture_slot(datetime.fromisoformat(stamp)) == slot)
 
     def remember(game, first_due):
         identity = str(game.schedule_id)
@@ -98,7 +98,7 @@ def run_parallel_nfl(endpoint, token, headless, timeout, health_output, pending_
         }
 
     # Recover the previous version's deferred games even when activation falls
-    # in a new hour. Those old prices cannot be recreated: retry captures NOW.
+    # in a new slot. Those old prices cannot be recreated: retry captures NOW.
     if not backlog.get('migrated_receipts') and previous_slot:
         for game in nfl.schedule_games_due(schedule, datetime.fromisoformat(previous_slot)):
             if key(game) not in completed:
@@ -106,7 +106,7 @@ def run_parallel_nfl(endpoint, token, headless, timeout, health_output, pending_
     backlog['migrated_receipts'] = True
     current_due = nfl.schedule_games_due(schedule, slot)
     for game in current_due:
-        if not done_this_hour(game):
+        if not done_this_slot(game):
             remember(game, slot.isoformat())
 
     # Keep work independent of the cadence slot. Refresh rescheduled games from
@@ -124,13 +124,15 @@ def run_parallel_nfl(endpoint, token, headless, timeout, health_output, pending_
             del pending_games[identity]
             continue
         remember(game, item['first_due'])
-        if done_this_hour(game):
+        if done_this_slot(game):
             del pending_games[identity]
         else:
             carried.append(game)
+    # Newly due observations precede older slow-tier retries. No historical prices are recreated.
     carried.sort(key=lambda game: (
+        not nfl.nfl_capture_is_due(game.event_date, slot, game.schedule_id),
         pending_games[str(game.schedule_id)]['first_due'], game.event_date, str(game.schedule_id)))
-    already = [game for game in current_due if done_this_hour(game)]
+    already = [game for game in current_due if done_this_slot(game)]
     remaining = carried
     due = already + remaining
     write_json(backlog_path, backlog)  # Checkpoint before any provider requests.
@@ -243,8 +245,7 @@ def run(sport, directory):
     root = Path(directory)
     root.mkdir(parents=True, exist_ok=True)
     now = datetime.now(timezone.utc)
-    slot = now.replace(minute=(0 if now.minute < 30 else 30) if sport == 'mlb' else 0,
-                       second=0, microsecond=0).isoformat()
+    slot = nfl.half_hour_capture_slot(now).isoformat()
     state = read_json(root / 'completed-slot.json')
     if (state.get('sport') == sport and state.get('slot') == slot
             and not list((root / 'pending').glob('*.json'))):
@@ -255,7 +256,7 @@ def run(sport, directory):
     write_json(root / 'health.json', {'status': 'running', 'event_type': sport,
         'started_at': now.isoformat(), 'capture_slot': slot})
     # Evaluate the actual current slot even if a cron was delayed past :30.
-    # NFL/NHL retain their hourly adaptive tiers, without a minute-based skip.
+    # NFL/NHL evaluate both half-hour slots and retain the slower adaptive tiers.
     from contextlib import ExitStack
     import collector
     from tools.free_live_mlb import run_remote_mlb

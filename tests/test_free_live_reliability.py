@@ -106,9 +106,16 @@ class ParallelTests(unittest.TestCase):
             self.assertEqual((report['captured'], report['committed'], report['pending']), (3, 2, 1))
             self.assertTrue((root/'pending/1.json').exists())
 
-    def test_duplicate_acknowledgement_is_success_and_same_slot_avoids_recapture(self):
+    def test_receipts_avoid_recapture_in_same_half_hour_but_allow_next_half_hour(self):
         with tempfile.TemporaryDirectory() as directory:
             nfl, stack, games, captured = self.fixture(directory, 1)
+            initial = datetime.now(timezone.utc).replace(minute=5, second=0, microsecond=0)
+            class Clock(datetime):
+                current = initial
+                @classmethod
+                def now(cls, tz=None):
+                    return cls.current.astimezone(tz) if tz else cls.current.replace(tzinfo=None)
+            stack.enter_context(patch('tools.free_live_collect.datetime', Clock))
             capture = stack.enter_context(patch('tools.free_live_collect.capture_one', side_effect=captured))
             stack.enter_context(patch.object(nfl, 'post_snapshot_with_retry', return_value={'status': 'duplicate', 'iteration_id': 11}))
             root = Path(directory)
@@ -117,6 +124,12 @@ class ParallelTests(unittest.TestCase):
             self.assertEqual(run_parallel_nfl(*args), 0)
             self.assertEqual(capture.call_count, 1)
             self.assertEqual(read_json(root/'health.json')['already_committed'], 1)
+            Clock.current += timedelta(minutes=30)
+            self.assertEqual(run_parallel_nfl(*args), 0)
+            self.assertEqual(capture.call_count, 2)
+            self.assertEqual(read_json(root/'health.json')['already_committed'], 0)
+            self.assertEqual(run_parallel_nfl(*args), 0)
+            self.assertEqual(capture.call_count, 2)
 
     def test_delayed_cron_is_not_skipped_by_minute(self):
         with tempfile.TemporaryDirectory() as directory:

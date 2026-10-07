@@ -15,7 +15,7 @@ on:
   schedule:
     # Best-effort baseball recovery trigger. PythonAnywhere dispatches the
     # reliable :08/:38 cadence. The :53 fallback maps to the same half-hour
-    # baseball slot as :38 and is intentionally skipped by hourly league jobs.
+    # baseball slot as :38 and is intentionally skipped by the league jobs.
     - cron: "53 */6 * * *"
   workflow_dispatch:
     inputs:
@@ -87,22 +87,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - name: Select the hourly NFL slot
+      - name: Select the half-hour NFL slot
         id: cadence
         env:
           DISPATCH_SOURCE: ${{ inputs.dispatch_source }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
-          minute="$(date -u +%M)"
           if [[ "$EVENT_NAME" == "schedule" ]]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
             echo "Skipping NFL on the best-effort GitHub baseball recovery schedule."
-          elif [[ "$EVENT_NAME" == "push" || "$DISPATCH_SOURCE" == "manual" || 10#$minute -lt 30 ]]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "NFL cadence evaluation is due for this UTC hour."
           else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping NFL; baseball continues on its 30-minute cadence."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "NFL evaluates every dispatched 30-minute cycle."
           fi
 
       - if: steps.cadence.outputs.run == 'true'
@@ -162,22 +158,18 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - name: Select the hourly NHL slot
+      - name: Select the half-hour NHL slot
         id: cadence
         env:
           DISPATCH_SOURCE: ${{ inputs.dispatch_source }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
-          minute="$(date -u +%M)"
           if [[ "$EVENT_NAME" == "schedule" ]]; then
             echo "run=false" >> "$GITHUB_OUTPUT"
             echo "Skipping NHL on the best-effort GitHub baseball recovery schedule."
-          elif [[ "$EVENT_NAME" == "push" || "$DISPATCH_SOURCE" == "manual" || 10#$minute -lt 30 ]]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "NHL cadence evaluation is due for this UTC hour."
           else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping NHL; baseball continues on its 30-minute cadence."
+            echo "run=true" >> "$GITHUB_OUTPUT"
+            echo "NHL evaluates every dispatched 30-minute cycle."
           fi
 
       - if: steps.cadence.outputs.run == 'true'

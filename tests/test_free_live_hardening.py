@@ -52,7 +52,7 @@ class PolicyTests(unittest.TestCase):
 
     def test_missed_cadence_does_not_wait_for_next_daily_phase(self):
         game=SimpleNamespace(schedule_id='a',event_date=NOW+timedelta(days=20))
-        choose=lambda games,slot: games if slot.hour==10 else []
+        choose=lambda games,slot: games if slot.hour==10 and slot.minute==30 else []
         result=due_since([game],NOW,(NOW-timedelta(hours=4)).isoformat(),choose)
         self.assertEqual(result,[game])
 
@@ -118,3 +118,45 @@ class NHLTests(unittest.TestCase):
             report=json.loads((root/'health.json').read_text())
             self.assertEqual((report['captured'],report['uploaded'],report['pending']),(3,2,1))
             self.assertEqual(report['unfinished_games'],['0'])
+
+    def test_nhl_receipts_allow_the_next_half_hour_without_backdating(self):
+        import nhl_schedule_collector as nhl
+        from tools import free_live_hardening as live
+        from tools.free_live_collect import read_json
+        initial = datetime.now(timezone.utc).replace(minute=5, second=0, microsecond=0)
+        class Clock(datetime):
+            current = initial
+            @classmethod
+            def now(cls, tz=None):
+                return cls.current.astimezone(tz) if tz else cls.current.replace(tzinfo=None)
+        with tempfile.TemporaryDirectory() as directory, ExitStack() as stack:
+            root=Path(directory)
+            game=nhl.ScheduledNHLGame('game',initial+timedelta(hours=8),'Toronto Maple Leafs',
+                'Montreal Canadiens','Bell Centre','Game')
+            stack.enter_context(patch.object(live,'datetime',Clock))
+            stack.enter_context(patch.object(nhl,'replay_pending_snapshots',return_value=(0,True,[])))
+            stack.enter_context(patch.object(nhl,'fetch_schedule_games',return_value=([game],['fixture'])))
+            stack.enter_context(patch.object(nhl,'discover_nhl_games',return_value=([],[])))
+            stack.enter_context(patch.object(nhl,'resolve_schedule_games',side_effect=lambda games,*a,**k:
+                ([SimpleNamespace(game=g,candidates=[1]) for g in games],[])))
+            capture=stack.enter_context(patch.object(nhl,'_capture_resolution',return_value=
+                ('url',game.event_date,SimpleNamespace(venue='Bell Centre',sections=[1]))))
+            stack.enter_context(patch.object(nhl,'nhl_snapshot_to_payload',return_value={'id':'game'}))
+            def queue(data,pending):
+                pending.mkdir(parents=True,exist_ok=True);path=pending/'game.json'
+                path.write_text(json.dumps(data));return path
+            stack.enter_context(patch.object(nhl,'queue_snapshot',side_effect=queue))
+            stack.enter_context(patch.object(nhl,'post_snapshot_with_retry',return_value={'status':'stored'}))
+            args=('','',True,1,root/'health.json',root/'pending')
+            self.assertEqual(run_nhl(*args),0)
+            self.assertEqual(run_nhl(*args),0)
+            self.assertEqual(capture.call_count,1)
+            Clock.current+=timedelta(minutes=30)
+            self.assertEqual(run_nhl(*args),0)
+            self.assertEqual(capture.call_count,2)
+            report=read_json(root/'health.json')
+            self.assertEqual(report['uploads'][0]['captured_at'],Clock.current.isoformat())
+            self.assertEqual(read_json(root/'nhl-progress.json')['completed']['game']['slot'],
+                nhl.half_hour_capture_slot(Clock.current).isoformat())
+            self.assertEqual(run_nhl(*args),0)
+            self.assertEqual(capture.call_count,2)

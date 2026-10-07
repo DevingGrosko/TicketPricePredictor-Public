@@ -43,7 +43,7 @@ from nhl_collector import (
     VividNFLBrowser,
     discover_nhl_games,
     extract_nhl_game_rows,
-    hourly_capture_slot,
+    half_hour_capture_slot,
     nhl_capture_interval_hours,
     nhl_capture_is_due,
     nhl_capture_tier,
@@ -397,14 +397,14 @@ def schedule_cadence_summary(
     schedule: list[ScheduledNHLGame],
     capture_slot: datetime,
 ) -> dict[str, dict[str, int]]:
-    labels = ("1h", "6h", "12h", "24h")
+    labels = ("30m", "6h", "12h", "24h")
     in_window = {label: 0 for label in labels}
     due = {label: 0 for label in labels}
     for game in schedule:
         interval = nhl_capture_interval_hours(game.event_date, capture_slot)
         if interval is None:
             continue
-        label = f"{interval}h"
+        label = "30m" if interval == 0.5 else f"{interval}h"
         in_window[label] = in_window.get(label, 0) + 1
         if nhl_capture_is_due(game.event_date, capture_slot, game.schedule_id):
             due[label] = due.get(label, 0) + 1
@@ -685,7 +685,7 @@ def run_schedule_collector(
         token,
         pending_dir,
     )
-    capture_slot = hourly_capture_slot(started_at)
+    capture_slot = half_hour_capture_slot(started_at)
 
     try:
         schedule, schedule_sources = fetch_schedule_games(started_at)
@@ -776,7 +776,7 @@ def run_schedule_collector(
             payload = nhl_snapshot_to_payload(
                 url,
                 event_date,
-                capture_slot,
+                datetime.now(timezone.utc),
                 snapshot,
                 schedule=game.snapshot_metadata(snapshot.venue),
             )
