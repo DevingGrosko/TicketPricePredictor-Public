@@ -54,13 +54,12 @@ jobs:
             --horizon-hours 720 \
             > nfl_schedule_result.json
 
-      - name: Capture one NFL event without writing to production
+      - name: Capture one NFL event in ordinary headed Chrome without writing to production
         env:
           REQUESTED_EVENT_URL: ${{ inputs.event_url }}
         run: |
-          timeout --signal=TERM --kill-after=10s 120s \
+          xvfb-run --auto-servernum timeout --signal=TERM --kill-after=10s 120s \
             python nfl_collector.py smoke "$REQUESTED_EVENT_URL" \
-            --headless \
             --timeout 45 \
             --output nfl_smoke_result.json
 
