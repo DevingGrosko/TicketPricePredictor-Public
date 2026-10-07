@@ -3,7 +3,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
-from nfl_collector import DiscoveredNFLGame
+from nfl_collector import DiscoveredNFLGame, NFLEventSnapshot
+from vivid_inventory import CurrentInventoryRecovery, VividCaptureError
 from nfl_schedule_collector import (
     ScheduleResolution,
     ScheduledNFLGame,
@@ -32,6 +33,30 @@ class NFLScheduleCaptureResilienceTests(unittest.TestCase):
             source="vivid-nfl-feed",
         )
         self.snapshot = SimpleNamespace(title="New England Patriots at Seattle Seahawks")
+
+    def test_current_404_reloads_same_browser_once_and_retains_both_attempts(self):
+        browser = Mock()
+        diagnostics = {"production_id": "6493039", "document_status": 200,
+                       "responses": [{"path": "/hermes/api/v1/listings", "status": 404}]}
+        browser.capture_diagnostics = diagnostics
+        browser.capture.side_effect = [VividCaptureError("provider-inventory-not-found", diagnostics),
+                                       ({"tickets": [1]}, self.game.event_date)]
+        snapshot = NFLEventSnapshot(source_id="6493039", title=self.snapshot.title,
+                                    venue="Lumen Field", sections=())
+        sleep = Mock()
+        with patch("nfl_schedule_collector.CurrentInventoryRecovery", side_effect=lambda date, tier:
+                   CurrentInventoryRecovery(date, tier, now=lambda: self.game.event_date - timedelta(days=2), sleep=sleep)), \
+             patch("nfl_schedule_collector.VividNFLBrowser", return_value=browser) as factory, \
+             patch("nfl_schedule_collector.NFLSnapshotParser.parse", return_value=snapshot):
+            _url, _date, captured = _capture_resolution(self.resolution, headless=False, timeout=45)
+        self.assertEqual(factory.call_count, 1)
+        self.assertEqual(browser.capture.call_count, 2)
+        self.assertEqual(browser.capture.call_args.kwargs, {"reload_page": True})
+        sleep.assert_called_once_with(15)
+        browser.close.assert_called_once_with()
+        self.assertEqual(captured.inventory_listing_count, 1)
+        self.assertTrue(captured.capture_diagnostics["inventory_recovery"]["recovered"])
+        self.assertEqual(len(captured.capture_diagnostics["inventory_recovery"]["attempts"]), 2)
 
     def test_schedule_kickoff_is_authoritative_after_provider_time_validation(self):
         # This mirrors the production Seattle failure: Vivid rendered 5:20 PM
