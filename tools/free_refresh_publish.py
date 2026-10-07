@@ -140,8 +140,10 @@ def build(output,cache_directory,*,scheduled=False):
     with patch.object(source,'read_sport',reader.read_sport):
         report = original_build(output)
     validate(output)
-    mounted = mount_pages(output,scheduled=scheduled)
-    report.update(mounted,source_reads=reader.metrics,deployed=False)
+    mount_pages(output,scheduled=scheduled)
+    from tools.free_public_assets import retain_public_assets
+    retention = retain_public_assets(output, cache)
+    report.update(validate_mounted(output), **retention, source_reads=reader.metrics,deployed=False)
     print('FREE_PAGES_BUILD '+json.dumps(report),flush=True)
     return report
 
