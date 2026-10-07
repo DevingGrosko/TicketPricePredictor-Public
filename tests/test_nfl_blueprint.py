@@ -47,7 +47,7 @@ class NFLDatabaseIsolationTests(unittest.TestCase):
             ),
         )
 
-    def test_hourly_storage_is_separate_and_idempotent(self):
+    def test_half_hour_storage_is_separate_and_idempotent(self):
         with tempfile.TemporaryDirectory() as directory:
             db_path = Path(directory) / "nfl.db"
             snapshot = self._snapshot()
@@ -55,7 +55,7 @@ class NFLDatabaseIsolationTests(unittest.TestCase):
                 2026, 9, 13, 13, tzinfo=ZoneInfo("America/New_York")
             )
             first = datetime(2026, 9, 6, 17, 5, tzinfo=timezone.utc)
-            second = datetime(2026, 9, 6, 17, 55, tzinfo=timezone.utc)
+            second = datetime(2026, 9, 6, 17, 25, tzinfo=timezone.utc)
             url = "https://www.vividseats.com/game/production/1234567"
 
             event_id, iteration_id, stored = store_nfl_snapshot(

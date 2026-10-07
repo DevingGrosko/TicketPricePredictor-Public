@@ -200,25 +200,12 @@ class VividBrowser:
         try:
             from selenium import webdriver
             from selenium import __version__ as selenium_version
-            from selenium.webdriver.remote.remote_connection import RemoteConnection
         except ModuleNotFoundError as exc:
             raise RuntimeError(
                 "Selenium is not installed. Run: pip install -r requirements.txt"
             ) from exc
 
         self.timeout = timeout
-        # Selenium otherwise waits up to 120 seconds for a frozen local
-        # ChromeDriver command, which caused failed cycles to consume hours of
-        # wall time.  Keep the transport timeout close to our capture timeout.
-        try:
-            RemoteConnection.set_timeout(timeout + 5)
-        except AttributeError:
-            # Selenium 4.26+ no longer initializes the class-level client
-            # configuration until ChromeDriver is constructed.  Calling the
-            # deprecated setter before then raises instead of setting a
-            # timeout.  The failure guards below still bound the cycle, and
-            # requirements.txt pins the release that supports this setter.
-            pass
         options = webdriver.ChromeOptions()
         profile_root = os.environ.get("VIVID_CHROME_PROFILE")
         if profile_root:
@@ -280,6 +267,15 @@ class VividBrowser:
                 raise
         else:
             self.driver = webdriver.Chrome(options=options)
+        # Selenium 4.26+ creates ClientConfig while constructing ChromeDriver.
+        # Setting the old class-level default before then either raises or is
+        # overwritten. Bound this driver's transport, including get_log/CDP.
+        executor = self.driver.command_executor
+        config = getattr(executor, "_client_config", None)
+        if config is not None:
+            config.timeout = timeout + 5
+        else:
+            executor.set_timeout(timeout + 5)
         self.driver.set_page_load_timeout(timeout)
         self.driver.execute_cdp_cmd("Network.enable", {})
         self.driver.execute_cdp_cmd(

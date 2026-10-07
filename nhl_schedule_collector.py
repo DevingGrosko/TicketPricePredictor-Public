@@ -8,7 +8,7 @@ cadence slot, and records explicit coverage and upload health.
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 import json
 import os
@@ -35,6 +35,7 @@ from nhl_collector import (
     NHL_DAILY_CADENCE_HOURS,
     NHL_FINAL_CADENCE_HOURS,
     NHLInventoryIncompleteError,
+    NHLEventSnapshot,
     NHL_SIX_HOUR_CADENCE_HOURS,
     NHL_TEAM_NAMES,
     NHL_TWELVE_HOUR_CADENCE_HOURS,
@@ -43,7 +44,7 @@ from nhl_collector import (
     VividNFLBrowser,
     discover_nhl_games,
     extract_nhl_game_rows,
-    hourly_capture_slot,
+    half_hour_capture_slot,
     nhl_capture_interval_hours,
     nhl_capture_is_due,
     nhl_capture_tier,
@@ -397,14 +398,14 @@ def schedule_cadence_summary(
     schedule: list[ScheduledNHLGame],
     capture_slot: datetime,
 ) -> dict[str, dict[str, int]]:
-    labels = ("1h", "6h", "12h", "24h")
+    labels = ("30m", "6h", "12h", "24h")
     in_window = {label: 0 for label in labels}
     due = {label: 0 for label in labels}
     for game in schedule:
         interval = nhl_capture_interval_hours(game.event_date, capture_slot)
         if interval is None:
             continue
-        label = f"{interval}h"
+        label = "30m" if interval == 0.5 else f"{interval}h"
         in_window[label] = in_window.get(label, 0) + 1
         if nhl_capture_is_due(game.event_date, capture_slot, game.schedule_id):
             due[label] = due.get(label, 0) + 1
@@ -602,6 +603,13 @@ def _capture_resolution(
             browser = VividNFLBrowser(headless=headless, timeout=timeout)
             raw_payload, provider_event_date = browser.capture(url)
             snapshot = NHLSnapshotParser.parse(raw_payload)
+            if isinstance(snapshot, NHLEventSnapshot):
+                snapshot = replace(
+                    snapshot,
+                    inventory_listing_count=len(raw_payload.get("tickets") or []),
+                    capture_diagnostics=dict(getattr(browser, "capture_diagnostics", {}) or {}),
+                    map_geometry_diagnostics=raw_payload.get("_map_geometry_diagnostics"),
+                )
             event_date = validate_captured_match(
                 resolution.game,
                 provider_event_date,
@@ -685,7 +693,7 @@ def run_schedule_collector(
         token,
         pending_dir,
     )
-    capture_slot = hourly_capture_slot(started_at)
+    capture_slot = half_hour_capture_slot(started_at)
 
     try:
         schedule, schedule_sources = fetch_schedule_games(started_at)
@@ -776,7 +784,7 @@ def run_schedule_collector(
             payload = nhl_snapshot_to_payload(
                 url,
                 event_date,
-                capture_slot,
+                datetime.now(timezone.utc),
                 snapshot,
                 schedule=game.snapshot_metadata(snapshot.venue),
             )
@@ -1018,6 +1026,9 @@ def run_schedule_smoke(
                 ),
                 "currency": snapshot.currency,
                 "section_count": len(snapshot.sections),
+                "inventory_listing_count": getattr(snapshot, "inventory_listing_count", None),
+                "capture_diagnostics": getattr(snapshot, "capture_diagnostics", None),
+                "map_geometry_diagnostics": getattr(snapshot, "map_geometry_diagnostics", None),
                 "map_geometry_sections": geometry_section_count(
                     getattr(snapshot, "map_geometry", None)
                 ),

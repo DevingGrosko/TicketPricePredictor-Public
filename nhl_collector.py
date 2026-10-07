@@ -2,14 +2,16 @@
 
 NHL games are sampled during the final 30 days before puck drop. Collection is
 daily from 30 to 14 days, every 12 hours from 14 to 7 days, every 6 hours from
-7 days to 72 hours, and hourly throughout the final 72 hours. Collection stops
+7 days to 72 hours, and every 30 minutes throughout the final 72 hours. Collection stops
 at the scheduled start time.
 """
 
 from __future__ import annotations
 
+from Flask_App.collection_cadence import half_hour_capture_slot, phased_capture_is_due
+
 import argparse
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from html.parser import HTMLParser
@@ -49,7 +51,7 @@ NHL_CAPTURE_WINDOW_HOURS = 30 * 24
 NHL_HOURLY_WINDOW_HOURS = 72
 NHL_SIX_HOUR_WINDOW_HOURS = 7 * 24
 NHL_TWELVE_HOUR_WINDOW_HOURS = 14 * 24
-NHL_FINAL_CADENCE_HOURS = 1
+NHL_FINAL_CADENCE_HOURS = 0.5
 NHL_SIX_HOUR_CADENCE_HOURS = 6
 NHL_TWELVE_HOUR_CADENCE_HOURS = 12
 NHL_DAILY_CADENCE_HOURS = 24
@@ -154,6 +156,9 @@ class DiscoveredNHLGame:
 class NHLEventSnapshot(EventSnapshot):
     map_geometry: dict[str, Any] | None = None
     currency: str = "USD"
+    inventory_listing_count: int | None = field(default=None, compare=False)
+    capture_diagnostics: dict[str, Any] | None = field(default=None, compare=False)
+    map_geometry_diagnostics: dict[str, Any] | None = field(default=None, compare=False)
 
 
 def ordered_matchup_from_title(title: str) -> tuple[str, str] | None:
@@ -501,11 +506,7 @@ def discover_nhl_games(headless: bool, timeout: int) -> tuple[list[DiscoveredNHL
     return rows, errors
 
 
-def hourly_capture_slot(value: datetime) -> datetime:
-    return value.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
-
-
-def nhl_capture_interval_hours(event_date: datetime, now: datetime) -> int | None:
+def nhl_capture_interval_hours(event_date: datetime, now: datetime) -> int | float | None:
     hours_until = (
         as_utc(event_date) - now.astimezone(timezone.utc)
     ).total_seconds() / 3600
@@ -523,7 +524,7 @@ def nhl_capture_interval_hours(event_date: datetime, now: datetime) -> int | Non
 def nhl_capture_tier(event_date: datetime, now: datetime) -> str | None:
     interval = nhl_capture_interval_hours(event_date, now)
     return {
-        NHL_FINAL_CADENCE_HOURS: "final_72_hours_hourly",
+        NHL_FINAL_CADENCE_HOURS: "final_72_hours_every_30_minutes",
         NHL_SIX_HOUR_CADENCE_HOURS: "days_4_to_7_every_6_hours",
         NHL_TWELVE_HOUR_CADENCE_HOURS: "days_8_to_14_every_12_hours",
         NHL_DAILY_CADENCE_HOURS: "days_15_to_30_daily",
@@ -548,8 +549,7 @@ def nhl_capture_is_due(
         return True
     phase_key = cadence_key or as_utc(event_date).isoformat()
     phase = nhl_capture_phase(phase_key, interval)
-    utc_hour = int(hourly_capture_slot(capture_slot).timestamp() // 3600)
-    return utc_hour % interval == phase
+    return phased_capture_is_due(capture_slot, interval, phase)
 
 
 def nhl_is_within_capture_window(event_date: datetime, now: datetime) -> bool:
@@ -605,7 +605,11 @@ def run_smoke_capture(
             "venue": snapshot.venue,
             "currency": snapshot.currency,
             "section_count": len(snapshot.sections),
+            "inventory_listing_count": len(raw_payload.get("tickets") or []),
+            "capture_diagnostics": getattr(browser, "capture_diagnostics", {}),
+            "map_geometry_diagnostics": raw_payload.get("_map_geometry_diagnostics"),
             "map_geometry_sections": geometry_section_count(snapshot.map_geometry),
+            "map_geometry": snapshot.map_geometry,
             "sections": [asdict(row) for row in snapshot.sections],
         }
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -617,6 +621,11 @@ def run_smoke_capture(
         return 0
     except Exception as exc:
         output.parent.mkdir(parents=True, exist_ok=True)
+        if browser is not None:
+            try:
+                browser.driver.save_screenshot(str(output.with_suffix(".png")))
+            except Exception:
+                pass
         output.write_text(
             json.dumps(
                 {

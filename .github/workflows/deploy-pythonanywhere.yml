@@ -8,6 +8,10 @@ on:
       - "Flask_App/**"
       - "models.py"
       - "graph_builder.py"
+      - "collector.py"
+      - "nfl_collector.py"
+      - "nfl_schedule_collector.py"
+      - "vivid_inventory.py"
       - "nhl_collector.py"
       - "nhl_schedule_collector.py"
       - "requirements.txt"
@@ -20,6 +24,10 @@ on:
       - "Flask_App/**"
       - "models.py"
       - "graph_builder.py"
+      - "collector.py"
+      - "nfl_collector.py"
+      - "nfl_schedule_collector.py"
+      - "vivid_inventory.py"
       - "nhl_collector.py"
       - "nhl_schedule_collector.py"
       - "requirements.txt"
@@ -61,6 +69,11 @@ jobs:
           python -m py_compile \
             models.py \
             graph_builder.py \
+            collector.py \
+            nfl_collector.py \
+            nfl_schedule_collector.py \
+            vivid_inventory.py \
+            Flask_App/collection_cadence.py \
             nhl_collector.py \
             nhl_schedule_collector.py \
             Flask_App/flask_app.py \
@@ -115,6 +128,31 @@ jobs:
             -o IdentitiesOnly=yes \
             -o StrictHostKeyChecking=yes \
             bunnyjeff@ssh.pythonanywhere.com deploy
+
+      - name: Verify production database connectivity
+        env:
+          COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
+        run: |
+          python - <<'PY'
+          import json, os, time
+          from urllib.request import Request, urlopen
+          for attempt in range(8):
+              try:
+                  request = Request('https://bunnyjeff.pythonanywhere.com/api/database/status',
+                      headers={'Authorization': 'Bearer ' + os.environ['COLLECTOR_INGEST_TOKEN']})
+                  with urlopen(request, timeout=30) as response:
+                      status = json.load(response)
+                  assert status['status'] == 'ok' and status['backend'] == 'mysql', status
+                  assert status['migration_paused'] is False, status
+                  assert all(status['databases'][sport]['connected'] and
+                      status['databases'][sport]['dialect'] == 'mysql' for sport in ('mlb', 'nfl', 'nhl')), status
+                  print(json.dumps(status), flush=True)
+                  break
+              except Exception:
+                  if attempt == 7:
+                      raise
+                  time.sleep(5)
+          PY
 
       - name: Backfill materialized ticket analytics
         timeout-minutes: 120
