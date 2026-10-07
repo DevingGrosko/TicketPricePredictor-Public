@@ -12,6 +12,8 @@ on:
       - "vivid_inventory.py"
       - "tests/test_vivid_inventory.py"
       - "tests/test_nfl_geometry_matching.py"
+      - "tools/schedule_capture_smoke.py"
+      - "tests/test_schedule_capture_smoke.py"
       - "nfl_metadata.py"
       - "Flask_App/nhl_blueprint.py"
       - "Flask_App/static/js/nhl-map.js"
@@ -24,6 +26,10 @@ on:
     inputs:
       event_url:
         description: Optional Vivid Seats NHL event URL
+        required: false
+        default: ""
+      schedule_id:
+        description: Optional official NHL game ID for one-game schedule capture
         required: false
         default: ""
 
@@ -59,11 +65,18 @@ jobs:
       - name: Capture one NHL event in ordinary headed Chrome without writing to production
         env:
           REQUESTED_EVENT_URL: ${{ inputs.event_url }}
+          REQUESTED_SCHEDULE_ID: ${{ inputs.schedule_id }}
         run: |
-          xvfb-run --auto-servernum timeout --signal=TERM --kill-after=10s 120s \
-            python nhl_schedule_collector.py smoke "$REQUESTED_EVENT_URL" \
-            --timeout 45 \
-            --output nhl_smoke_result.json
+          if [ -n "$REQUESTED_SCHEDULE_ID" ]; then
+            xvfb-run --auto-servernum timeout --signal=TERM --kill-after=10s 180s \
+              python tools/schedule_capture_smoke.py --sport nhl \
+              --schedule-id "$REQUESTED_SCHEDULE_ID" --event-url "$REQUESTED_EVENT_URL" \
+              --timeout 45 --output nhl_smoke_result.json
+          else
+            xvfb-run --auto-servernum timeout --signal=TERM --kill-after=10s 120s \
+              python nhl_schedule_collector.py smoke "$REQUESTED_EVENT_URL" \
+              --timeout 45 --output nhl_smoke_result.json
+          fi
 
       - name: Validate NHL section prices, currency, and optional geometry
         run: |
