@@ -11,7 +11,7 @@ from __future__ import annotations
 from Flask_App.collection_cadence import half_hour_capture_slot, phased_capture_is_due
 
 import argparse
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from html.parser import HTMLParser
@@ -156,6 +156,9 @@ class DiscoveredNHLGame:
 class NHLEventSnapshot(EventSnapshot):
     map_geometry: dict[str, Any] | None = None
     currency: str = "USD"
+    inventory_listing_count: int | None = field(default=None, compare=False)
+    capture_diagnostics: dict[str, Any] | None = field(default=None, compare=False)
+    map_geometry_diagnostics: dict[str, Any] | None = field(default=None, compare=False)
 
 
 def ordered_matchup_from_title(title: str) -> tuple[str, str] | None:
@@ -604,6 +607,7 @@ def run_smoke_capture(
             "section_count": len(snapshot.sections),
             "inventory_listing_count": len(raw_payload.get("tickets") or []),
             "capture_diagnostics": getattr(browser, "capture_diagnostics", {}),
+            "map_geometry_diagnostics": raw_payload.get("_map_geometry_diagnostics"),
             "map_geometry_sections": geometry_section_count(snapshot.map_geometry),
             "map_geometry": snapshot.map_geometry,
             "sections": [asdict(row) for row in snapshot.sections],
