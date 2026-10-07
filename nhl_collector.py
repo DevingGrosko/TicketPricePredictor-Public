@@ -605,7 +605,10 @@ def run_smoke_capture(
             "venue": snapshot.venue,
             "currency": snapshot.currency,
             "section_count": len(snapshot.sections),
+            "inventory_listing_count": len(raw_payload.get("tickets") or []),
+            "capture_diagnostics": getattr(browser, "capture_diagnostics", {}),
             "map_geometry_sections": geometry_section_count(snapshot.map_geometry),
+            "map_geometry": snapshot.map_geometry,
             "sections": [asdict(row) for row in snapshot.sections],
         }
         output.parent.mkdir(parents=True, exist_ok=True)
@@ -617,6 +620,11 @@ def run_smoke_capture(
         return 0
     except Exception as exc:
         output.parent.mkdir(parents=True, exist_ok=True)
+        if browser is not None:
+            try:
+                browser.driver.save_screenshot(str(output.with_suffix(".png")))
+            except Exception:
+                pass
         output.write_text(
             json.dumps(
                 {

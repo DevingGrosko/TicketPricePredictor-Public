@@ -8,6 +8,9 @@ on:
       - "nhl_collector.py"
       - "nhl_schedule_collector.py"
       - "collector.py"
+      - "nfl_collector.py"
+      - "vivid_inventory.py"
+      - "tests/test_vivid_inventory.py"
       - "nfl_metadata.py"
       - "Flask_App/nhl_blueprint.py"
       - "Flask_App/static/js/nhl-map.js"
@@ -29,7 +32,7 @@ permissions:
 jobs:
   capture-nhl:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
 
@@ -52,12 +55,12 @@ jobs:
             --horizon-hours 1080 \
             > nhl_schedule_result.json
 
-      - name: Capture one NHL event without writing to production
+      - name: Capture one NHL event in ordinary headed Chrome without writing to production
         env:
           REQUESTED_EVENT_URL: ${{ inputs.event_url }}
         run: |
-          python nhl_schedule_collector.py smoke "$REQUESTED_EVENT_URL" \
-            --headless \
+          xvfb-run --auto-servernum timeout --signal=TERM --kill-after=10s 120s \
+            python nhl_schedule_collector.py smoke "$REQUESTED_EVENT_URL" \
             --timeout 45 \
             --output nhl_smoke_result.json
 
@@ -122,5 +125,6 @@ jobs:
           path: |
             nhl_schedule_result.json
             nhl_smoke_result.json
+            nhl_smoke_result.png
           if-no-files-found: warn
           retention-days: 14
