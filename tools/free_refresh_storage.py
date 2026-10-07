@@ -6,10 +6,13 @@ Account-wide zero-dollar spending caps remain the owner's final billing guard.
 """
 from __future__ import annotations
 import argparse
+import http.client
 import json
 import os
 from pathlib import Path
 import re
+import ssl
+import time
 import urllib.error
 import urllib.request
 import zlib
@@ -19,6 +22,7 @@ API='https://api.github.com/repos/'+REPO
 ARTIFACT='ticketsignal-free-pages'
 CACHE=re.compile(r'^ticketsignal-free-v1-(raw|pending-mlb|pending-nfl|pending-nhl)-(\d+)-(\d+)$')
 MB=1024**2
+API_RETRY_DELAYS = (1, 3)
 
 
 def stale_caches(rows,keep=2):
@@ -44,9 +48,34 @@ def api(path,method='GET'):
     request=urllib.request.Request(API+path,method=method,headers={
         'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json',
         'X-GitHub-Api-Version':'2022-11-28'})
-    with urllib.request.urlopen(request,timeout=30) as response:
-        raw=response.read(5*MB)
-        return json.loads(raw) if raw else None
+    attempts = 1 + len(API_RETRY_DELAYS) if method in ('GET', 'DELETE') else 1
+    for attempt in range(1, attempts + 1):
+        try:
+            with urllib.request.urlopen(request,timeout=30) as response:
+                raw=response.read(5*MB)
+                return json.loads(raw) if raw else None
+        except (urllib.error.URLError, ConnectionError, TimeoutError,
+                http.client.IncompleteRead) as exc:
+            if isinstance(exc, urllib.error.HTTPError):
+                # An acknowledged DELETE can lose its response. A subsequent
+                # 404 confirms the same resource is now absent.
+                if method == 'DELETE' and attempt > 1 and exc.code == 404:
+                    return None
+                transient = 500 <= exc.code < 600
+            else:
+                reason = getattr(exc, 'reason', exc)
+                transient = not isinstance(reason, ssl.SSLCertVerificationError)
+            retry = transient and attempt < attempts
+            evidence = {'method': method, 'path': path.split('?', 1)[0],
+                        'attempt': attempt, 'maximum_attempts': attempts,
+                        'error_type': type(exc).__name__}
+            if isinstance(exc, urllib.error.HTTPError):
+                evidence['http_status'] = exc.code
+            print(('FREE_STORAGE_API_RETRY ' if retry else 'FREE_STORAGE_API_STOP ')
+                  + json.dumps(evidence), flush=True)
+            if not retry:
+                raise
+            time.sleep(API_RETRY_DELAYS[attempt - 1])
 
 
 def list_rows(path,key):
