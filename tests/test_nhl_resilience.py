@@ -136,6 +136,42 @@ class NHLResilienceTests(unittest.TestCase):
             nhl_collection_should_fail([], ["search failed"])
         )
 
+    def test_schedule_capture_preserves_inventory_and_map_diagnostics(self):
+        game = self._scheduled_game()
+        candidate = DiscoveredNHLGame(
+            url="https://www.vividseats.com/game/production/7227372",
+            title=game.name,
+            date_hint=game.local_date,
+        )
+        payload = self._thin_payload()
+        payload["tickets"] = [
+            {"l": f"Section {100 + index}", "p": "45", "q": "2", "r": "A"}
+            for index in range(12)
+        ]
+        payload["_map_geometry_diagnostics"] = {"status": "partial", "mapped_sections": 3}
+        diagnostics = {"listing_responses": [{"status": 200}], "inventory_view": "unfiltered"}
+
+        class FakeBrowser:
+            capture_diagnostics = diagnostics
+
+            def __init__(self, **kwargs):
+                pass
+
+            def capture(self, url):
+                return payload, game.event_date
+
+            def close(self):
+                pass
+
+        with patch("nhl_schedule_collector.VividNFLBrowser", FakeBrowser):
+            _, _, snapshot = _capture_resolution(
+                ScheduleResolution(game, (candidate,), "test"), headless=False, timeout=1,
+            )
+        self.assertEqual(snapshot.inventory_listing_count, 12)
+        self.assertEqual(snapshot.capture_diagnostics, diagnostics)
+        self.assertIsNot(snapshot.capture_diagnostics, diagnostics)
+        self.assertEqual(snapshot.map_geometry_diagnostics, payload["_map_geometry_diagnostics"])
+
     def test_scheduled_fallback_exits_before_network_or_browser_work(self):
         self.assertTrue(nhl_should_skip_for_trigger("schedule"))
         self.assertFalse(nhl_should_skip_for_trigger("workflow_dispatch"))
