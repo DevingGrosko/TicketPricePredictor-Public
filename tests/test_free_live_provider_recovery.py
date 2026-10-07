@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -56,6 +56,9 @@ class Driver:
     def get(self, url):
         self.visited = url
         self.current_url = url
+
+    def refresh(self):
+        self.reloads = getattr(self, 'reloads', 0) + 1
 
     def find_elements(self, *args):
         return []
@@ -314,6 +317,48 @@ def test_provider_context_delegates_without_recursion_and_preserves_v2_http_evid
     assert request['status'] == 200
     assert request['success_body']['production_id'] == '123'
     assert request['success_body']['ticket_count'] == 1
+
+
+def test_reload_keyword_reaches_shared_browser_through_http_wrapper(environment):
+    b = environment.VividNFLBrowser.__new__(environment.VividNFLBrowser)
+    b.__dict__.update(browser().__dict__)
+    with http_diagnostics(), r.provider_recovery():
+        result, stamp = b.capture(URL, reload_page=True)
+    assert result['tickets'] and stamp == AT
+    assert b.driver.reloads == 1
+    assert not hasattr(b.driver, 'visited')
+    assert b.capture_diagnostics['http_evidence']['requests'][0]['status'] == 200
+
+
+@pytest.mark.parametrize('sport', ['nfl', 'nhl'])
+def test_current_404_recovers_in_one_browser_and_records_both_attempts(monkeypatch, sport):
+    from vivid_inventory import CurrentInventoryRecovery
+    import nfl_schedule_collector as nfl
+    import nhl_schedule_collector as nhl
+    module = nfl if sport == 'nfl' else nhl
+    parser = module.NFLSnapshotParser if sport == 'nfl' else module.NHLSnapshotParser
+    b = Mock()
+    diagnostics = {'production_id': '123', 'document_status': 200,
+                   'responses': [{'path': '/hermes/api/v1/listings', 'status': 404}]}
+    b.capture_diagnostics = diagnostics
+    b.capture.side_effect = [r.ProviderCaptureError('provider-inventory-not-found', diagnostics), ({}, AT)]
+    factory = Mock(return_value=b)
+    monkeypatch.setattr(module, 'VividNFLBrowser', factory)
+    monkeypatch.setattr(parser, 'parse', Mock(return_value=SimpleNamespace(title='Correct teams')))
+    monkeypatch.setattr(module, 'validate_captured_match', Mock())
+    sleep = Mock()
+    monkeypatch.setattr(r, 'CurrentInventoryRecovery', lambda date, tier:
+                        CurrentInventoryRecovery(date, tier, now=lambda: AT-timedelta(hours=48), sleep=sleep))
+    resolution = SimpleNamespace(game=SimpleNamespace(schedule_id='game', event_date=AT),
+                                 candidates=[SimpleNamespace(url=URL)])
+    events = []
+    r.capture_resolution(sport, resolution, headless=False, timeout=35, events=events)
+    assert factory.call_count == 1 and b.capture.call_count == 2
+    assert b.capture.call_args.kwargs == {'reload_page': True}
+    sleep.assert_called_once_with(15)
+    b.close.assert_called_once()
+    history = events[0]['diagnostics']['inventory_recovery']
+    assert history['recovered'] and len(history['attempts']) == 2
 
 
 @pytest.mark.parametrize('sport', ['nfl', 'nhl'])

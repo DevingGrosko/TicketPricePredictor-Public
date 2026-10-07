@@ -101,6 +101,10 @@ class TracedDriver:
         self.active = True
         return self.driver.get(url)
 
+    def refresh(self):
+        self.active = True
+        return self.driver.refresh()
+
     def get_log(self, kind):
         entries = self.driver.get_log(kind)
         if self.active and kind == 'performance':
@@ -187,12 +191,12 @@ def http_diagnostics():
     from tools import free_live_provider_recovery as recovery
     original = recovery.capture
 
-    def capture(browser, url):
+    def capture(browser, url, *, reload_page=False):
         driver = browser.driver
         traced = TracedDriver(driver)
         browser.driver = traced
         try:
-            return original(browser, url)
+            return original(browser, url, **({'reload_page': True} if reload_page else {}))
         finally:
             try:
                 traced.get_log('performance')

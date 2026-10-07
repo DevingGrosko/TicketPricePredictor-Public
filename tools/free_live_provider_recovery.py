@@ -17,7 +17,7 @@ from urllib.parse import urlsplit
 from unittest.mock import patch
 
 from nfl_collector import VividNFLBrowser
-from vivid_inventory import VividCaptureError
+from vivid_inventory import CurrentInventoryRecovery, VividCaptureError
 
 # Capture the shared implementation before provider_recovery replaces the class
 # method. Resolving it through the class inside capture() would recurse.
@@ -47,10 +47,10 @@ def retryable(exc):
     return isinstance(exc, TimeoutError) or type(exc).__name__ == 'TimeoutException'
 
 
-def capture(browser, url):
+def capture(browser, url, *, reload_page=False):
     """Delegate inventory validation and map extraction to the shared browser."""
     try:
-        return _SHARED_CAPTURE(browser, url)
+        return _SHARED_CAPTURE(browser, url, **({'reload_page': True} if reload_page else {}))
     except VividCaptureError as exc:
         # Preserve the shared failure policy, including nonretryable 404s and
         # filtered/paginated inventory. The outer diagnostic wrapper can still
@@ -67,13 +67,14 @@ def capture_resolution(sport, resolution, *, headless, timeout, events=None):
     module = nfl if sport == 'nfl' else nhl
     parser = module.NFLSnapshotParser if sport == 'nfl' else module.NHLSnapshotParser
     errors = []
+    recovery = CurrentInventoryRecovery(resolution.game.event_date, 7 * 24 if sport == 'nfl' else 72)
     for candidate in resolution.candidates:
         for attempt in range(1, len(RETRY_DELAYS) + 2):
             browser = None
             try:
                 url = validated_vivid_url(candidate.url)
                 browser = module.VividNFLBrowser(headless=headless, timeout=timeout)
-                raw, provider_at = browser.capture(url)
+                raw, provider_at = recovery.capture(browser, url)
                 snapshot = parser.parse(raw)
                 module.validate_captured_match(resolution.game, provider_at, snapshot.title)
                 item = {'sport': sport, 'schedule_id': str(resolution.game.schedule_id),
@@ -88,6 +89,7 @@ def capture_resolution(sport, resolution, *, headless, timeout, events=None):
                         'attempt': attempt, 'status': 'failed', 'type': type(exc).__name__,
                         'category': getattr(exc, 'category', 'validation-or-capture-error'),
                         'message': safe_message(exc),
+                        'diagnostics': getattr(exc, 'diagnostics', {}),
                         'will_retry': attempt <= len(RETRY_DELAYS) and retryable(exc)}
                 errors.append(item)
                 if events is not None:
@@ -132,7 +134,9 @@ def run(sport, directory):
             health = read_json(health_path)
             health['provider_recovery'] = {
                 'attempts': len(events),
-                'recovered_after_retry': sum(e['status'] == 'captured' and e['attempt'] > 1 for e in events),
+                'recovered_after_retry': sum(e['status'] == 'captured' and (
+                    e['attempt'] > 1 or e.get('diagnostics', {}).get('inventory_recovery', {}).get('recovered')
+                ) for e in events),
                 'failed_attempts': [e for e in events if e['status'] == 'failed'],
             }
             write_json(health_path, health)
