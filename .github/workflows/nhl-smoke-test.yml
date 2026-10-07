@@ -40,6 +40,10 @@ on:
         description: Restore ordinary image/font loading and normal page-load strategy for diagnostic
         type: boolean
         default: false
+      homepage_first:
+        description: Initialize one fresh browser with normal homepage navigation before the event
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -76,10 +80,12 @@ jobs:
           REQUESTED_SCHEDULE_ID: ${{ inputs.schedule_id }}
           LONG_OBSERVATION: ${{ inputs.long_observation }}
           FULL_RENDERER: ${{ inputs.full_renderer }}
+          HOMEPAGE_FIRST: ${{ inputs.homepage_first }}
         run: |
           if [ "$LONG_OBSERVATION" = true ]; then
             renderer_args=()
             if [ "$FULL_RENDERER" = true ]; then renderer_args+=(--full-renderer); fi
+            if [ "$HOMEPAGE_FIRST" = true ]; then renderer_args+=(--homepage-first); fi
             xvfb-run --auto-servernum timeout --signal=TERM --kill-after=10s 180s \
               python tools/observe_vivid_inventory.py --event-url "$REQUESTED_EVENT_URL" \
               --seconds 60 --output nhl_smoke_result.json "${renderer_args[@]}"

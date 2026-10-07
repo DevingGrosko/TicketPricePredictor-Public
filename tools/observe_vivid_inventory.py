@@ -30,12 +30,15 @@ class Observation:
         self.page_states = []
         self.next_probe = 0
         self.reloads = 0
+        self.phase = "event"
+        self.homepage_document_status = None
 
     def __getattr__(self, name):
         return getattr(self.driver, name)
 
     def get(self, url):
         self.active = True
+        self.phase = "homepage" if urlsplit(url).path == "/" else "event"
         return self.driver.get(url)
 
     def refresh(self):
@@ -56,7 +59,10 @@ class Observation:
                     continue
                 source = params.get("request" if method == "Network.requestWillBeSent" else "response") or {}
                 url = urlsplit(source.get("url", ""))
-                if url.hostname not in {"www.vividseats.com", "vividseats.com"} or url.path not in INVENTORY_PATHS:
+                if url.hostname not in {"www.vividseats.com", "vividseats.com"}:
+                    continue
+                document = params.get("type") == "Document"
+                if not document and url.path not in INVENTORY_PATHS:
                     continue
                 query = parse_qs(url.query)
                 allowed = {"productionId", "quantity", "recommended", "sf", "includeIpAddress", "currency", "localizeCurrency"}
@@ -64,11 +70,14 @@ class Observation:
                               and len(value) == 1 and re.fullmatch(r"\d{1,12}|true|false|[A-Z]{3}", value[0])}
                 event = {"kind": method.split(".")[-1], "path": url.path,
                          "query": safe_query, "resource_type": params.get("type"),
+                         "phase": self.phase,
                          "observed_seconds": round(time.monotonic() - self.started, 3)}
                 if self.origin is not None and isinstance(params.get("timestamp"), (int, float)):
                     event["network_seconds"] = round(params["timestamp"] - self.origin, 3)
                 if method == "Network.responseReceived":
                     event["status"] = int(source.get("status", 0))
+                    if document and self.phase == "homepage":
+                        self.homepage_document_status = event["status"]
                 else:
                     event["method"] = source.get("method")
                 self.events.append(event)
@@ -88,18 +97,30 @@ return {ready_state:document.readyState,
   challenge:/captcha|verify you are human|access denied|request blocked/i.test(text)};
 """)
             state["observed_seconds"] = round(time.monotonic() - self.started, 3)
+            state["phase"] = self.phase
             self.page_states.append(state)
             if state.get("challenge"):
                 raise VividCaptureError("visible-provider-challenge", {})
         return entries
 
 
-def run(event_url, seconds, output, full_renderer=False):
+def initialize_homepage(observed):
+    """Use ordinary navigation; fail closed before the event on access denial."""
+    observed.get("https://www.vividseats.com/")
+    observed.get_log("performance")
+    if observed.homepage_document_status != 200:
+        raise VividCaptureError("homepage-initialization-failed", {})
+    if not observed.page_states or observed.page_states[-1].get("ready_state") != "complete":
+        raise VividCaptureError("homepage-not-loaded", {})
+
+
+def run(event_url, seconds, output, full_renderer=False, homepage_first=False):
     from selenium import webdriver
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     report = {"status": "failure", "source_url": validated_vivid_url(event_url),
-              "observation_seconds": seconds, "full_renderer": full_renderer}
+              "observation_seconds": seconds, "full_renderer": full_renderer,
+              "homepage_first": homepage_first}
     browser = None
     observed = None
     original_chrome = webdriver.Chrome
@@ -127,12 +148,17 @@ def run(event_url, seconds, output, full_renderer=False):
 
     previous = signal.signal(signal.SIGTERM, interrupted)
     try:
+        if homepage_first and not full_renderer:
+            raise ValueError("Homepage initialization diagnostic requires the normal full renderer")
         with patch.object(webdriver, "Chrome", full_chrome) if full_renderer else nullcontext():
             browser = VividNFLBrowser(headless=False, timeout=seconds + 15)
         if full_renderer:
             browser.driver.execute_cdp_cmd("Network.setBlockedURLs", {"urls": []})
         observed = Observation(browser.driver)
         browser.driver = observed
+        if homepage_first:
+            initialize_homepage(observed)
+            report["homepage_initialized"] = True
         raw, at = browser.capture(event_url, inventory_404_settle_seconds=seconds)
         snapshot = NHLSnapshotParser.parse(raw)
         report.update(status="success", source_id=snapshot.source_id, title=snapshot.title,
@@ -161,5 +187,6 @@ if __name__ == "__main__":
     cli.add_argument("--seconds", type=int, default=60)
     cli.add_argument("--output", type=Path, required=True)
     cli.add_argument("--full-renderer", action="store_true")
+    cli.add_argument("--homepage-first", action="store_true")
     args = cli.parse_args()
-    raise SystemExit(run(args.event_url, args.seconds, args.output, args.full_renderer))
+    raise SystemExit(run(args.event_url, args.seconds, args.output, args.full_renderer, args.homepage_first))
