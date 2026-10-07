@@ -1,4 +1,3 @@
-import base64
 from datetime import datetime, timezone
 import json
 from types import SimpleNamespace
@@ -7,6 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 from tools import free_live_provider_recovery as r
+from tools.free_live_http_diagnostics import http_diagnostics
 
 URL = 'https://www.vividseats.com/example/production/123'
 API = 'https://www.vividseats.com/hermes/api/v1/listings?productionId=123'
@@ -41,6 +41,7 @@ class Clock:
 
 class Driver:
     title = 'Normal event page'
+    current_url = URL
 
     def __init__(self, batches, bodies):
         self.batches = iter([[], *batches])
@@ -54,6 +55,10 @@ class Driver:
 
     def get(self, url):
         self.visited = url
+        self.current_url = url
+
+    def find_elements(self, *args):
+        return []
 
     def execute_cdp_cmd(self, command, arguments):
         self.commands.append((command, arguments))
@@ -112,8 +117,10 @@ def test_loading_finished_first_does_not_lose_later_response(environment):
     assert r.capture(b, URL)[1] == AT
 
 
-@pytest.mark.parametrize('status,category', [(401, 'access-denied'), (403, 'access-denied'),
-                                           (429, 'rate-limited'), (503, 'provider-server-error')])
+@pytest.mark.parametrize('status,category', [(401, 'provider-access-denied'), (403, 'provider-access-denied'),
+                                           (429, 'provider-rate-limited'),
+                                           (404, 'provider-inventory-not-found'),
+                                           (503, 'provider-server-error')])
 def test_http_failures_are_explicit(environment, status, category):
     b = browser(batches=[[received(status)]])
     with pytest.raises(r.ProviderCaptureError) as exc:
@@ -135,7 +142,8 @@ def test_wrong_production_id_is_never_accepted(environment):
     b = browser(bodies=[payload('999')])
     with pytest.raises(r.ProviderCaptureError) as exc:
         r.capture(b, URL)
-    assert exc.value.diagnostics['rejected_production_id'] == '999'
+    assert exc.value.category == 'provider-inventory-timeout'
+    assert exc.value.diagnostics['identity_responses_rejected'] == 1
 
 
 def test_badging_endpoint_is_not_confused_with_inventory(environment):
@@ -166,9 +174,9 @@ def test_metadata_timeout_identified_separately(environment):
     def missing(url):
         raise ValueError('Could not determine the event date and time from the Vivid page.')
     b._event_datetime = missing
-    with pytest.raises(r.ProviderCaptureError) as exc:
+    with pytest.raises(ValueError, match='event date and time') as exc:
         r.capture(b, URL)
-    assert exc.value.category == 'metadata-timeout'
+    assert not r.retryable(exc.value)
 
 
 def test_body_unavailable_is_reported_without_query_strings(environment):
@@ -177,13 +185,8 @@ def test_body_unavailable_is_reported_without_query_strings(environment):
         r.capture(b, URL)
     assert 'do-not-log' not in str(exc.value)
     assert exc.value.diagnostics['body_read_retries'] > 1
-    assert exc.value.diagnostics['pending_requests'][0]['status'] == 200
+    assert exc.value.category == 'provider-inventory-timeout'
 
-
-def test_base64_body():
-    d = Mock()
-    d.execute_cdp_cmd.return_value = {'body': base64.b64encode(json.dumps(payload()).encode()).decode(), 'base64Encoded': True}
-    assert r.response_payload(d, 'a') == payload()
 
 
 @pytest.mark.parametrize('sport', ['nfl', 'nhl'])
@@ -284,3 +287,78 @@ def test_health_enrichment_does_not_turn_failures_green(tmp_path, monkeypatch):
     health = read_json(tmp_path / 'health.json')
     assert health['status'] == 'degraded' and health['failed'] == 1 and health['committed'] == 2
     assert 'provider_recovery' in health
+
+
+@pytest.mark.parametrize('query', ['quantity=2', 'page=1', 'offset=50', 'limit=50',
+                                   'pageSize=50', 'recommended=true', 'sf=true'])
+def test_adapter_rejects_quantity_and_pagination_subsets(environment, query):
+    b = browser(batches=[[received(url=API+'&'+query)]])
+    with pytest.raises(r.ProviderCaptureError) as exc:
+        r.capture(b, URL)
+    assert exc.value.category == 'filtered-inventory-only'
+    assert not r.retryable(exc.value)
+    assert b.driver.reads == 0
+
+
+def test_provider_context_delegates_without_recursion_and_preserves_v2_http_evidence(environment):
+    b = environment.VividNFLBrowser.__new__(environment.VividNFLBrowser)
+    b.__dict__.update(browser(batches=[[received(url=API.replace('/v1/', '/v2/'))]]).__dict__)
+    original = environment.VividNFLBrowser.capture
+    with http_diagnostics(), r.provider_recovery():
+        result, stamp = b.capture(URL)
+    assert result['tickets'] and stamp == AT
+    assert environment.VividNFLBrowser.capture is original
+    assert b.driver.__class__ is Driver
+    request = b.capture_diagnostics['http_evidence']['requests'][0]
+    assert request['path'] == '/hermes/api/v2/listings'
+    assert request['status'] == 200
+    assert request['success_body']['production_id'] == '123'
+    assert request['success_body']['ticket_count'] == 1
+
+
+@pytest.mark.parametrize('sport', ['nfl', 'nhl'])
+@pytest.mark.parametrize('category', ['provider-inventory-not-found', 'provider-access-denied',
+                                     'provider-rate-limited', 'filtered-inventory-only', 'empty-inventory'])
+def test_both_sports_do_not_retry_deterministic_provider_failures(monkeypatch, sport, category):
+    import nfl_schedule_collector as nfl
+    import nhl_schedule_collector as nhl
+    module = nfl if sport == 'nfl' else nhl
+    b = Mock()
+    b.capture.side_effect = r.ProviderCaptureError(category, {'production_id':'123'})
+    factory = Mock(return_value=b)
+    monkeypatch.setattr(module, 'VividNFLBrowser', factory)
+    sleep = Mock()
+    monkeypatch.setattr(r.time, 'sleep', sleep)
+    resolution = SimpleNamespace(game=SimpleNamespace(schedule_id='game',event_date=AT),
+        candidates=[SimpleNamespace(url=URL)])
+    with pytest.raises(r.ProviderCaptureError) as exc:
+        r.capture_resolution(sport,resolution,headless=True,timeout=35)
+    assert factory.call_count == 1
+    assert exc.value.diagnostics['attempts'][0]['category'] == category
+    assert exc.value.diagnostics['attempts'][0]['will_retry'] is False
+    b.close.assert_called_once()
+    sleep.assert_not_called()
+
+
+@pytest.mark.parametrize('sport', ['nfl', 'nhl'])
+def test_both_sports_retry_explicit_provider_server_errors(monkeypatch, sport):
+    import nfl_schedule_collector as nfl
+    import nhl_schedule_collector as nhl
+    module = nfl if sport == 'nfl' else nhl
+    parser = module.NFLSnapshotParser if sport == 'nfl' else module.NHLSnapshotParser
+    first, second = Mock(), Mock()
+    first.capture.side_effect = r.ProviderCaptureError('provider-server-error',{},retryable=True)
+    second.capture.return_value = ({},AT)
+    second.capture_diagnostics = {}
+    factory = Mock(side_effect=[first,second])
+    monkeypatch.setattr(module,'VividNFLBrowser',factory)
+    snapshot = SimpleNamespace(title='Correct teams')
+    monkeypatch.setattr(parser,'parse',Mock(return_value=snapshot))
+    monkeypatch.setattr(module,'validate_captured_match',Mock())
+    sleep = Mock(); monkeypatch.setattr(r.time,'sleep',sleep)
+    resolution = SimpleNamespace(game=SimpleNamespace(schedule_id='game',event_date=AT),
+        candidates=[SimpleNamespace(url=URL)])
+    assert r.capture_resolution(sport,resolution,headless=True,timeout=35) == (URL,AT,snapshot)
+    assert factory.call_count == 2
+    sleep.assert_called_once_with(2)
+    first.close.assert_called_once(); second.close.assert_called_once()

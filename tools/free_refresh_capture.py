@@ -174,11 +174,20 @@ def store_payload(engine, sport, payload, *, now=None):
     return result
 
 
+def browser_headless():
+    """Keep local/default mode; scheduled jobs explicitly select ordinary Chrome."""
+    mode = os.environ.get('TICKETSIGNAL_BROWSER_MODE', 'headless').strip().casefold()
+    if mode not in ('headless', 'headed'):
+        raise ValueError('TICKETSIGNAL_BROWSER_MODE must be headless or headed')
+    return mode == 'headless'
+
+
 def capture(sport, directory, *, smoke=False):
     import collector
     import nfl_collector
     import nfl_schedule_collector
     import nhl_schedule_collector
+    headless = browser_headless()
     directory = Path(directory); directory.mkdir(parents=True, exist_ok=True)
     engine = open_writer(sport)
     try:
@@ -186,7 +195,7 @@ def capture(sport, directory, *, smoke=False):
             if sport != 'mlb':
                 raise ValueError('The bounded single-game smoke is MLB only')
             path = directory/'captured.json'
-            collector.run_auto_smoke_capture(True, 35, path)
+            collector.run_auto_smoke_capture(headless, 35, path)
             payload = json.loads(path.read_text())
             payload['schema_version'] = 1
             first = store_payload(engine, sport, payload)
@@ -216,7 +225,7 @@ def capture(sport, directory, *, smoke=False):
             patches.enter_context(patch.object(collector, 'post_snapshot', no_http_upload))
             for target in (collector, nfl_collector, nfl_schedule_collector, nhl_schedule_collector):
                 patches.enter_context(patch.object(target, 'post_snapshot_with_retry', deliver))
-            code = function('https://staging-write.invalid/no-http', 'not-an-http-token', True, 35,
+            code = function('https://staging-write.invalid/no-http', 'not-an-http-token', headless, 35,
                             directory/'health.json', directory/'pending')
         health = json.loads((directory/'health.json').read_text())
         if health.get('pending', 0):

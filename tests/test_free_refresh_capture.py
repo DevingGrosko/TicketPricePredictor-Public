@@ -1,12 +1,16 @@
 """Offline, disposable SQLite checks. No credentials or production connections."""
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
+import json
+import os
+from pathlib import Path
+import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.orm import Session
-from tools.free_refresh_capture import models_for, parse_payload, require_write_statement, store_payload
+from tools.free_refresh_capture import browser_headless, capture, models_for, parse_payload, require_write_statement, store_payload
 
 NOW = datetime(2026, 9, 27, 12, tzinfo=timezone.utc)
 
@@ -58,6 +62,38 @@ class GuardTests(unittest.TestCase):
         p = payload(); p['captured_at'] = (NOW+timedelta(minutes=31)).isoformat()
         parsed = parse_payload('mlb', p, NOW+timedelta(minutes=35))
         self.assertEqual(parsed[2].minute, 30)
+
+
+class BrowserModeTests(unittest.TestCase):
+    def test_local_default_preserves_headless_mode(self):
+        with patch.dict(os.environ):
+            os.environ.pop('TICKETSIGNAL_BROWSER_MODE', None)
+            self.assertTrue(browser_headless())
+
+    def test_invalid_mode_is_rejected_before_opening_database(self):
+        with patch.dict(os.environ, {'TICKETSIGNAL_BROWSER_MODE': 'unknown'}), \
+             patch('tools.free_refresh_capture.open_writer') as writer:
+            with self.assertRaises(ValueError):
+                capture('nfl', Path('/unused'))
+            writer.assert_not_called()
+
+    def test_scheduled_headed_mode_reaches_each_sport_collector(self):
+        targets = {'mlb': 'collector.run_remote_collector',
+                   'nfl': 'nfl_schedule_collector.run_schedule_collector',
+                   'nhl': 'nhl_schedule_collector.run_schedule_collector'}
+        for sport, target in targets.items():
+            with self.subTest(sport=sport), tempfile.TemporaryDirectory() as directory:
+                writer = Mock()
+                def collect(_endpoint, _token, headless, _timeout, health, _pending):
+                    self.assertFalse(headless)
+                    health.write_text(json.dumps({'status': 'healthy', 'pending': 0}))
+                    return 0
+                with patch.dict(os.environ, {'TICKETSIGNAL_BROWSER_MODE': 'headed'}), \
+                     patch('tools.free_refresh_capture.open_writer', return_value=writer), \
+                     patch(target, side_effect=collect) as collect_mock:
+                    self.assertEqual(capture(sport, directory), 0)
+                    collect_mock.assert_called_once()
+                writer.dispose.assert_called_once()
 
 
 class StorageTests(unittest.TestCase):

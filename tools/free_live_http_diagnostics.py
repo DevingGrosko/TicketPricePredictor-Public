@@ -121,7 +121,7 @@ class TracedDriver:
                     source = p.get('request') if method == 'Network.requestWillBeSent' else p.get('response')
                     source = source or {}
                     url = urlsplit(source.get('url', ''))
-                    if url.hostname not in {'www.vividseats.com', 'vividseats.com'} or url.path != '/hermes/api/v1/listings':
+                    if url.hostname not in {'www.vividseats.com', 'vividseats.com'} or url.path not in {'/hermes/api/v1/listings', '/hermes/api/v2/listings'}:
                         continue
                     if rid not in self.requests:
                         if len(self.requests) >= MAX_REQUESTS:

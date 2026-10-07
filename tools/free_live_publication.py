@@ -9,7 +9,8 @@ from tools import free_refresh_publish as publisher
 FRESHNESS_JS = r'''
   function showPriceFreshness(boot, c, params) {
     const game = c.games?.[params.get('game') || boot.game || ''];
-    const stamp = game?.captured_through || c.captured_through;
+    const report = c.reports?.find(r => r.id === boot.report);
+    const stamp = game ? game.captured_through : report ? report.captured_through : c.captured_through;
     const node = document.createElement('p');
     node.className = 'form-note price-freshness';
     node.setAttribute('role', 'status');
@@ -17,9 +18,20 @@ FRESHNESS_JS = r'''
     const date = stamp ? new Date(stamp) : null;
     const historical = game && new Date(game.event_at).getTime() < Date.now();
     let label = game ? (historical ? 'Historical game · last price snapshot: ' : 'Prices last captured: ')
-                     : 'Latest ' + boot.sport.toUpperCase() + ' price snapshot: ';
+                     : report ? report.team + ' latest price snapshot: '
+                              : 'Latest ' + boot.sport.toUpperCase() + ' price snapshot: ';
     label += date && Number.isFinite(date.getTime()) ? date.toLocaleString() : 'unavailable';
     if (!game) label += ' · freshness varies by game';
+    const lead = game ? (new Date(game.event_at).getTime() - Date.now()) / 3600000 : null;
+    let interval = null;
+    if (lead > 0 && lead <= 720) {
+      if (boot.sport === 'nfl') interval = lead <= 168 ? 0.5 : lead <= 336 ? 3 : 6;
+      if (boot.sport === 'nhl') interval = lead <= 72 ? 0.5 : lead <= 168 ? 6 : lead <= 336 ? 12 : 24;
+    }
+    if (interval && date && Date.now() - date.getTime() > (interval * 2 + 0.25) * 3600000) {
+      label += ' · updates delayed';
+      node.dataset.updatesDelayed = 'true';
+    }
     if (game && game.section_count > 0 && game.section_count < 10) label += ' · limited section coverage';
     node.textContent = label;
     if (stamp) node.dataset.capturedAt = stamp;
