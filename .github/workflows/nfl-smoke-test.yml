@@ -9,6 +9,8 @@ on:
       - "nfl_schedule_collector.py"
       - "nfl_metadata.py"
       - "collector.py"
+      - "vivid_inventory.py"
+      - "tests/test_vivid_inventory.py"
       - "Flask_App/nfl_blueprint.py"
       - "Flask_App/static/js/nfl-map.js"
       - "Flask_App/templates/nfl_map.html"
@@ -29,7 +31,7 @@ permissions:
 jobs:
   capture-nfl:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
 
@@ -56,7 +58,8 @@ jobs:
         env:
           REQUESTED_EVENT_URL: ${{ inputs.event_url }}
         run: |
-          python nfl_collector.py smoke "$REQUESTED_EVENT_URL" \
+          timeout --signal=TERM --kill-after=10s 120s \
+            python nfl_collector.py smoke "$REQUESTED_EVENT_URL" \
             --headless \
             --timeout 45 \
             --output nfl_smoke_result.json
@@ -108,5 +111,6 @@ jobs:
           path: |
             nfl_schedule_result.json
             nfl_smoke_result.json
+            nfl_smoke_result.png
           if-no-files-found: warn
           retention-days: 14

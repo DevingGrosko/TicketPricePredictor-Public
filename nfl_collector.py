@@ -709,6 +709,8 @@ return best;
                 except Exception as exc:
                     diagnostics["inventory_view_error"] = type(exc).__name__
                 diagnostics["inventory_view_actions"] = list(inventory_view.actions)
+                diagnostics["inventory_modal_seen"] = inventory_view.modal_seen
+                diagnostics["inventory_clear_seen"] = inventory_view.clear_seen
             if event_date is None:
                 try:
                     event_date = self._event_datetime(url)
@@ -1186,6 +1188,12 @@ def run_smoke_capture(
             message = f"{game.url}: {type(exc).__name__}: {exc}"
             errors.append(message)
             print(f"NFL SMOKE CAPTURE FAILED: {message}", file=sys.stderr, flush=True)
+            if browser is not None:
+                try:
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    browser.driver.save_screenshot(str(output.with_suffix(".png")))
+                except Exception:
+                    pass
         finally:
             if browser is not None:
                 try:
