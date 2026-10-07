@@ -63,7 +63,7 @@ class Driver:
 
 
 class CaptureTests(unittest.TestCase):
-    def capture(self, batches, bodies, *, reload_page=False):
+    def capture(self, batches, bodies, *, reload_page=False, inventory_404_settle_seconds=5.0):
         browser = VividNFLBrowser.__new__(VividNFLBrowser)
         browser.timeout = 35
         browser.driver = Driver(batches, bodies)
@@ -80,7 +80,16 @@ class CaptureTests(unittest.TestCase):
         with patch("nfl_collector.time.monotonic", side_effect=lambda: self.clock), \
              patch("nfl_collector.time.sleep", side_effect=sleep), \
              patch("nfl_collector.MAP_GEOMETRY_SETTLE_SECONDS", 0):
-            return browser.capture(URL, reload_page=reload_page)
+            return browser.capture(URL, reload_page=reload_page,
+                                   inventory_404_settle_seconds=inventory_404_settle_seconds)
+
+    def test_diagnostic_settle_can_observe_late_200_without_reloading(self):
+        result, _stamp = self.capture([[response(404)], *[[] for _ in range(80)], [response()]],
+                                     [payload()], inventory_404_settle_seconds=60)
+        self.assertTrue(result["tickets"])
+        self.assertGreater(self.clock, 10)
+        self.assertEqual(self.browser.driver.navigations, ["get"])
+        self.assertEqual([r["status"] for r in self.browser.capture_diagnostics["responses"]], [404, 200])
 
     def test_reload_uses_only_the_existing_browser_refresh(self):
         result, _stamp = self.capture([[response()]], [payload()], reload_page=True)

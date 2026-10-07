@@ -676,7 +676,8 @@ return best;
             return None
         return sanitize_map_geometry(raw, known_sections)
 
-    def capture(self, url: str, *, reload_page: bool = False) -> tuple[dict[str, Any], datetime]:
+    def capture(self, url: str, *, reload_page: bool = False,
+                inventory_404_settle_seconds: float = 5.0) -> tuple[dict[str, Any], datetime]:
         from selenium.common.exceptions import TimeoutException
         from vivid_inventory import (
             InventoryView, MAX_INVENTORY_BYTES, VividCaptureError, http_category,
@@ -805,7 +806,8 @@ return best;
             # consume the entire per-game timeout or trigger fresh-browser retries.
             if captured_payload is None and http_failure and not inventory_view.selected_quantity:
                 status, failed_at = http_failure
-                if time.monotonic() - max(failed_at, view_action_at) >= 5.0 and not listing_requests:
+                settle = inventory_404_settle_seconds if status == 404 else 5.0
+                if time.monotonic() - max(failed_at, view_action_at) >= settle and not listing_requests:
                     raise VividCaptureError(http_category(status), diagnostics, retryable=status >= 500)
 
             if captured_payload is not None and event_date is not None:

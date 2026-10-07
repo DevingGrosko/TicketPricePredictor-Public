@@ -32,6 +32,14 @@ on:
         description: Optional official NHL game ID for one-game schedule capture
         required: false
         default: ""
+      long_observation:
+        description: Observe one event for 60 seconds after inventory 404 without reload
+        type: boolean
+        default: false
+      full_renderer:
+        description: Restore ordinary image/font loading and normal page-load strategy for diagnostic
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -66,8 +74,16 @@ jobs:
         env:
           REQUESTED_EVENT_URL: ${{ inputs.event_url }}
           REQUESTED_SCHEDULE_ID: ${{ inputs.schedule_id }}
+          LONG_OBSERVATION: ${{ inputs.long_observation }}
+          FULL_RENDERER: ${{ inputs.full_renderer }}
         run: |
-          if [ -n "$REQUESTED_SCHEDULE_ID" ]; then
+          if [ "$LONG_OBSERVATION" = true ]; then
+            renderer_args=()
+            if [ "$FULL_RENDERER" = true ]; then renderer_args+=(--full-renderer); fi
+            xvfb-run --auto-servernum timeout --signal=TERM --kill-after=10s 180s \
+              python tools/observe_vivid_inventory.py --event-url "$REQUESTED_EVENT_URL" \
+              --seconds 60 --output nhl_smoke_result.json "${renderer_args[@]}"
+          elif [ -n "$REQUESTED_SCHEDULE_ID" ]; then
             xvfb-run --auto-servernum timeout --signal=TERM --kill-after=10s 180s \
               python tools/schedule_capture_smoke.py --sport nhl \
               --schedule-id "$REQUESTED_SCHEDULE_ID" --event-url "$REQUESTED_EVENT_URL" \
