@@ -292,6 +292,60 @@ def test_health_enrichment_does_not_turn_failures_green(tmp_path, monkeypatch):
     assert 'provider_recovery' in health
 
 
+@pytest.mark.parametrize('sport', ['nfl', 'nhl'])
+def test_run_reports_first_attempt_success_recovered_success_and_failure(tmp_path, monkeypatch, sport):
+    from pathlib import Path
+    import nfl_schedule_collector as nfl
+    import nhl_schedule_collector as nhl
+    from tools import free_live_hardening as h
+    from tools.free_live_collect import write_json, read_json
+    module = nfl if sport == 'nfl' else nhl
+    parser = module.NFLSnapshotParser if sport == 'nfl' else module.NHLSnapshotParser
+    event_at = datetime.now(timezone.utc) + timedelta(days=1)
+    direct, recovered, failed = Mock(), Mock(), Mock()
+    direct.capture.return_value = ({}, event_at)
+    direct.capture_diagnostics = {}
+    failure_evidence = {'production_id': '123', 'document_status': 200,
+                        'responses': [{'path': '/hermes/api/v1/listings', 'status': 404}]}
+    def eventually_recovers(*args, **kwargs):
+        if recovered.capture.call_count == 1:
+            recovered.capture_diagnostics = failure_evidence
+            raise r.ProviderCaptureError('provider-inventory-not-found', failure_evidence)
+        recovered.capture_diagnostics = {'production_id': '123', 'document_status': 200,
+            'responses': [{'path': '/hermes/api/v1/listings', 'status': 200}]}
+        return {}, event_at
+    recovered.capture.side_effect = eventually_recovers
+    failed.capture_diagnostics = failure_evidence
+    failed.capture.side_effect = r.ProviderCaptureError('provider-inventory-not-found', failure_evidence)
+    monkeypatch.setattr(module, 'VividNFLBrowser', Mock(side_effect=[direct, recovered, failed]))
+    monkeypatch.setattr(parser, 'parse', Mock(return_value=SimpleNamespace(title='Correct teams')))
+    monkeypatch.setattr(module, 'validate_captured_match', Mock())
+    monkeypatch.setattr(r.time, 'sleep', Mock())
+    def capture_games(active_sport, directory):
+        committed, failures = 0, 0
+        for identity in ('direct', 'recovered', 'failed'):
+            resolution = SimpleNamespace(game=SimpleNamespace(schedule_id=identity, event_date=event_at),
+                                         candidates=[SimpleNamespace(url=URL)])
+            try:
+                module._capture_resolution(resolution, headless=True, timeout=35)
+                committed += 1
+            except r.ProviderCaptureError:
+                failures += 1
+        write_json(Path(directory) / 'health.json',
+                   {'status': 'degraded', 'failed': failures, 'committed': committed})
+        return 1
+    monkeypatch.setattr(h, 'run', capture_games)
+    assert r.run(sport, tmp_path) == 1
+    health = read_json(tmp_path / 'health.json')
+    assert (health['status'], health['committed'], health['failed']) == ('degraded', 2, 1)
+    recovery = health['provider_recovery']
+    assert recovery['attempts'] == 3
+    assert recovery['recovered_after_retry'] == 1
+    assert [e['schedule_id'] for e in recovery['failed_attempts']] == ['failed']
+    assert direct.capture.call_count == 1
+    assert recovered.capture.call_count == failed.capture.call_count == 2
+
+
 @pytest.mark.parametrize('query', ['quantity=2', 'page=1', 'offset=50', 'limit=50',
                                    'pageSize=50', 'recommended=true', 'sf=true'])
 def test_adapter_rejects_quantity_and_pagination_subsets(environment, query):

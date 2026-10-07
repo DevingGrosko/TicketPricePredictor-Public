@@ -134,9 +134,9 @@ def run(sport, directory):
             health = read_json(health_path)
             health['provider_recovery'] = {
                 'attempts': len(events),
-                'recovered_after_retry': sum(e['status'] == 'captured' and (
+                'recovered_after_retry': sum(bool(e['status'] == 'captured' and (
                     e['attempt'] > 1 or e.get('diagnostics', {}).get('inventory_recovery', {}).get('recovered')
-                ) for e in events),
+                )) for e in events),
                 'failed_attempts': [e for e in events if e['status'] == 'failed'],
             }
             write_json(health_path, health)
