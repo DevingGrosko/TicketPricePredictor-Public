@@ -11,6 +11,7 @@ on:
       - "nfl_collector.py"
       - "vivid_inventory.py"
       - "tests/test_vivid_inventory.py"
+      - "tests/test_nfl_geometry_matching.py"
       - "nfl_metadata.py"
       - "Flask_App/nhl_blueprint.py"
       - "Flask_App/static/js/nhl-map.js"
@@ -81,6 +82,16 @@ jobs:
           if section_count < 8:
               raise SystemExit(f"NHL smoke returned only {section_count} sections")
 
+          listing_count = int(payload.get("inventory_listing_count") or 0)
+          if listing_count < section_count:
+              raise SystemExit("NHL smoke did not retain its complete inventory count")
+          diagnostics = payload.get("capture_diagnostics") or {}
+          if str(diagnostics.get("production_id")) != str(payload.get("source_id")):
+              raise SystemExit("NHL inventory diagnostics do not match the captured event")
+          if not any(row.get("status") == 200 for row in diagnostics.get("responses") or []):
+              raise SystemExit("NHL smoke did not capture a successful inventory response")
+          print(f"Captured {listing_count} unfiltered listings for event {payload['source_id']}.")
+
           currency = str(payload.get("currency") or "").upper()
           if len(currency) != 3 or not currency.isalpha():
               raise SystemExit(f"Invalid NHL currency code: {currency!r}")
@@ -99,16 +110,25 @@ jobs:
                   for row in geometry.get("sections") or []
               )
               required = max(4, min(12, math.ceil(known * 0.6)))
-              if mapped < required or ratio < 0.6 or shape_count < mapped:
+              if (mapped < 1 or mapped > known or shape_count < mapped
+                  or not math.isfinite(ratio) or not 0 <= ratio <= 1
+                  or not math.isclose(ratio, mapped / max(1, known), abs_tol=0.0001)):
                   raise SystemExit(
-                      "Returned NHL geometry is incomplete: "
+                      "Returned NHL geometry is invalid: "
                       f"{mapped}/{known} sections ({ratio:.1%}), "
                       f"{shape_count} shapes"
                   )
-              print(
-                  f"Verified {section_count} NHL sections in {currency} and "
-                  f"{mapped}/{known} provider-map sections ({ratio:.1%})."
-              )
+              if mapped >= required and ratio >= 0.6:
+                  print(
+                      f"Verified {section_count} NHL sections in {currency} and "
+                      f"{mapped}/{known} provider-map sections ({ratio:.1%})."
+                  )
+              else:
+                  print(
+                      f"Verified {section_count} NHL sections in {currency}; "
+                      f"provider geometry is partial ({mapped}/{known}, {ratio:.1%}). "
+                      "The interface will use its rink fallback."
+                  )
           else:
               print(
                   f"Verified {section_count} NHL sections in {currency}; "

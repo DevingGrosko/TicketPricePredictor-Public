@@ -97,6 +97,20 @@ def section_number(value: Any) -> int | None:
     return int(matches[-1]) if matches else None
 
 
+def _section_letter_code(normalized: str) -> str:
+    match = re.search(r"(?:^|\s)([a-z]{1,3})\s*\d+$", normalized)
+    return match[1] if match else ""
+
+
+def _numeric_section_hint(normalized: str) -> bool:
+    # UI class names and generated IDs can contain incidental numbers. Only
+    # section-like labels may use the numeric fallback.
+    return bool(re.fullmatch(
+        r"(?:(?:upper|lower|middle|loge|level|club|premier|terrace|suite)\s+)*"
+        r"(?:[a-z]{1,3}\s*)?\d+", normalized,
+    ))
+
+
 def match_section_name(candidate: Any, known_sections: Iterable[str]) -> str | None:
     known = [clean_text(item, maximum=180) for item in known_sections]
     known = [item for item in known if item]
@@ -113,21 +127,25 @@ def match_section_name(candidate: Any, known_sections: Iterable[str]) -> str | N
 
     candidate_number = section_number(candidate)
     if candidate_number is not None:
+        if not _numeric_section_hint(normalized_candidate):
+            return None
         numeric = [item for item in known if section_number(item) == candidate_number]
-        if len(numeric) == 1:
-            return numeric[0]
-
-        # Prefer a unique alphanumeric match such as C136 over a bare 136.
-        candidate_letters = re.sub(r"[^a-z]+", "", normalized_candidate)
-        if candidate_letters:
+        candidate_code = _section_letter_code(normalized_candidate)
+        if candidate_code:
             narrowed = [
                 item
                 for item in numeric
-                if re.sub(r"[^a-z]+", "", normalize_section_name(item))
-                == candidate_letters
+                if _section_letter_code(normalize_section_name(item)) == candidate_code
             ]
             if len(narrowed) == 1:
                 return narrowed[0]
+        else:
+            # Bare 5 must never become C05. Likewise, suite B03 does not make
+            # the verified Premier section 3 ambiguous when both have offers.
+            plain = [item for item in numeric if not _section_letter_code(normalize_section_name(item))]
+            if len(plain) == 1:
+                return plain[0]
+        return None
 
     contains = [
         item

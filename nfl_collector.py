@@ -540,6 +540,13 @@ function number(value) {
   const matches = clean(value).match(/\d+/g);
   return matches ? Number(matches[matches.length - 1]) : null;
 }
+function letterCode(value) {
+  const found = normalize(value).match(/(?:^|\s)([a-z]{1,3})\s*\d+$/);
+  return found ? found[1] : '';
+}
+function numericHint(key) {
+  return /^(?:(?:upper|lower|middle|loge|level|club|premier|terrace|suite)\s+)*(?:[a-z]{1,3}\s*)?\d+$/.test(key);
+}
 const exact = new Map();
 const byNumber = new Map();
 known.forEach((name) => {
@@ -558,9 +565,13 @@ function match(hints) {
     const key = normalize(hint);
     const exactMatches = exact.get(key) || [];
     if (exactMatches.length === 1) return exactMatches[0];
+    if (!numericHint(key)) continue;
     const n = number(hint);
     const numeric = n === null ? [] : (byNumber.get(n) || []);
-    if (numeric.length === 1) return numeric[0];
+    const code = letterCode(hint);
+    const narrowed = code ? numeric.filter((name) => letterCode(name) === code)
+      : numeric.filter((name) => !letterCode(name));
+    if (narrowed.length === 1) return narrowed[0];
   }
   return null;
 }

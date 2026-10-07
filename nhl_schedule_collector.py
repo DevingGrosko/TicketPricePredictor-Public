@@ -8,7 +8,7 @@ cadence slot, and records explicit coverage and upload health.
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 import json
 import os
@@ -35,6 +35,7 @@ from nhl_collector import (
     NHL_DAILY_CADENCE_HOURS,
     NHL_FINAL_CADENCE_HOURS,
     NHLInventoryIncompleteError,
+    NHLEventSnapshot,
     NHL_SIX_HOUR_CADENCE_HOURS,
     NHL_TEAM_NAMES,
     NHL_TWELVE_HOUR_CADENCE_HOURS,
@@ -602,6 +603,13 @@ def _capture_resolution(
             browser = VividNFLBrowser(headless=headless, timeout=timeout)
             raw_payload, provider_event_date = browser.capture(url)
             snapshot = NHLSnapshotParser.parse(raw_payload)
+            if isinstance(snapshot, NHLEventSnapshot):
+                snapshot = replace(
+                    snapshot,
+                    inventory_listing_count=len(raw_payload.get("tickets") or []),
+                    capture_diagnostics=dict(getattr(browser, "capture_diagnostics", {}) or {}),
+                    map_geometry_diagnostics=raw_payload.get("_map_geometry_diagnostics"),
+                )
             event_date = validate_captured_match(
                 resolution.game,
                 provider_event_date,
@@ -1018,6 +1026,9 @@ def run_schedule_smoke(
                 ),
                 "currency": snapshot.currency,
                 "section_count": len(snapshot.sections),
+                "inventory_listing_count": getattr(snapshot, "inventory_listing_count", None),
+                "capture_diagnostics": getattr(snapshot, "capture_diagnostics", None),
+                "map_geometry_diagnostics": getattr(snapshot, "map_geometry_diagnostics", None),
                 "map_geometry_sections": geometry_section_count(
                     getattr(snapshot, "map_geometry", None)
                 ),
