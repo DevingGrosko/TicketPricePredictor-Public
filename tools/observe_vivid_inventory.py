@@ -20,6 +20,53 @@ from nhl_collector import NHLSnapshotParser
 from vivid_inventory import INVENTORY_PATHS, VividCaptureError, http_category
 
 
+def sanitized_query_metadata(query_string):
+    """Keep known benign values and bounded parameter names, never unknown values."""
+    query = parse_qs(query_string, keep_blank_values=True)
+    patterns = {
+        "productionId": r"[0-9]{1,12}", "quantity": r"[0-9]{1,12}",
+        "priceGroupId": r"[0-9]{1,12}", "currency": r"[A-Z]{3}",
+        "recommended": r"true|false|0|1", "sf": r"true|false|0|1",
+        "includeIpAddress": r"true|false|0|1", "localizeCurrency": r"true|false|0|1",
+    }
+    safe = {key: values[0] for key, values in query.items()
+            if key in patterns and len(values) == 1 and re.fullmatch(patterns[key], values[0])}
+    keys = sorted(key for key in query if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]{0,63}", key))
+    return {"query": safe, "query_keys": keys[:64], "query_key_count": len(query)}
+
+
+def sanitized_build_markers(raw):
+    """Export public Next build fields and first-party static script paths only."""
+    if not isinstance(raw, dict):
+        return {}
+    result = {key: raw[key] for key in ("next_data_present", "next_data_valid", "next_f_present")
+              if isinstance(raw.get(key), bool)}
+    patterns = {
+        "asset_prefix": r"/athena-assets/[a-z0-9]{8,40}/prod/next-assets",
+        "build_id": r"[A-Za-z0-9_-]{1,64}",
+        "page": r"/[A-Za-z0-9_\[\]/-]{0,159}",
+    }
+    for key, pattern in patterns.items():
+        if isinstance(raw.get(key), str) and re.fullmatch(pattern, raw[key]):
+            result[key] = raw[key]
+    paths = []
+    sources = raw.get("script_sources")
+    for source in sources[:300] if isinstance(sources, list) else []:
+        if not isinstance(source, str):
+            continue
+        parsed = urlsplit(source)
+        if parsed.scheme and parsed.scheme not in {"http", "https"}:
+            continue
+        if parsed.netloc and parsed.hostname not in {"www.vividseats.com", "vividseats.com"}:
+            continue
+        if re.fullmatch(r"/athena-assets/[a-z0-9]{8,40}/prod/next-assets/_next/static/[A-Za-z0-9_./-]{1,200}\.js", parsed.path):
+            paths.append(parsed.path)
+    paths = sorted(set(paths))
+    result.update(athena_builds=sorted({path.split("/")[2] for path in paths}),
+                  static_script_count=len(paths), script_paths=paths[:12])
+    return result
+
+
 class Observation:
     def __init__(self, driver):
         self.driver = driver
@@ -32,6 +79,8 @@ class Observation:
         self.reloads = 0
         self.phase = "event"
         self.homepage_document_status = None
+        self.page_builds = []
+        self.last_build = {}
 
     def __getattr__(self, name):
         return getattr(self.driver, name)
@@ -64,12 +113,8 @@ class Observation:
                 document = params.get("type") == "Document"
                 if not document and url.path not in INVENTORY_PATHS:
                     continue
-                query = parse_qs(url.query)
-                allowed = {"productionId", "quantity", "recommended", "sf", "includeIpAddress", "currency", "localizeCurrency"}
-                safe_query = {key: value[0] for key, value in query.items() if key in allowed
-                              and len(value) == 1 and re.fullmatch(r"\d{1,12}|true|false|[A-Z]{3}", value[0])}
                 event = {"kind": method.split(".")[-1], "path": url.path,
-                         "query": safe_query, "resource_type": params.get("type"),
+                         **sanitized_query_metadata(url.query), "resource_type": params.get("type"),
                          "phase": self.phase,
                          "observed_seconds": round(time.monotonic() - self.started, 3)}
                 if self.origin is not None and isinstance(params.get("timestamp"), (int, float)):
@@ -90,12 +135,36 @@ class Observation:
             state = self.driver.execute_script(r"""
 const text = document.body ? document.body.innerText : '';
 const count = text.match(/([\d,]+)\s+listings\b/i);
+const node = document.getElementById('__NEXT_DATA__');
+let next = null;
+try { if (node) next = JSON.parse(node.textContent); } catch (_) {}
+const sources = Array.from(document.scripts).map(script => {
+  try {
+    const url = new URL(script.getAttribute('src'), location.href);
+    return ['www.vividseats.com','vividseats.com'].includes(url.hostname)
+      && /^\/athena-assets\/[a-z0-9]{8,40}\/prod\/next-assets\/_next\/static\//.test(url.pathname)
+      ? url.pathname : null;
+  } catch (_) { return null; }
+}).filter(Boolean).slice(0,300);
+const build = {next_data_present: Boolean(node),
+  next_data_valid: Boolean(next && typeof next === 'object' && !Array.isArray(next)),
+  next_f_present: Object.prototype.hasOwnProperty.call(window, '__next_f'),
+  asset_prefix: next && next.assetPrefix, build_id: next && next.buildId,
+  page: next && next.page,
+  script_sources: sources};
 return {ready_state:document.readyState,
   inventory_error:/sorry, there was an error|something went wrong/i.test(text),
   quantity_modal:/how many tickets/i.test(text),
   listings:count ? Number(count[1].replace(/,/g,'')) : null,
-  challenge:/captcha|verify you are human|access denied|request blocked/i.test(text)};
+  challenge:/captcha|verify you are human|access denied|request blocked/i.test(text), build};
 """)
+            raw_build = state.pop("build", None)
+            if raw_build is not None:
+                build = sanitized_build_markers(raw_build)
+                if build != self.last_build.get(self.phase):
+                    self.page_builds.append({**build, "phase": self.phase,
+                        "observed_seconds": round(time.monotonic() - self.started, 3)})
+                    self.last_build[self.phase] = build
             state["observed_seconds"] = round(time.monotonic() - self.started, 3)
             state["phase"] = self.phase
             self.page_states.append(state)
@@ -137,6 +206,7 @@ def run(event_url, seconds, output, full_renderer=False, homepage_first=False):
         report.update(captured_at=datetime.now(timezone.utc).isoformat(),
                       network=observed.events if observed else [],
                       page_states=observed.page_states if observed else [],
+                      page_builds=observed.page_builds if observed else [],
                       reloads=observed.reloads if observed else 0,
                       capture_diagnostics=getattr(browser, "capture_diagnostics", {}) if browser else {})
         output.write_text(json.dumps(report, indent=2) + "\n")

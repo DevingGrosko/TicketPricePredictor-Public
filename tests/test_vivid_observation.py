@@ -3,7 +3,9 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock
 
-from tools.observe_vivid_inventory import Observation, initialize_homepage
+from tools.observe_vivid_inventory import (
+    Observation, initialize_homepage, sanitized_build_markers, sanitized_query_metadata,
+)
 from vivid_inventory import VividCaptureError
 
 
@@ -22,6 +24,7 @@ class ObservationTests(unittest.TestCase):
         observation.get_log("performance")
         event = observation.events[0]
         self.assertEqual(event["query"], {"productionId": "7302493", "quantity": "0"})
+        self.assertEqual(event["query_keys"], ["productionId", "quantity", "token"])
         self.assertEqual(event["status"], 404)
         self.assertEqual(event["resource_type"], "Fetch")
         self.assertIn("network_seconds", event)
@@ -72,6 +75,73 @@ class ObservationTests(unittest.TestCase):
                 driver.execute_script.return_value["ready_state"] = ready
                 with self.assertRaises(VividCaptureError):
                     initialize_homepage(Observation(driver))
+
+
+class SanitizerTests(unittest.TestCase):
+    def test_price_group_identity_is_numeric_and_unknown_values_are_omitted(self):
+        result = sanitized_query_metadata(
+            "productionId=7302493&priceGroupId=21&includeIpAddress=true&currency=USD"
+            "&localizeCurrency=true&token=private-value&_rsc=private-flight-value&empty=")
+        self.assertEqual(result["query"], {"productionId": "7302493", "priceGroupId": "21",
+            "includeIpAddress": "true", "currency": "USD", "localizeCurrency": "true"})
+        self.assertIn("token", result["query_keys"])
+        self.assertIn("_rsc", result["query_keys"])
+        self.assertIn("empty", result["query_keys"])
+        self.assertNotIn("private", json.dumps(result))
+
+    def test_malformed_duplicate_and_non_numeric_price_groups_never_export_values(self):
+        for value in ["true", "USD", "private", "-21", "21.5", "1" * 13, "21&priceGroupId=22"]:
+            with self.subTest(value=value):
+                result = sanitized_query_metadata("priceGroupId=" + value)
+                self.assertNotIn("priceGroupId", result["query"])
+                self.assertIn("priceGroupId", result["query_keys"])
+
+    def test_query_key_names_are_bounded_and_non_identifiers_omitted(self):
+        query = "&".join(f"key{i}=private" for i in range(80)) + "&%3Cprivate%3E=private"
+        result = sanitized_query_metadata(query)
+        self.assertEqual(len(result["query_keys"]), 64)
+        self.assertEqual(result["query_key_count"], 81)
+        self.assertNotIn("private", json.dumps(result))
+
+    def test_public_build_fields_and_script_paths_exclude_private_state_and_query(self):
+        path = "/athena-assets/d6790c45/prod/next-assets/_next/static/chunks/turbopack-public.js"
+        raw = {"next_data_present": True, "next_data_valid": True, "next_f_present": False,
+            "asset_prefix": "/athena-assets/d6790c45/prod/next-assets", "build_id": "public-build",
+            "page": "/[slug]/production/[id]", "props": {"nonce": "private-state"},
+            "script_sources": ["https://www.vividseats.com" + path + "?token=private-query",
+                path, "https://other.example" + path, "/private-script.js?token=private-query"]}
+        result = sanitized_build_markers(raw)
+        self.assertEqual(result["athena_builds"], ["d6790c45"])
+        self.assertEqual(result["script_paths"], [path])
+        self.assertEqual(result["static_script_count"], 1)
+        self.assertEqual(result["page"], "/[slug]/production/[id]")
+        self.assertNotIn("private", json.dumps(result))
+        self.assertNotIn("props", result)
+
+    def test_private_or_malformed_build_field_values_are_rejected(self):
+        result = sanitized_build_markers({"asset_prefix": "https://other.example/private",
+            "build_id": "private?token=secret", "page": "/private?token=secret",
+            "next_data_present": "secret", "script_sources": []})
+        self.assertNotIn("asset_prefix", result)
+        self.assertNotIn("build_id", result)
+        self.assertNotIn("page", result)
+        self.assertNotIn("next_data_present", result)
+
+    def test_observation_records_build_change_without_exporting_raw_state(self):
+        driver = ObservationTests().driver()
+        state = dict(driver.execute_script.return_value)
+        driver.execute_script.side_effect = [
+            {**state, "build": {"next_data_present": True, "build_id": identity,
+                "script_sources": [], "props": {"token": "private"}}}
+            for identity in ["public-build", "public-build", "next-build"]]
+        observed = Observation(driver)
+        observed.active = True
+        for _ in range(3):
+            observed.next_probe = 0
+            observed.get_log("performance")
+        self.assertEqual([row["build_id"] for row in observed.page_builds], ["public-build", "next-build"])
+        self.assertNotIn("build", observed.page_states[0])
+        self.assertNotIn("private", json.dumps(observed.page_builds))
 
 
 if __name__ == "__main__":
