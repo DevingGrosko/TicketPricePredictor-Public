@@ -45,13 +45,17 @@ def removable_generations(rows, runs_for, *, current_run, current_ref='refs/head
     """Keep two completed generations per sport/role/ref/path-version plus live owners."""
     if keep != 2:
         raise ValueError('Shared queues retain exactly two completed generations')
-    groups, runs = {}, {}
+    groups, runs, seen_ids, seen_generations = {}, {}, set(), set()
     for row in rows:
         match = KEY.fullmatch(row.get('key', ''))
         migration = MIGRATION_KEY.fullmatch(row.get('key', ''))
         version = row.get('version')
         if not (match or migration) or row.get('ref') != current_ref or not isinstance(version, str) or not version:
             continue
+        generation = (row['key'], row['ref'], version)
+        if row.get('id') in seen_ids or generation in seen_generations:
+            continue
+        seen_ids.add(row.get('id')); seen_generations.add(generation)
         if migration:
             sport, run_text, attempt = migration.groups()
             role = 'legacy-delivery'

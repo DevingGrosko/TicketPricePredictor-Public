@@ -16,6 +16,11 @@ def cache(identity,sport='nfl',role='capture',version='path-version1',ref='refs/
 
 
 class SharedStorageTests(unittest.TestCase):
+    def test_pagination_duplicates_do_not_count_as_two_distinct_cache_generations(self):
+        rows = [cache(2), cache(2), cache(1), {**cache(2), 'id': 20}]
+        remove = removable_generations(rows, lambda _: {'status':'completed', 'path':OWNER}, current_run=99)
+        self.assertEqual(remove, [])
+
     def test_two_completed_generations_each_sport_role_branch_and_path_version(self):
         rows=[cache(1),cache(2),cache(3),cache(4,role='tidb'),cache(5,role='tidb'),cache(6,role='tidb'),
               cache(7,sport='nhl'),cache(8,sport='nhl'),cache(9,sport='nhl'),
