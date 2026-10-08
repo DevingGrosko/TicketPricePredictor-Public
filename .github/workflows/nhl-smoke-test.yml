@@ -13,6 +13,10 @@ on:
       - "vivid_webkit.py"
       - "vivid_performer_routes.py"
       - "tests/test_vivid_webkit.py"
+      - "tests/test_nhl_official_identity.py"
+      - "tests/test_nhl_time_identity_canary.py"
+      - "tests/fixtures/nhl_official_provider_identity.json"
+      - "tools/nhl_time_identity_canary.py"
       - "tests/test_saved_collector_payloads.py"
       - "tests/test_smoke_workflow_gates.py"
       - "docs/shared-observations/**"
@@ -35,7 +39,7 @@ on:
       mode:
         description: Original NHL smoke or a bounded stock-browser canary
         type: choice
-        options: [smoke, firefox_canary, webkit_canary]
+        options: [smoke, firefox_canary, webkit_canary, nhl_time_canary]
         default: smoke
       canary_events:
         description: JSON list of two to four distinct NFL/NHL public event URLs
@@ -60,7 +64,7 @@ permissions:
 
 jobs:
   capture-nhl:
-    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.mode != 'firefox_canary' && inputs.mode != 'webkit_canary')
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.mode != 'firefox_canary' && inputs.mode != 'webkit_canary' && inputs.mode != 'nhl_time_canary')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -82,6 +86,7 @@ jobs:
             tests.test_saved_collector_payloads.SavedCollectorPayloadTests.test_nhl_original_observations \
             tests.test_vivid_webkit tests.test_nhl_collector \
             tests.test_nhl_schedule_collector tests.test_nfl_geometry_matching \
+            tests.test_nhl_official_identity tests.test_nhl_time_identity_canary \
             tests.test_smoke_workflow_gates -v
 
       - name: Install legacy Chrome diagnostic dependencies
@@ -195,6 +200,33 @@ jobs:
             nhl_smoke_result.png
           if-no-files-found: warn
           retention-days: 14
+
+  nhl-time-canary:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'nhl_time_canary'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install the stock WebKit diagnostic runtime
+        run: |
+          python -m pip install -r requirements-collector.txt -r requirements-webkit-collector.txt
+          python -m playwright install --with-deps webkit
+      - name: Validate three fixed NHL identities through the production capture path without storing
+        env:
+          TICKETSIGNAL_BROWSER_ENGINE: webkit
+        run: |
+          xvfb-run --auto-servernum timeout --signal=TERM --kill-after=10s 300s \
+            python -m tools.nhl_time_identity_canary --directory nhl-time-canary
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: nhl-time-identity-canary-${{ github.run_id }}
+          path: nhl-time-canary/*.json
+          if-no-files-found: warn
+          retention-days: 1
 
   firefox-canary:
     if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'firefox_canary' || inputs.mode == 'webkit_canary')

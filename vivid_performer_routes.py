@@ -61,7 +61,14 @@ def configure_schedule_navigation(browser, sport, game, event_url):
     routes = {production_id: performer_url(sport, game.home_team)}
     dates = {production_id: stamp.astimezone(timezone.utc)}
     if webkit is not None:
-        webkit.configure_normal_navigation(routes, dates)
+        if sport == 'nhl':
+            context = dict(sport='nhl', schedule_id=getattr(game, 'schedule_id', None),
+                event_date=stamp.astimezone(timezone.utc).isoformat(), away_team=getattr(game, 'away_team', None),
+                home_team=game.home_team, venue=getattr(game, 'venue', None),
+                venue_timezone=getattr(game, 'venue_timezone', None))
+            webkit.configure_normal_navigation(routes, dates, official_games={production_id: context})
+        else:
+            webkit.configure_normal_navigation(routes, dates)
     else:
         from vivid_firefox import configure_normal_navigation
         configure_normal_navigation(browser, performer_urls=routes, expected_event_dates=dates)

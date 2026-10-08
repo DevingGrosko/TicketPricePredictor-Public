@@ -14,9 +14,10 @@ import math
 import re
 import time
 from urllib.parse import parse_qs, urlsplit
+from zoneinfo import ZoneInfo
 
 from collector import as_utc, parse_iso_datetime, validated_vivid_url
-from nfl_metadata import extract_map_geometry_from_json, geometry_is_usable, geometry_section_count
+from nfl_metadata import canonical_venue_name, extract_map_geometry_from_json, geometry_is_usable, geometry_section_count
 from vivid_firefox import native_unfiltered_request, validate_full_inventory, validated_performer_url
 from vivid_inventory import INVENTORY_PATHS, MAX_INVENTORY_BYTES, VividCaptureError, http_category
 
@@ -87,7 +88,34 @@ def public_inventory(payload, production_id):
     return {"global": [metadata], "tickets": rows}
 
 
-def verified_event_date(metadata, payload, production_id, expected):
+def _nhl_venue_identity(value):
+    # These exact provider/official aliases were observed in the accepted NHL
+    # capture set. Do not weaken the identity check with substring matching.
+    value = canonical_venue_name(value).casefold()
+    return {"sap center": "sap center at san jose", "bell centre": "centre bell"}.get(value, value)
+
+
+def validated_nhl_context(context, expected):
+    """Accept only explicit official NHL identity supplied by the schedule owner."""
+    from nhl_collector import NHL_TEAM_NAMES
+    fields = {"sport", "schedule_id", "event_date", "away_team", "home_team", "venue", "venue_timezone"}
+    if (not isinstance(context, dict) or set(context) != fields or context.get("sport") != "nhl"
+            or not isinstance(context.get("schedule_id"), str)
+            or not re.fullmatch(r"[0-9]{10}", context["schedule_id"])
+            or context.get("away_team") not in NHL_TEAM_NAMES or context.get("home_team") not in NHL_TEAM_NAMES
+            or context["away_team"] == context["home_team"]
+            or any(not isinstance(context.get(key), str) or not context[key].strip()
+                   for key in ("event_date", "venue", "venue_timezone"))):
+        raise ValueError("Trusted NHL context requires the complete official game identity")
+    stamp = parse_iso_datetime(context["event_date"])
+    if (stamp is None or stamp.tzinfo is None or not re.search(r"(?:Z|[+-][0-9]{2}:?[0-9]{2})$", context["event_date"])
+            or as_utc(stamp) != expected):
+        raise ValueError("Trusted NHL context must identify the configured official UTC")
+    ZoneInfo(context["venue_timezone"])
+    return dict(context)
+
+
+def verified_event_date(metadata, payload, production_id, expected, *, official_game=None, diagnostics=None):
     if (not isinstance(metadata, dict) or str(metadata.get("id")) != production_id
             or str(metadata.get("page_id")) != production_id
             or (metadata.get("query_id") is not None and str(metadata["query_id"]) != production_id)):
@@ -96,7 +124,7 @@ def verified_event_date(metadata, payload, production_id, expected):
     if not isinstance(raw, str) or not re.search(r"(?:Z|[+-][0-9]{2}:?[0-9]{2})$", raw):
         raise VividCaptureError("event-metadata-time-mismatch", {"production_id": production_id})
     stamp = parse_iso_datetime(raw)
-    if stamp is None or stamp.tzinfo is None or as_utc(stamp) != expected:
+    if stamp is None or stamp.tzinfo is None:
         raise VividCaptureError("event-metadata-time-mismatch", {"production_id": production_id})
     global_row = payload["global"][0]
     for field, key in (("title", "productionName"), ("venue", "mapTitle")):
@@ -106,6 +134,26 @@ def verified_event_date(metadata, payload, production_id, expected):
             raise VividCaptureError("event-metadata-identity-mismatch", {"production_id": production_id})
     if not metadata.get("venue_id") or str(global_row.get("venueId")) != str(metadata["venue_id"]):
         raise VividCaptureError("event-metadata-identity-mismatch", {"production_id": production_id})
+    if official_game is not None:
+        try:
+            context = validated_nhl_context(official_game, expected)
+        except (ValueError, TypeError, KeyError) as exc:
+            raise VividCaptureError("event-metadata-identity-mismatch", {"production_id": production_id}) from exc
+        from nhl_collector import ordered_matchup_from_title
+        if (ordered_matchup_from_title(metadata["title"]) != (context["away_team"], context["home_team"])
+                or _nhl_venue_identity(metadata["venue"]) != _nhl_venue_identity(context["venue"])):
+            raise VividCaptureError("event-metadata-identity-mismatch", {"production_id": production_id})
+        zone = ZoneInfo(context["venue_timezone"])
+        if as_utc(stamp).astimezone(zone).date() != expected.astimezone(zone).date():
+            raise VividCaptureError("event-metadata-time-mismatch", {"production_id": production_id})
+        if diagnostics is not None:
+            diagnostics["event_time_validation"] = dict(policy="official-nhl-identity-calendar",
+                schedule_id=context["schedule_id"], provider_utc=as_utc(stamp).isoformat(),
+                official_utc=expected.isoformat(), venue_timezone=context["venue_timezone"],
+                difference_seconds=(as_utc(stamp) - expected).total_seconds())
+        return expected
+    if as_utc(stamp) != expected:
+        raise VividCaptureError("event-metadata-time-mismatch", {"production_id": production_id})
     return as_utc(stamp)
 
 
@@ -157,13 +205,13 @@ class WebKitInventorySession:
         self.timeout_error = TimeoutError
         self.playwright = sync_playwright().start()
         self.runtime = {"engine": "webkit", "playwright": version("playwright"), "headed": not headless}
-        self.routes, self.expected_dates = {}, {}
+        self.routes, self.expected_dates, self.official_games = {}, {}, {}
         self.event_browser = self.event_context = self.event_page = self.event_pid = None
         self.discovery_browser = self._discovery_page = None
         self.generation = 0
         owner.driver = PublicDOMDriver(self)
 
-    def configure_normal_navigation(self, performer_urls, expected_event_dates):
+    def configure_normal_navigation(self, performer_urls, expected_event_dates, *, official_games=None):
         if (not isinstance(performer_urls, dict) or not performer_urls
                 or not isinstance(expected_event_dates, dict) or set(expected_event_dates) != set(performer_urls)):
             raise ValueError("WebKit requires explicit public routes and official UTC dates")
@@ -174,8 +222,11 @@ class WebKitInventorySession:
             stamp = expected_event_dates[pid]
             if not isinstance(stamp, datetime) or stamp.tzinfo is None or stamp.utcoffset() is None:
                 raise ValueError("Expected event dates must have explicit UTC offsets")
-        self.routes = dict(performer_urls)
-        self.expected_dates = {pid: as_utc(stamp) for pid, stamp in expected_event_dates.items()}
+        dates = {pid: as_utc(stamp) for pid, stamp in expected_event_dates.items()}
+        if official_games is not None and (not isinstance(official_games, dict) or set(official_games) != set(performer_urls)):
+            raise ValueError("Trusted NHL contexts must match the configured production IDs")
+        contexts = {pid: validated_nhl_context(context, dates[pid]) for pid, context in (official_games or {}).items()}
+        self.routes, self.expected_dates, self.official_games = dict(performer_urls), dates, contexts
 
     def new_browser(self):
         stop_after_denial({"engine": "webkit", "phase": "launch"})
@@ -357,7 +408,8 @@ class WebKitInventorySession:
                     }
                 if payload is not None and state.get("event") is not None:
                     try:
-                        stamp = verified_event_date(state["event"], payload, pid, self.expected_dates[pid])
+                        stamp = verified_event_date(state["event"], payload, pid, self.expected_dates[pid],
+                            official_game=self.official_games.get(pid), diagnostics=diagnostics)
                     except VividCaptureError as exc:
                         raise VividCaptureError(exc.category, diagnostics) from exc
                     return payload, stamp
