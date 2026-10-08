@@ -185,3 +185,78 @@ def test_error_json_cannot_be_mistaken_for_a_legitimately_empty_schedule(monkeyp
     schedules, errors, excluded = official_schedules(NOW)
     assert schedules == {}
     assert set(errors) == {'nfl','nhl'}
+
+
+def test_public_version_recovers_from_network_error_and_old_manifest_without_redeploy(tmp_path):
+    import json
+    from urllib.error import URLError
+    from tools.free_live_verify import wait_for_publication
+    elapsed, waits, calls = [0], [], []
+    outcomes = [URLError('private network detail'), {'generated_at':'previous'}, {'generated_at':'expected'}]
+    def read(path, timeout):
+        calls.append((path, timeout))
+        value = outcomes.pop(0)
+        if isinstance(value, Exception):
+            raise value
+        return value
+    def sleep(seconds):
+        waits.append(seconds); elapsed[0] += seconds
+    report_path, output_path = tmp_path/'version.json', tmp_path/'step-output'
+    value, result = wait_for_publication(read, 'expected', report_path=report_path, output_path=output_path,
+                                         clock=lambda:elapsed[0], sleep=sleep)
+    assert value['generated_at'] == 'expected'
+    assert result['version_verified'] is True
+    assert result['attempts'] == 3
+    assert result['wait_seconds'] == 30
+    assert waits == [15,15]
+    assert all(path == '/original-manifest.json' and timeout <= 20 for path,timeout in calls)
+    assert json.loads(report_path.read_text())['version_verified'] is True
+    assert output_path.read_text().splitlines()[-1] == 'version_verified=true'
+    assert 'private network detail' not in report_path.read_text()
+
+
+def test_unavailable_version_has_hard_deadline_and_false_report(tmp_path):
+    import json
+    import pytest
+    from urllib.error import URLError
+    from tools.free_live_verify import wait_for_publication
+    elapsed, waits, calls = [0], [], []
+    def read(path, timeout):
+        calls.append(timeout)
+        raise URLError('withheld error details')
+    def sleep(seconds):
+        waits.append(seconds); elapsed[0] += seconds
+    report_path = tmp_path/'version.json'
+    with pytest.raises(RuntimeError, match='Expected publication not available'):
+        wait_for_publication(read, 'expected', timeout=31, report_path=report_path,
+                             clock=lambda:elapsed[0], sleep=sleep)
+    result = json.loads(report_path.read_text())
+    assert result['version_verified'] is False
+    assert result['wait_seconds'] == 31
+    assert calls == [20,16,1]
+    assert waits == [15,15,1]
+    assert max(waits) <= 15
+    for timeout in (601, True, 0):
+        with pytest.raises(ValueError):
+            wait_for_publication(read, 'expected', timeout=timeout)
+
+
+def test_schedule_failure_preserves_proved_version_for_artifact_cleanup(monkeypatch, tmp_path):
+    import json
+    import pytest
+    verifier = mock_published_site(monkeypatch, {'nfl':[scheduled('nfl')], 'nhl':[]})
+    report_path, output_path = tmp_path/'version.json', tmp_path/'step-output'
+    with pytest.raises(RuntimeError, match='missing price captures'):
+        verifier.verify('expected', report_path=report_path, output_path=output_path)
+    assert json.loads(report_path.read_text())['version_verified'] is True
+    assert output_path.read_text().splitlines()[-1] == 'version_verified=true'
+
+
+def test_feed_unavailable_preserves_version_true_but_remains_a_failure(monkeypatch, tmp_path):
+    import json
+    import pytest
+    verifier = mock_published_site(monkeypatch, {'nhl':[]}, {'nfl':'Official NFL schedule unavailable: TimeoutError'})
+    report_path = tmp_path/'version.json'
+    with pytest.raises(RuntimeError, match='coverage unavailable'):
+        verifier.verify('expected', report_path=report_path)
+    assert json.loads(report_path.read_text())['version_verified'] is True

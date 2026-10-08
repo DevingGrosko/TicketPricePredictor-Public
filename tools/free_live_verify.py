@@ -2,11 +2,68 @@
 import hashlib
 import json
 import os
+from pathlib import Path
 import time
 from datetime import datetime, timedelta, timezone
 from urllib.error import URLError
 from urllib.request import Request, build_opener
 from tools.check_public_pages import fixed_url, Redirects
+
+VERSION_WAIT_SECONDS = 600
+VERSION_POLL_SECONDS = 15
+
+
+def write_version_result(result, report_path=None, output_path=None):
+    """Keep exact-version availability separate from later price freshness."""
+    if report_path:
+        path = Path(report_path)
+        temporary = path.with_suffix(path.suffix + '.tmp')
+        temporary.write_text(json.dumps(result, sort_keys=True, indent=2) + '\n')
+        temporary.replace(path)
+    if output_path:
+        with Path(output_path).open('a') as output:
+            output.write('version_verified=' + str(result['version_verified']).lower() + '\n')
+
+
+def wait_for_publication(read, expected, *, report_path=None, output_path=None,
+                         timeout=VERSION_WAIT_SECONDS, clock=None, sleep=None):
+    """Wait at most ten minutes for the expected public manifest, without redeploying."""
+    if not isinstance(expected, str) or not expected:
+        raise ValueError('Expected publication version must be a nonempty string')
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0 < timeout <= VERSION_WAIT_SECONDS:
+        raise ValueError('Publication version timeout must be at most 600 seconds')
+    clock, sleep = clock or time.monotonic, sleep or time.sleep
+    started = clock()
+    deadline = started + timeout
+    result = {'version_verified': False, 'expected_generated_at': expected,
+              'observed_generated_at': None, 'attempts': 0, 'wait_seconds': 0}
+    write_version_result(result, report_path, output_path)
+    while clock() < deadline:
+        remaining = deadline - clock()
+        if remaining <= 0:
+            break
+        result['attempts'] += 1
+        try:
+            value = read('/original-manifest.json', timeout=min(20, remaining))
+            if not isinstance(value, dict):
+                raise ValueError('Public manifest must be an object')
+            observed = value.get('generated_at')
+            result['observed_generated_at'] = observed if isinstance(observed, str) else None
+            if observed == expected:
+                result.update(version_verified=True, wait_seconds=round(clock() - started, 3))
+                write_version_result(result, report_path, output_path)
+                print('FREE_LIVE_VERSION ' + json.dumps(result), flush=True)
+                return value, result
+        except (URLError, TimeoutError, ValueError) as exc:
+            result['last_error_type'] = type(exc).__name__
+        remaining = deadline - clock()
+        if remaining <= 0:
+            break
+        sleep(min(VERSION_POLL_SECONDS, remaining))
+    result['wait_seconds'] = round(clock() - started, 3)
+    write_version_result(result, report_path, output_path)
+    print('FREE_LIVE_VERSION ' + json.dumps(result), flush=True)
+    raise RuntimeError('Expected publication not available at public URL')
 
 
 def capture_deadline(sport, event_at, captured_at, now, interval):
@@ -120,26 +177,18 @@ def capture_freshness(catalogs, now=None, schedules=None, schedule_errors=None, 
     return result
 
 
-def verify(expected):
+def verify(expected, *, report_path=None, output_path=None, version_timeout=VERSION_WAIT_SECONDS):
     opener = build_opener(Redirects())
-    def read(path):
-        with opener.open(Request(fixed_url(path), headers={'Cache-Control': 'no-cache'}), timeout=20) as response:
+    def read(path, timeout=20):
+        with opener.open(Request(fixed_url(path), headers={'Cache-Control': 'no-cache'}), timeout=timeout) as response:
             raw = response.read(2 * 1024 * 1024 + 1)
         if len(raw) > 2 * 1024 * 1024:
             raise ValueError('Oversized public metadata')
         if path.lstrip('/').startswith(('native/', 'data/')) and hashlib.sha256(raw).hexdigest() not in path:
             raise ValueError('Public data hash mismatch')
         return json.loads(raw)
-    for attempt in range(8):
-        try:
-            value = read('/original-manifest.json')
-            if value.get('generated_at') == expected:
-                break
-        except URLError:
-            pass
-        if attempt == 7:
-            raise RuntimeError('Expected publication not available at public URL')
-        time.sleep(15)
+    value, version = wait_for_publication(read, expected, report_path=report_path,
+                                           output_path=output_path, timeout=version_timeout)
     catalogs = {sport: read(path) for sport, path in value['sports'].items()}
     freshness = {sport: catalog['captured_through'] for sport, catalog in catalogs.items()}
     if set(freshness) != {'mlb', 'nfl', 'nhl'}:
@@ -147,6 +196,7 @@ def verify(expected):
     now = datetime.now(timezone.utc)
     schedules, schedule_errors, excluded = official_schedules(now)
     report = {'generated_at': value['generated_at'], 'sports': freshness,
+              'version_verified': version['version_verified'],
               'live_updates_enabled': value['live_updates_enabled'],
               'capture_freshness': capture_freshness(catalogs, now, schedules, schedule_errors, excluded),
               'note': 'Per-sport maxima are not a claim of gap-free history.'}
@@ -161,4 +211,6 @@ def verify(expected):
 
 
 if __name__ == '__main__':
-    verify(os.environ['EXPECTED_GENERATED_AT'])
+    verify(os.environ['EXPECTED_GENERATED_AT'],
+           report_path=os.environ.get('FREE_LIVE_VERIFICATION_REPORT'),
+           output_path=os.environ.get('GITHUB_OUTPUT'))

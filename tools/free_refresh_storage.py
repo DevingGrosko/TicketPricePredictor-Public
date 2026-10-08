@@ -6,6 +6,7 @@ Account-wide zero-dollar spending caps remain the owner's final billing guard.
 """
 from __future__ import annotations
 import argparse
+from datetime import datetime, timedelta, timezone
 import http.client
 import json
 import os
@@ -23,6 +24,30 @@ ARTIFACT='ticketsignal-free-pages'
 CACHE=re.compile(r'^ticketsignal-free-v1-(raw|pending-mlb|pending-nfl|pending-nhl)-(\d+)-(\d+)$')
 MB=1024**2
 API_RETRY_DELAYS = (1, 3)
+UNVERIFIED_ARTIFACT_TTL = timedelta(days=1)
+UNVERIFIED_ARTIFACT_MAX_BYTES = 128 * MB
+
+
+def stale_publication_artifacts(rows, now=None):
+    """Keep only the latest bounded completed artifact left unverified by cleanup.
+
+    The caller must first validate publisher ownership and completed-run status.
+    Verified versions are removed by the deployment step, even when freshness is red.
+    """
+    now = now or datetime.now(timezone.utc)
+    owned = [row for row in rows if row.get('name') == ARTIFACT and not row.get('expired')]
+    candidates = []
+    for row in owned:
+        try:
+            created = datetime.fromisoformat(row['created_at'])
+            size = row['size_in_bytes']
+            valid_size = type(size) is int and 0 <= size <= UNVERIFIED_ARTIFACT_MAX_BYTES
+            if (created.tzinfo is not None and valid_size and now - UNVERIFIED_ARTIFACT_TTL < created <= now):
+                candidates.append((created, int(row['id'])))
+        except (KeyError, TypeError, ValueError):
+            continue
+    keep = max(candidates)[1] if candidates else None
+    return [row for row in owned if int(row['id']) != keep]
 
 
 def stale_caches(rows,keep=2):
@@ -89,6 +114,7 @@ def list_rows(path,key):
 
 def prune():
     run_id=int(os.environ['GITHUB_RUN_ID'])
+    completed_artifacts = []
     # A unique artifact name prevents touching existing collector/test artifacts.
     for item in list_rows('/actions/artifacts','artifacts'):
         if item.get('name')!=ARTIFACT or item.get('expired'):continue
@@ -96,6 +122,8 @@ def prune():
         if not old or old==run_id:continue
         run=api('/actions/runs/'+str(old))
         if run.get('path')!='.github/workflows/free-ticket-site.yml' or run.get('status')!='completed':continue
+        completed_artifacts.append(item)
+    for item in stale_publication_artifacts(completed_artifacts):
         api('/actions/artifacts/'+str(int(item['id'])),'DELETE')
     for item in stale_caches(list_rows('/actions/caches','actions_caches')):
         match=CACHE.fullmatch(item['key']);old=int(match[2])
