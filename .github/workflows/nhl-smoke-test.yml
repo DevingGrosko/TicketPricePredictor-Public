@@ -33,9 +33,9 @@ on:
         required: false
         default: ""
       mode:
-        description: Original NHL smoke or a bounded stock-browser canary
+        description: NHL smoke, bounded browser canary, or official schedule-only audit
         type: choice
-        options: [smoke, firefox_canary, webkit_canary]
+        options: [smoke, firefox_canary, webkit_canary, official_schedule]
         default: smoke
       canary_events:
         description: JSON list of two to four distinct NFL/NHL public event URLs
@@ -60,7 +60,7 @@ permissions:
 
 jobs:
   capture-nhl:
-    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.mode != 'firefox_canary' && inputs.mode != 'webkit_canary')
+    if: github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && inputs.mode != 'firefox_canary' && inputs.mode != 'webkit_canary' && inputs.mode != 'official_schedule')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -195,6 +195,31 @@ jobs:
             nhl_smoke_result.png
           if-no-files-found: warn
           retention-days: 14
+
+  official-schedule:
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'official_schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      # Import dependencies only; no browser is installed or started.
+      - name: Install existing schedule module import dependencies
+        run: python -m pip install "selenium>=4.26.1,<5" "SQLAlchemy>=2,<3"
+      - name: Read three exact official NHL identities without capture or delivery
+        run: python -m tools.nhl_official_schedule_audit --output nhl-official-time-audit.json
+      - name: Preserve the narrow official source result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: nhl-official-time-audit-${{ github.run_id }}
+          path: nhl-official-time-audit.json
+          if-no-files-found: warn
+          retention-days: 1
 
   firefox-canary:
     if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'firefox_canary' || inputs.mode == 'webkit_canary')
