@@ -1395,11 +1395,23 @@ def ingest_nfl_snapshot():
     except (KeyError, TypeError, ValueError) as exc:
         return jsonify({"status": "error", "error": str(exc)}), 400
 
+    from Flask_App.observation_receipt import stored_observation_receipt
+    receipt_model = CreateNFLModel()
+    try:
+        with receipt_model.getSession()() as receipt_session:
+            stored_receipt = stored_observation_receipt(
+                receipt_session, "nfl", NFLEvent, NFLIteration, NFLTicket,
+                event_id, iteration_id,
+            )
+    finally:
+        dispose_ticket_engine(receipt_model.engine)
+
     status = "stored" if stored else "duplicate"
     return jsonify(
         {
             "status": status,
             "event_type": "nfl",
+            **stored_receipt,
             "timezone": "America/New_York",
             "event_id": event_id,
             "iteration_id": iteration_id,
