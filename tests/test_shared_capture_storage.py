@@ -48,5 +48,19 @@ class SharedStorageTests(unittest.TestCase):
             alias=root/'symlink';alias.symlink_to(body)
             with self.assertRaises(RuntimeError):queue_budget(root)
 
+    def test_migrated_free_delivery_keeps_two_and_never_prunes_original_free_caches(self):
+        rows = [{**cache(i), 'key': f'ticketsignal-free-v1-state-nfl-shared-{i}-1'}
+                for i in range(1, 9)]
+        rows.extend([{**cache(9), 'key': 'ticketsignal-free-v1-state-nfl-9-1'},
+                     {**cache(10), 'key': 'ticketsignal-free-v1-state-mlb-shared-10-1'},
+                     {**cache(11), 'key': 'ticketsignal-free-v1-state-nfl-shared-invalid-1'}])
+        rows[6]['version'] = 'another-cache-path'
+        rows[7]['ref'] = 'refs/heads/unrelated'
+        def run(identity):
+            return {'status': 'in_progress' if identity == 4 else 'completed',
+                    'path': '.github/workflows/free-ticket-collect.yml' if identity == 5 else OWNER}
+        remove = removable_generations(rows, run, current_run=6)
+        self.assertEqual([row['id'] for row in remove], [1])
+
 
 if __name__=='__main__':unittest.main()

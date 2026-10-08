@@ -1,4 +1,4 @@
-"""Draft bounded retention of shared queues; old free state/history stays untouched."""
+"""Bounded shared-queue retention; original free state/history stays untouched."""
 from __future__ import annotations
 
 import argparse
@@ -12,6 +12,7 @@ from urllib.error import HTTPError
 from tools.single_capture_owner import OWNER, api, check_scope
 
 KEY = re.compile(r'^shared-capture-v1-(nfl|nhl)-(capture|tidb)-(\d+)-(\d+)$')
+MIGRATION_KEY = re.compile(r'^ticketsignal-free-v1-state-(nfl|nhl)-shared-(\d+)-(\d+)$')
 MIRROR = '.github/workflows/shared-snapshot-mirror.yml'
 QUEUE_LIMIT = 20 * 1024**2
 
@@ -40,17 +41,22 @@ def removable_generations(rows, runs_for, *, current_run, current_ref='refs/head
     groups, runs = {}, {}
     for row in rows:
         match = KEY.fullmatch(row.get('key', ''))
+        migration = MIGRATION_KEY.fullmatch(row.get('key', ''))
         version = row.get('version')
-        if not match or row.get('ref') != current_ref or not isinstance(version, str) or not version:
+        if not (match or migration) or row.get('ref') != current_ref or not isinstance(version, str) or not version:
             continue
-        sport, role, run_text, attempt = match.groups()
+        if migration:
+            sport, run_text, attempt = migration.groups()
+            role = 'legacy-delivery'
+        else:
+            sport, role, run_text, attempt = match.groups()
         run_id = int(run_text)
         if run_id == current_run:
             continue
         if run_id not in runs:
             runs[run_id] = runs_for(run_id)
         run = runs[run_id]
-        paths = {OWNER} if role == 'capture' else {OWNER, MIRROR}
+        paths = {OWNER, MIRROR} if role == 'tidb' else {OWNER}
         if run.get('path') not in paths or run.get('status') != 'completed':
             continue
         try:
