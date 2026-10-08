@@ -63,7 +63,8 @@ class FakeDriver:
         if source == diagnostic.DOM_SCRIPT:
             return {"ready_state": "complete", "listing_count": 1, "inventory_error": False,
                     "challenge_visible": False, "quantity_modal_visible": self.modal, "webdriver": True}
-        return [self.inventory_url]
+        # Real Firefox can omit this request after its resource buffer fills.
+        return [] if self.modal else [self.inventory_url]
 
     def execute_async_script(self, source, url):
         assert source == diagnostic.FETCH_SCRIPT and url == URL

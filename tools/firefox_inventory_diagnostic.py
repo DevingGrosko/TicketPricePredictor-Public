@@ -302,8 +302,12 @@ def run(args, report):
             if denial or report["dom"]["challenge_visible"]:
                 report["category"] = "access-denial-or-challenge"
                 return False
-            observed = driver.execute_script("return performance.getEntriesByType('resource').map(e => e.name);")
-            urls = [url for url in observed if unfiltered_url(url)]
+            # The resource-timing buffer can fill before inventory completes.
+            # Passive BiDi events retain the actual request URL and body ID.
+            urls = [row["url"] for row in inventory if row["phase"] == "page" and unfiltered_url(row["url"])]
+            if not urls:
+                observed = driver.execute_script("return performance.getEntriesByType('resource').map(e => e.name);")
+                urls = [url for url in observed if unfiltered_url(url)]
             candidate = urls[-1] if urls else None
             # A completed native whole-market response is sufficient even while
             # a quantity dialog overlays the page. Do not change that UI first.
