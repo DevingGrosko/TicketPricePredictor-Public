@@ -4,11 +4,12 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: One target or the fixed four-capture normal-link comparison
+        description: Firefox controls or the fixed two-event stock WebKit comparison
         type: choice
         options:
           - single
           - linkcanary
+          - webkit
         default: single
       diagnostic_target:
         description: Single-mode target on a fresh runner
@@ -30,6 +31,7 @@ permissions:
 
 jobs:
   firefox-inventory-diagnostic:
+    if: inputs.mode != 'webkit'
     runs-on: ubuntu-latest
     timeout-minutes: 11
     steps:
@@ -86,3 +88,31 @@ jobs:
             firefox-link-canary/
           if-no-files-found: warn
           retention-days: 14
+
+  webkit-inventory-diagnostic:
+    if: inputs.mode == 'webkit'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install official Playwright and stock WebKit dependencies
+        run: |
+          python -m pip install playwright==1.63.0
+          python -m playwright install --with-deps webkit
+      - name: Check offline capture guards
+        run: python -m unittest tests.test_webkit_inventory_diagnostic
+      - name: Observe the two fixed public events without ingestion
+        run: |
+          timeout --signal=TERM --kill-after=10s 170s xvfb-run -a \
+            python tools/webkit_inventory_diagnostic.py --directory webkit-control
+      - name: Save honest diagnostic outcomes and sanitized public inventory
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: webkit-inventory-${{ github.run_id }}
+          path: webkit-control/*.json
+          if-no-files-found: warn
+          retention-days: 3
