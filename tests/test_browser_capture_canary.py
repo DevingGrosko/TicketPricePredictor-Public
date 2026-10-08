@@ -164,7 +164,7 @@ class CanaryTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[1]
         smoke = (root / '.github/workflows/nhl-smoke-test.yml').read_text()
         collect = (root / '.github/workflows/collect-ticket-prices.yml').read_text()
-        self.assertIn("if: github.event_name == 'workflow_dispatch' && inputs.mode == 'firefox_canary'", smoke)
+        self.assertIn("if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'firefox_canary' || inputs.mode == 'webkit_canary')", smoke)
         self.assertIn('default: smoke', smoke)
         self.assertIn('default: chrome', collect)
         self.assertEqual(collect.count("TICKETSIGNAL_BROWSER_ENGINE: ${{ inputs.browser_engine || 'chrome' }}"), 2)
@@ -179,6 +179,35 @@ class CanaryTests(unittest.TestCase):
         self.assertIn("CANARY_PACE_SECONDS: ${{ inputs.canary_pace_seconds || '0' }}", smoke)
         self.assertIn('print(360 + 5 * pace)', smoke)
         self.assertIn('--pace-seconds "$CANARY_PACE_SECONDS"', smoke)
+
+    def test_webkit_uses_native_delegate_and_stops_all_sessions_after_denial(self):
+        from unittest.mock import Mock
+        from vivid_inventory import VividCaptureError
+        known = events_from_json(json.dumps([
+            {'sport':'nfl','url':'https://www.vividseats.com/game/production/6493143'}, EVENTS[1]]))
+        for denied in (False, True):
+            sessions=[]
+            class StockWebKit(Browser):
+                def __init__(self):
+                    super().__init__()
+                    self._webkit_session=SimpleNamespace(configure_normal_navigation=Mock())
+                    self.driver=SimpleNamespace()  # The adapter has no Selenium capabilities.
+                def capture(self, url):
+                    if denied:
+                        raise VividCaptureError('provider-rate-limited', {})
+                    return super().capture(url)
+            def factory(**kwargs):
+                browser=StockWebKit();sessions.append(browser);return browser
+            with tempfile.TemporaryDirectory() as directory, patch('vivid_firefox.configure_normal_navigation') as firefox:
+                report=run_canary(known,directory,engine='webkit',isolated_events=True,factory=factory)
+            firefox.assert_not_called()
+            self.assertEqual(report['status'],'failed' if denied else 'passed')
+            self.assertEqual(len(sessions),1 if denied else 2)
+            self.assertTrue(all(browser.closed for browser in sessions))
+            self.assertTrue(report['normal_navigation'])
+            for browser in sessions:
+                browser._webkit_session.configure_normal_navigation.assert_called_once()
+            if denied:self.assertTrue(report['stopped_after_access_denial'])
 
     def test_failure_report_keeps_category_and_safe_native_response_evidence(self):
         from vivid_inventory import VividCaptureError

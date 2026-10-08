@@ -1,4 +1,4 @@
-"""Read-only multi-event Firefox capture canary; no database or upload calls."""
+"""Read-only stock-browser capture canary; no database or upload calls."""
 from __future__ import annotations
 
 import argparse
@@ -77,15 +77,15 @@ def safe_diagnostics(value):
     pid = str(value.get('production_id', ''))
     if re.fullmatch(r'\d{1,12}', pid):
         result['production_id'] = pid
-    if value.get('engine') in ('firefox', 'chrome'):
+    if value.get('engine') in ('firefox', 'chrome', 'webkit'):
         result['engine'] = value['engine']
     if type(value.get('document_status')) is int:
         result['document_status'] = value['document_status']
-    if value.get('acquisition_method') == 'original-response-bidi':
+    if value.get('acquisition_method') in ('original-response-bidi', 'original-response-playwright'):
         result['acquisition_method'] = value['acquisition_method']
     if value.get('navigation_mode') in ('performer', 'direct'):
         result['navigation_mode'] = value['navigation_mode']
-    for key in ('visible_event_link_clicked', 'event_opened_new_window'):
+    for key in ('visible_event_link_clicked', 'event_opened_new_window', 'event_opened_native_popup'):
         if type(value.get(key)) is bool:
             result[key] = value[key]
     for key in ('event_link_click_attempts', 'preclick_responses_ignored'):
@@ -95,7 +95,7 @@ def safe_diagnostics(value):
         result['last_link_error_type'] = value['last_link_error_type']
     runtime = value.get('runtime')
     if isinstance(runtime, dict):
-        result['runtime'] = {key: runtime[key] for key in ('engine', 'selenium', 'browser_version', 'driver_version')
+        result['runtime'] = {key: runtime[key] for key in ('engine', 'selenium', 'playwright', 'browser_version', 'driver_version')
             if isinstance(runtime.get(key), str) and re.fullmatch(r'[A-Za-z0-9 .()_-]{1,100}', runtime[key])}
         if type(runtime.get('headed')) is bool:
             result['runtime']['headed'] = runtime['headed']
@@ -125,7 +125,11 @@ def safe_diagnostics(value):
     return result
 
 
-def run_canary(events, directory, *, timeout=45, pace_seconds=0, factory=None, normal_navigation=False, isolated_events=False):
+def run_canary(events, directory, *, timeout=45, pace_seconds=0, factory=None, normal_navigation=False, isolated_events=False, engine='firefox'):
+    if engine not in ('firefox', 'webkit'):
+        raise ValueError('Canary engine must be Firefox or WebKit')
+    if engine == 'webkit':
+        normal_navigation = True
     if type(pace_seconds) is not int or not 0 <= pace_seconds <= 90:
         raise ValueError('pace_seconds must be an integer between 0 and 90')
     if type(normal_navigation) is not bool or type(isolated_events) is not bool:
@@ -137,7 +141,7 @@ def run_canary(events, directory, *, timeout=45, pace_seconds=0, factory=None, n
     from vivid_inventory import validate_inventory
     directory = Path(directory); directory.mkdir(parents=True, exist_ok=True)
     report = dict(status='running', database_calls=0, upload_calls=0, pace_seconds=pace_seconds,
-                  normal_navigation=normal_navigation,
+                  normal_navigation=normal_navigation, engine=engine,
                   isolated_events=isolated_events,
                   observations=[], browser_sessions=[], selenium_version=selenium.__version__,
                   started_at=datetime.now(timezone.utc).isoformat())
@@ -198,18 +202,30 @@ def run_canary(events, directory, *, timeout=45, pace_seconds=0, factory=None, n
         report['browser_sessions'].append(session)
         try:
             browser = factory(headless=False, timeout=timeout)
-            capabilities = browser.driver.capabilities
-            if str(capabilities.get('browserName', '')).casefold() != 'firefox':
-                raise ValueError('The Firefox canary did not start Firefox')
+            webkit = getattr(browser, '_webkit_session', None)
+            if engine == 'webkit':
+                if webkit is None:
+                    raise ValueError('The WebKit canary did not start WebKit')
+                capabilities = {'browserName': 'webkit'}
+            else:
+                capabilities = browser.driver.capabilities
+                if str(capabilities.get('browserName', '')).casefold() != 'firefox':
+                    raise ValueError('The Firefox canary did not start Firefox')
             if normal_navigation:
-                from vivid_firefox import configure_normal_navigation
-                configure_normal_navigation(browser,
-                    {event['production_id']: routes[event['production_id']][0] for event in cohort},
-                    {event['production_id']: routes[event['production_id']][1] for event in cohort})
+                performer_urls = {event['production_id']: routes[event['production_id']][0] for event in cohort}
+                expected_dates = {event['production_id']: routes[event['production_id']][1] for event in cohort}
+                if engine == 'webkit':
+                    webkit.configure_normal_navigation(performer_urls, expected_dates)
+                else:
+                    from vivid_firefox import configure_normal_navigation
+                    configure_normal_navigation(browser, performer_urls, expected_dates)
             session.update(status='started', browser_version=capabilities.get('browserVersion'),
                            driver_version=capabilities.get('moz:geckodriverVersion'))
             for event in cohort:
                 observe(browser, event, phase)
+                if report['observations'][-1].get('category') in ('provider-access-denied', 'provider-rate-limited', 'provider-authentication-required'):
+                    report['stopped_after_access_denial'] = True
+                    break
         except Exception as exc:
             session.update(status='failed', error_type=type(exc).__name__)
         finally:
@@ -221,6 +237,8 @@ def run_canary(events, directory, *, timeout=45, pace_seconds=0, factory=None, n
                     session['closed'] = False
                     session['close_error_type'] = type(exc).__name__
             _write(report_path, report)
+        if report.get('stopped_after_access_denial'):
+            break
     expected = len(events) if isolated_events else len(events) + 2
     success = (len(report['observations']) == expected
         and all(row['status'] == 'captured' for row in report['observations'])
@@ -236,19 +254,20 @@ def main():
     parser.add_argument('--events', required=True, help='JSON events with sport/url and optional paired home_team/event_date')
     parser.add_argument('--directory', type=Path, default=Path('firefox-canary'))
     parser.add_argument('--timeout', type=int, default=45)
+    parser.add_argument('--engine', choices=('firefox', 'webkit'), default='firefox')
     parser.add_argument('--pace-seconds', type=int, default=0,
                         help='Idle seconds between observations, including browser restarts (0..90; default 0).')
     parser.add_argument('--normal-navigation', action='store_true',
                         help='Use observed performer links from paired schedule fields or the fixed known routes; default direct.')
     parser.add_argument('--isolated-events', action='store_true',
-                        help='Start and close one fresh Firefox browser per distinct event, without repeats.')
+                        help='Start and close one fresh browser per distinct event, without repeats.')
     args = parser.parse_args()
     if not 20 <= args.timeout <= 60:
         parser.error('timeout must be between20 and60 seconds')
     if not 0 <= args.pace_seconds <= 90:
         parser.error('pace-seconds must be between 0 and 90')
     result = run_canary(events_from_json(args.events), args.directory, timeout=args.timeout,
-                        pace_seconds=args.pace_seconds, normal_navigation=args.normal_navigation, isolated_events=args.isolated_events)
+                        pace_seconds=args.pace_seconds, normal_navigation=args.normal_navigation, isolated_events=args.isolated_events, engine=args.engine)
     print('BROWSER_CAPTURE_CANARY ' + json.dumps(result, sort_keys=True))
     return int(result['status'] != 'passed')
 
