@@ -1,0 +1,1123 @@
+{
+  "captured_at": "2026-10-08T03:30:22.302321+00:00",
+  "currency": "USD",
+  "event_date": "2026-10-08T23:00:00+00:00",
+  "event_type": "nhl",
+  "map_geometry": {
+    "coverage_ratio": 0.9492,
+    "known_section_count": 59,
+    "mapped_section_count": 56,
+    "sections": [
+      {
+        "name": "Balcony Level 301",
+        "shapes": [
+          {
+            "path": "M265.78,311.53v40.49h-31.36v-40.49h31.36Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 302",
+        "shapes": [
+          {
+            "path": "M230.84,311.53v40.49h-30.07v-40.49h30.07Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 303",
+        "shapes": [
+          {
+            "path": "M197.57,311.53v40.49h-39.96l8.32-40.49h31.64Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 304",
+        "shapes": [
+          {
+            "path": "M131.8,303.4l30.02,7.65-8.56,40.58-42.06-11.76,20.6-36.47Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 305",
+        "shapes": [
+          {
+            "path": "M128.68,302.35l-20.5,36.33-29.64-20.7,28.58-29.16,21.56,13.53Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 306",
+        "shapes": [
+          {
+            "path": "M104.56,286.92l-28.68,29.2-29.68-37.71,37.33-17.73,21.03,26.24Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 307",
+        "shapes": [
+          {
+            "path": "M81.61,257.97l-36.9,17.72-13.72-38.29,39.67-6.36,10.95,26.93Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 308",
+        "shapes": [
+          {
+            "path": "M69.71,194.18v33.79l-39.72,6.36v-40.15h39.72Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 309",
+        "shapes": [
+          {
+            "path": "M69.71,159.67v31.31H29.99v-37.57l39.72,6.26Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 310",
+        "shapes": [
+          {
+            "path": "M79.56,128.32l-9.85,28.15-39.63-6.31,13.19-40.06,36.28,18.22h0Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 311",
+        "shapes": [
+          {
+            "path": "M80.66,125.31l-35.8-17.93,28.25-36.85,29.01,28.87-21.46,25.9h0Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 312",
+        "shapes": [
+          {
+            "path": "M104.75,97.47l-29.01-28.78,31.74-22.04,21.46,33.46-24.19,17.35h0Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 313",
+        "shapes": [
+          {
+            "path": "M156.09,32.57l6.35,38.38-30.3,8.22-21.7-33.89,45.65-12.71Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 314",
+        "shapes": [
+          {
+            "path": "M159.1,32.29h38.38v38.38h-31.98l-6.4-38.38Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 315",
+        "shapes": [
+          {
+            "path": "M230.6,32.29v38.38h-29.97v-38.38h29.97Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 316",
+        "shapes": [
+          {
+            "path": "M233.76,32.29h32.17v38.38h-32.17v-38.38Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 317",
+        "shapes": [
+          {
+            "path": "M298.29,32.29v38.38h-29.21v-38.38h29.21Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 318",
+        "shapes": [
+          {
+            "path": "M341.88,32.29l-7.6,38.38h-32.84v-38.38h40.44Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 319",
+        "shapes": [
+          {
+            "path": "M389.25,45.35l-22.18,33.99-29.35-8.36,7.6-38.38,43.93,12.76h0Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 320",
+        "shapes": [
+          {
+            "path": "M394.65,96.86l-24.1-16.49,21.56-33.6,30.93,21.46-28.39,28.63Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 321",
+        "shapes": [
+          {
+            "path": "M425.74,70.12l25.89,33.25-35.66,19.26-18.71-23.85,28.48-28.66Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 322",
+        "shapes": [
+          {
+            "path": "M454.4,107l14.72,40.86-42.06,7.27-8.99-29.06,36.33-19.08h0Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 323",
+        "shapes": [
+          {
+            "path": "M469.46,151.07v40.15h-42.4v-32.6l42.4-7.55Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 324",
+        "shapes": [
+          {
+            "path": "M469.46,194.37v38.67l-42.45-6.45.05-32.22h42.4Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 325",
+        "shapes": [
+          {
+            "path": "M468.88,236.71l-15.68,41.83-37.19-19.41,10.23-29.35,42.64,6.93Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 326",
+        "shapes": [
+          {
+            "path": "M414.2,261.72l37.14,19.5-26.7,34.15-29.73-29.16,19.29-24.49Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 327",
+        "shapes": [
+          {
+            "path": "M392.23,288.03l29.71,29.24-30.21,21.08-23.09-35.47,23.59-14.85h0Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 328",
+        "shapes": [
+          {
+            "path": "M335.76,311.29l29.64-7.5,23.37,35.99-46.32,11.95-6.69-40.44Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 329",
+        "shapes": [
+          {
+            "path": "M301.59,311.53h30.83l6.5,40.49h-37.33v-40.49Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Balcony Level 330",
+        "shapes": [
+          {
+            "path": "M269.27,311.53h29.21v40.49h-29.21v-40.49Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Club Level 111",
+        "shapes": [
+          {
+            "path": "M266.26,296.86h-31.5v-19.12h31.5v19.12Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Club Level 113",
+        "shapes": [
+          {
+            "path": "M231.56,296.86h-30.07v-19.12h30.07v19.12Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Club Level 139",
+        "shapes": [
+          {
+            "path": "M231.22,106.61h-29.68v-19.31h29.68v19.31Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Club Level 141",
+        "shapes": [
+          {
+            "path": "M265.88,87.54v19.07h-31.5v-19.31h31.5v.24Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Club Level 145",
+        "shapes": [
+          {
+            "path": "M301.15,87.3h28.73l-3.39,19.31h-25.33v-19.31h-.01Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Loge Level 1",
+        "shapes": [
+          {
+            "path": "M266.02,244.8v29.35h-31.36v-29.35h31.36Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Loge Level 10",
+        "shapes": [
+          {
+            "path": "M151.97,90.79c4.62-1.27,9.38-2.07,14.29-2.39l3.49,21.13h28.68v40.77h-19.6l-26.86-59.51Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Loge Level 11",
+        "shapes": [
+          {
+            "path": "M231.22,109.53v40.77h-29.68v-40.77h29.68Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Loge Level 12",
+        "shapes": [
+          {
+            "path": "M240.93,109.53h24.95v40.77h-5.35v-10.18h-21.03v10.18h-5.11v-40.77h6.54Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Loge Level 13",
+        "shapes": [
+          {
+            "path": "M277.59,109.53h20.46v40.77h-28.97v-40.77h8.51Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Loge Level 14",
+        "shapes": [
+          {
+            "path": "M319.99,150.3h-18.83v-40.77h24.86l-6.02,40.77h-.01Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Loge Level 15",
+        "shapes": [
+          {
+            "path": "M376.39,107c1.05.8,2.06,1.64,3.01,2.53l-42.16,43.35-6.02-3.82,9.2-21.13c-4.11-1.8-8.48-3-13.12-3.58l5.74-36.09c15.74,1.94,30.19,8.19,43.35,18.74Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Loge Level 16",
+        "shapes": [
+          {
+            "path": "M334.05,159.77l47.65-48.18c6.12,5.93,10.69,12.35,13.72,19.26l-57.36,33.56c-.73-.76-1.29-1.43-1.67-2.01-.38-.54-1.16-1.42-2.35-2.63h0Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Loge Level 17",
+        "shapes": [
+          {
+            "path": "M394.86,190.69h-52.55v-14.2c-.25-2.45-.45-3.95-.57-4.49-.25-.99-.84-2.49-1.77-4.49l47.42-26.43,7.49,20.6v29.01Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Loge Level 18",
+        "shapes": [
+          {
+            "path": "M386.67,244.76l-47.27-24.57c1.24-2.23,2.02-3.87,2.34-4.92.25-.83.48-2.37.67-4.64v-16.78h52.45v29.24l-8.19,21.67Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Loge Level 19",
+        "shapes": [
+          {
+            "path": "M394.51,255.65c-3.35,6.66-8,12.78-13.96,18.35l-1.72,1.48c-2.71,2.2-5.64,4.37-8.8,6.5-3.57,2.45-6.63,4.32-9.18,5.59l-30.27-56.39c2.34-2.32,4.46-5.09,6.32-7.37l57.61,31.83h0Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Loge Level 2",
+        "shapes": [
+          {
+            "path": "M223.72,234.33v10.28h7.74v29.54h-29.73v-39.82h21.99Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Loge Level 20",
+        "shapes": [
+          {
+            "path": "M322.19,234.14c1.24-.22,2.14-.4,2.68-.53.89-.25,1.85-.62,2.87-1.1l26.91,57.84c-6.98,2.74-14.36,4.57-22.13,5.5l-3.82-21.7h-27.2v-39.82h17.11c.89.1,2.09.03,3.58-.19Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Loge Level 21",
+        "shapes": [
+          {
+            "path": "M277.35,244.61v-10.28h20.98v39.82h-29.21v-29.54h8.23Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Loge Level 3",
+        "shapes": [
+          {
+            "path": "M179.3,234.33h19.27v39.82h-29.97l-2.68,22.08c-4.59-.67-9.02-1.66-13.29-2.96l26.67-58.94Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Loge Level 4",
+        "shapes": [
+          {
+            "path": "M167.26,229.27c2.4,1.82,4.9,3.11,7.51,3.87l-27.68,58.22c-7.04-2.71-15.69-8.36-25.96-16.97l28.39-29.3,2.49,1.67,15.26-17.49h-.01Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Loge Level 5",
+        "shapes": [
+          {
+            "path": "M159.53,228.69l-41.78,42.68c-.54-.48-1.27-1.12-2.2-1.91-5.67-5.58-10.18-11.23-13.53-16.97l53.92-28.11s.05.03.05.1c1.12,1.59,2.29,3,3.54,4.21Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Loge Level 6",
+        "shapes": [
+          {
+            "path": "M154.36,214.99c.35,1.65,1.19,3.26,2.53,4.82l-57.12,28.63c-1.5-2.49-2.77-4.94-3.82-7.36-1.91-4.46-3.19-9.43-3.82-14.91v-32.26h62.23v21.07h0Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Loge Level 7",
+        "shapes": [
+          {
+            "path": "M92.14,159.2c1.31-8.52,3.97-16.77,8.03-24.77l57.31,29.49c-.32.41-.75.96-1.29,1.63-.45.61-.81,1.29-1.1,2.06-.29.8-.48,1.48-.57,2.06-.06.48-.11,1.15-.14,2.01v19.02h-62.23v-31.5h-.01Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Loge Level 8",
+        "shapes": [
+          {
+            "path": "M117.32,111.3l42.3,44.55c-1.02.96-2.1,2.18-3.25,3.68-.06.1-.13.19-.19.29l-54.35-28.49c3.54-6.37,8-12.36,13.38-17.97.7-.7,1.4-1.39,2.11-2.06Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      },
+      {
+        "name": "Loge Level 9",
+        "shapes": [
+          {
+            "path": "M170.52,152.23l-10.99-20.13c-3.41,1.82-6.74,4.14-9.99,6.98-.16.16-.33.33-.53.53l-29.4-30.45c8.83-7.97,18.26-13.65,28.3-17.06l26.96,58.75c-1.5.32-2.95.78-4.35,1.38Z",
+            "transform": "matrix(0.9703697562217712 0 0 0.9703697562217712 0 131.58660888671875)"
+          }
+        ]
+      }
+    ],
+    "source": "vivid-dom-svg",
+    "source_url": "https://www.vividseats.com/boston-bruins-tickets-td-garden-10-8-2026/production/7302493",
+    "view_box": [
+      0.0,
+      0.0,
+      500.84,
+      382.14999
+    ]
+  },
+  "schema_version": 1,
+  "section_count": 59,
+  "sections": [
+    {
+      "alternate_price": "89.00",
+      "displayed_price": "63.00",
+      "listing_count": 21,
+      "price": 63,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "11",
+      "section": "Balcony Level 301"
+    },
+    {
+      "alternate_price": "78.00",
+      "displayed_price": "55.00",
+      "listing_count": 26,
+      "price": 55,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "14",
+      "section": "Balcony Level 302"
+    },
+    {
+      "alternate_price": "72.00",
+      "displayed_price": "50.00",
+      "listing_count": 18,
+      "price": 50,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "10",
+      "section": "Balcony Level 303"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 19,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "13",
+      "section": "Balcony Level 304"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 17,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "15",
+      "section": "Balcony Level 305"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 11,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "10",
+      "section": "Balcony Level 306"
+    },
+    {
+      "alternate_price": "59.00",
+      "displayed_price": "40.95",
+      "listing_count": 10,
+      "price": 41,
+      "price_source": "p",
+      "quantity": "8",
+      "row": "14",
+      "section": "Balcony Level 307"
+    },
+    {
+      "alternate_price": "64.00",
+      "displayed_price": "45.00",
+      "listing_count": 28,
+      "price": 45,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "13",
+      "section": "Balcony Level 308"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 17,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "14",
+      "section": "Balcony Level 309"
+    },
+    {
+      "alternate_price": "63.00",
+      "displayed_price": "44.00",
+      "listing_count": 13,
+      "price": 44,
+      "price_source": "p",
+      "quantity": "8",
+      "row": "13",
+      "section": "Balcony Level 310"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 20,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "8",
+      "row": "14",
+      "section": "Balcony Level 311"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 19,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "14",
+      "section": "Balcony Level 312"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 10,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "14",
+      "section": "Balcony Level 313"
+    },
+    {
+      "alternate_price": "68.00",
+      "displayed_price": "48.00",
+      "listing_count": 6,
+      "price": 48,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "13",
+      "section": "Balcony Level 314"
+    },
+    {
+      "alternate_price": "72.00",
+      "displayed_price": "50.00",
+      "listing_count": 19,
+      "price": 50,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "13",
+      "section": "Balcony Level 315"
+    },
+    {
+      "alternate_price": "71.00",
+      "displayed_price": "50.00",
+      "listing_count": 22,
+      "price": 50,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "13",
+      "section": "Balcony Level 316"
+    },
+    {
+      "alternate_price": "71.00",
+      "displayed_price": "50.00",
+      "listing_count": 16,
+      "price": 50,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "13",
+      "section": "Balcony Level 317"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 11,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "11",
+      "section": "Balcony Level 318"
+    },
+    {
+      "alternate_price": "59.00",
+      "displayed_price": "40.95",
+      "listing_count": 12,
+      "price": 41,
+      "price_source": "p",
+      "quantity": "8",
+      "row": "14",
+      "section": "Balcony Level 319"
+    },
+    {
+      "alternate_price": "127.00",
+      "displayed_price": "90.00",
+      "listing_count": 2,
+      "price": 90,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "7",
+      "section": "Balcony Level 320"
+    },
+    {
+      "alternate_price": "79.00",
+      "displayed_price": "56.00",
+      "listing_count": 5,
+      "price": 56,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "11",
+      "section": "Balcony Level 321"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 8,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "8",
+      "section": "Balcony Level 322"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 10,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "10",
+      "section": "Balcony Level 323"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 9,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "13",
+      "section": "Balcony Level 324"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 9,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "10",
+      "section": "Balcony Level 325"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 4,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "8",
+      "row": "15",
+      "section": "Balcony Level 326"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 20,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "8",
+      "row": "13",
+      "section": "Balcony Level 327"
+    },
+    {
+      "alternate_price": "63.00",
+      "displayed_price": "44.00",
+      "listing_count": 19,
+      "price": 44,
+      "price_source": "p",
+      "quantity": "8",
+      "row": "14",
+      "section": "Balcony Level 328"
+    },
+    {
+      "alternate_price": "74.00",
+      "displayed_price": "52.00",
+      "listing_count": 8,
+      "price": 52,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "8",
+      "section": "Balcony Level 329"
+    },
+    {
+      "alternate_price": "83.00",
+      "displayed_price": "59.00",
+      "listing_count": 21,
+      "price": 59,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "11",
+      "section": "Balcony Level 330"
+    },
+    {
+      "alternate_price": "231.00",
+      "displayed_price": "165.00",
+      "listing_count": 1,
+      "price": 165,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "H",
+      "section": "Club Level 111"
+    },
+    {
+      "alternate_price": "224.00",
+      "displayed_price": "160.00",
+      "listing_count": 1,
+      "price": 160,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "H",
+      "section": "Club Level 113"
+    },
+    {
+      "alternate_price": "251.00",
+      "displayed_price": "180.00",
+      "listing_count": 1,
+      "price": 180,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "C",
+      "section": "Club Level 139"
+    },
+    {
+      "alternate_price": "224.00",
+      "displayed_price": "160.00",
+      "listing_count": 2,
+      "price": 160,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "C",
+      "section": "Club Level 141"
+    },
+    {
+      "alternate_price": "180.00",
+      "displayed_price": "128.00",
+      "listing_count": 2,
+      "price": 128,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "D",
+      "section": "Club Level 145"
+    },
+    {
+      "alternate_price": "14.00",
+      "displayed_price": "8.00",
+      "listing_count": 2,
+      "price": 8,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "PASS..",
+      "section": "LEGENDS CLUB"
+    },
+    {
+      "alternate_price": "29.00",
+      "displayed_price": "22.00",
+      "listing_count": 1,
+      "price": 22,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "GA",
+      "section": "Legends club pass"
+    },
+    {
+      "alternate_price": "172.00",
+      "displayed_price": "123.00",
+      "listing_count": 20,
+      "price": 123,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "9",
+      "section": "Loge Level 1"
+    },
+    {
+      "alternate_price": "120.00",
+      "displayed_price": "85.00",
+      "listing_count": 32,
+      "price": 85,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "23",
+      "section": "Loge Level 10"
+    },
+    {
+      "alternate_price": "169.00",
+      "displayed_price": "121.00",
+      "listing_count": 30,
+      "price": 121,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "7",
+      "section": "Loge Level 11"
+    },
+    {
+      "alternate_price": "180.00",
+      "displayed_price": "128.00",
+      "listing_count": 30,
+      "price": 128,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "4",
+      "section": "Loge Level 12"
+    },
+    {
+      "alternate_price": "149.00",
+      "displayed_price": "106.00",
+      "listing_count": 26,
+      "price": 106,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "18",
+      "section": "Loge Level 13"
+    },
+    {
+      "alternate_price": "143.00",
+      "displayed_price": "102.00",
+      "listing_count": 16,
+      "price": 102,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "7",
+      "section": "Loge Level 14"
+    },
+    {
+      "alternate_price": "101.00",
+      "displayed_price": "71.00",
+      "listing_count": 20,
+      "price": 71,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "20",
+      "section": "Loge Level 15"
+    },
+    {
+      "alternate_price": "105.00",
+      "displayed_price": "74.00",
+      "listing_count": 17,
+      "price": 74,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "25",
+      "section": "Loge Level 16"
+    },
+    {
+      "alternate_price": "107.00",
+      "displayed_price": "76.00",
+      "listing_count": 18,
+      "price": 76,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "20",
+      "section": "Loge Level 17"
+    },
+    {
+      "alternate_price": "110.00",
+      "displayed_price": "78.00",
+      "listing_count": 33,
+      "price": 78,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "18",
+      "section": "Loge Level 18"
+    },
+    {
+      "alternate_price": "106.00",
+      "displayed_price": "75.00",
+      "listing_count": 22,
+      "price": 75,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "23",
+      "section": "Loge Level 19"
+    },
+    {
+      "alternate_price": "186.00",
+      "displayed_price": "133.00",
+      "listing_count": 9,
+      "price": 133,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "5",
+      "section": "Loge Level 2"
+    },
+    {
+      "alternate_price": "133.00",
+      "displayed_price": "95.00",
+      "listing_count": 27,
+      "price": 95,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "12",
+      "section": "Loge Level 20"
+    },
+    {
+      "alternate_price": "180.00",
+      "displayed_price": "128.00",
+      "listing_count": 27,
+      "price": 128,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "10",
+      "section": "Loge Level 21"
+    },
+    {
+      "alternate_price": "126.00",
+      "displayed_price": "90.00",
+      "listing_count": 39,
+      "price": 90,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "21",
+      "section": "Loge Level 3"
+    },
+    {
+      "alternate_price": "138.00",
+      "displayed_price": "98.00",
+      "listing_count": 19,
+      "price": 98,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "13",
+      "section": "Loge Level 4"
+    },
+    {
+      "alternate_price": "114.00",
+      "displayed_price": "81.00",
+      "listing_count": 9,
+      "price": 81,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "24",
+      "section": "Loge Level 5"
+    },
+    {
+      "alternate_price": "117.00",
+      "displayed_price": "83.00",
+      "listing_count": 35,
+      "price": 83,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "19",
+      "section": "Loge Level 6"
+    },
+    {
+      "alternate_price": "118.00",
+      "displayed_price": "84.00",
+      "listing_count": 27,
+      "price": 84,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "25",
+      "section": "Loge Level 7"
+    },
+    {
+      "alternate_price": "111.00",
+      "displayed_price": "79.00",
+      "listing_count": 16,
+      "price": 79,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "25",
+      "section": "Loge Level 8"
+    },
+    {
+      "alternate_price": "142.00",
+      "displayed_price": "101.00",
+      "listing_count": 20,
+      "price": 101,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "6",
+      "section": "Loge Level 9"
+    },
+    {
+      "alternate_price": "484.00",
+      "displayed_price": "349.00",
+      "listing_count": 1,
+      "price": 349,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "B",
+      "section": "RAFTERS"
+    }
+  ],
+  "source_id": "7302493",
+  "source_url": "https://www.vividseats.com/boston-bruins-tickets-td-garden-10-8-2026/production/7302493",
+  "title": "Utah Mammoth at Boston Bruins",
+  "venue": "TD Garden"
+}
