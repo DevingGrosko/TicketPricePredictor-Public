@@ -483,6 +483,9 @@ jobs:
 
   mirror-nfl:
     name: mirror-nfl-staging
+    permissions:
+      contents: read
+      actions: read
     if: always() && needs.collect-nfl.outputs.mirror == 'true'
     needs: collect-nfl
     uses: ./.github/workflows/shared-snapshot-mirror.yml
@@ -496,6 +499,9 @@ jobs:
 
   mirror-nhl:
     name: mirror-nhl-staging
+    permissions:
+      contents: read
+      actions: read
     if: always() && needs.collect-nhl.outputs.mirror == 'true'
     needs: collect-nhl
     uses: ./.github/workflows/shared-snapshot-mirror.yml

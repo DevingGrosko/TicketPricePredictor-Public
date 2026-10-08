@@ -126,6 +126,8 @@ class CaptureCutoverWorkflowTests(unittest.TestCase):
                 self.assertNotIn('secrets: inherit', mirror)
                 self.assertNotIn('COLLECTOR_INGEST_TOKEN', mirror)
                 self.assertIn('source_ref: ' + SOURCE, mirror)
+                self.assertIn('permissions:\n      contents: read\n      actions: read', mirror)
+                self.assertNotIn('actions: write', mirror)
 
     def test_backup_dispatches_only_owner_and_preserves_old_free_state(self):
         backup = workflow('free-ticket-collect')
