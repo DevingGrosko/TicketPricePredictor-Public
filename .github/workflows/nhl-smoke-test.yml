@@ -2,6 +2,14 @@ name: NHL collector smoke test
 
 on:
   workflow_dispatch:
+    inputs:
+      navigation:
+        description: Normal navigation to the public event
+        type: choice
+        options:
+          - direct
+          - performer
+        default: direct
 
 permissions:
   contents: read
@@ -25,9 +33,12 @@ jobs:
           firefox --version
           geckodriver --version
       - name: Observe one public event in headed Firefox
+        env:
+          DIAGNOSTIC_NAVIGATION: ${{ inputs.navigation || 'direct' }}
         run: |
           timeout --signal=TERM --kill-after=10s 120s xvfb-run -a \
             python tools/firefox_inventory_diagnostic.py --timeout 75 \
+            --navigation "$DIAGNOSTIC_NAVIGATION" \
             --output firefox_inventory_result.json \
             --inventory-output firefox_public_inventory.json
       - name: Save sanitized diagnostics and public inventory

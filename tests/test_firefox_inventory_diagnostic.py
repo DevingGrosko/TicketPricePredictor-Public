@@ -45,13 +45,16 @@ class FakeDriver:
         self.fetches, self.navigations = 0, []
         self.modal = modal
         self.inventory_url = URL + "&quantity=2" if filtered else URL
+        self.links = []
+        self.current_url = "about:blank"
 
     def set_page_load_timeout(self, value): pass
     def set_script_timeout(self, value): pass
-    def find_elements(self, *_): return []
+    def find_elements(self, *_): return self.links
     def quit(self): pass
 
     def get(self, url):
+        self.current_url = url
         self.navigations.append(url)
         self.network.callback({"request": {"url": self.inventory_url, "request": "transient-request", "method": "GET",
                                           "headers": [{"name": "Cookie", "value": "PRIVATE-COOKIE"},
@@ -63,6 +66,8 @@ class FakeDriver:
         if source == diagnostic.DOM_SCRIPT:
             return {"ready_state": "complete", "listing_count": 1, "inventory_error": False,
                     "challenge_visible": False, "quantity_modal_visible": self.modal, "webdriver": True}
+        if source == "return performance.timeOrigin;":
+            return 123
         # Real Firefox can omit this request after its resource buffer fills.
         return [] if self.modal else [self.inventory_url]
 
@@ -70,6 +75,22 @@ class FakeDriver:
         assert source == diagnostic.FETCH_SCRIPT and url == URL
         self.fetches += 1
         return {"status": 200, "payload": PAYLOAD}
+
+
+class Link:
+    def __init__(self, href, *, visible=True, enabled=True, target=None, driver=None):
+        self.href, self.visible, self.enabled, self.target, self.driver = href, visible, enabled, target, driver
+        self.clicks = 0
+    def get_attribute(self, name): return self.href if name == "href" else self.target
+    def is_displayed(self): return self.visible
+    def is_enabled(self): return self.enabled
+    def click(self):
+        self.clicks += 1
+        if self.driver:
+            self.driver.current_url = diagnostic.EVENT
+            self.driver.navigations.append("visible-event-link-click")
+            self.driver.network.callback({"request": {"url": self.driver.inventory_url, "request": "event-request", "method": "GET"},
+                                          "response": {"status": self.driver.network.status}})
 
 
 class FirefoxDiagnosticTests(unittest.TestCase):
@@ -156,6 +177,56 @@ class FirefoxDiagnosticTests(unittest.TestCase):
         raw = json.dumps(PAYLOAD)
         for encoding, value in (("string", raw), ("base64", base64.b64encode(raw.encode()).decode())):
             self.assertEqual(diagnostic.decode_bidi_body({"bytes": {"type": encoding, "value": value}}), PAYLOAD)
+
+    def test_visible_link_choice_is_exact_safe_and_bounded(self):
+        driver = FakeDriver()
+        wanted = Link(diagnostic.EVENT)
+        driver.links = [Link(diagnostic.EVENT, visible=False), Link(diagnostic.EVENT, enabled=False),
+                        Link(diagnostic.EVENT, target="_blank"), Link(diagnostic.EVENT + "?quantity=2"),
+                        Link(diagnostic.EVENT.replace("www.vividseats.com", "other.example")),
+                        Link(diagnostic.EVENT.replace("7302493", "123")), wanted]
+        self.assertIs(diagnostic.visible_event_link(driver), wanted)
+        self.assertEqual(wanted.clicks, 0)
+        driver.links = [Link(diagnostic.EVENT, visible=False)] * 50 + [wanted]
+        self.assertIsNone(diagnostic.visible_event_link(driver))
+
+    def test_missing_performer_link_times_out_without_direct_navigation(self):
+        driver = FakeDriver()
+        evidence = diagnostic.Evidence()
+        driver.network.callback = evidence.response
+        report = {}
+        with patch.object(diagnostic.time, "monotonic", side_effect=range(20)), patch.object(diagnostic.time, "sleep"):
+            self.assertFalse(diagnostic.navigate_performer(driver, evidence, report, 4))
+        self.assertEqual(driver.navigations, [diagnostic.PERFORMER])
+        self.assertEqual(report["category"], "visible-event-link-not-found")
+
+    def test_performer_click_uses_original_body_and_never_fetches_or_changes_quantity(self):
+        import selenium.webdriver, selenium.webdriver.firefox.service
+        for status in (200, 404):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as tmp:
+                driver = FakeDriver(status=status, modal=True)
+                link = Link(diagnostic.EVENT, driver=driver)
+                driver.links = [link]
+                args = SimpleNamespace(output=Path(tmp) / "result.json", inventory_output=Path(tmp) / "inventory.json", timeout=75, navigation="performer")
+                report, clock = {}, [0]
+                def tick(): clock[0] += 1; return clock[0]
+                with patch.object(selenium.webdriver, "Firefox", return_value=driver), \
+                     patch.object(selenium.webdriver.firefox.service, "Service", return_value=object()), \
+                     patch.object(diagnostic.shutil, "which", side_effect=lambda value: "/installed/" + value), \
+                     patch.object(diagnostic, "binary_version", return_value="test1"), \
+                     patch.object(diagnostic, "prepare_quantity") as controls, \
+                     patch.object(diagnostic.time, "monotonic", side_effect=tick), patch.object(diagnostic.time, "sleep"):
+                    success = diagnostic.run(args, report)
+                self.assertEqual(success, status == 200)
+                self.assertEqual(driver.navigations, [diagnostic.PERFORMER, "visible-event-link-click"])
+                self.assertEqual(link.clicks, 1)
+                self.assertEqual(driver.fetches, 0)
+                controls.assert_not_called()
+                self.assertEqual(report["navigation_transition"], "client-side")
+                self.assertEqual(report["event_document_response_count"], 0)
+                if status == 200:
+                    self.assertEqual(len(driver.network.body_calls), 1)
+                    self.assertEqual(driver.network.body_calls[0]["request"], "event-request")
 
 
 if __name__ == "__main__":

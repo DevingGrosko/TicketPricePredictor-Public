@@ -18,9 +18,10 @@ import shutil
 import subprocess
 import threading
 import time
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urljoin, urlsplit
 
 EVENT = "https://www.vividseats.com/boston-bruins-tickets-td-garden-10-8-2026/production/7302493"
+PERFORMER = "https://www.vividseats.com/boston-bruins-tickets--sports-nhl-hockey/performer/104"
 PRODUCTION_ID = "7302493"
 PATHS = {"/hermes/api/v1/listings", "/hermes/api/v2/listings"}
 MAX_BYTES = 16 * 1024 * 1024
@@ -37,10 +38,12 @@ def unfiltered_url(url):
         if (parsed.scheme != "https" or parsed.netloc != "www.vividseats.com" or parsed.path not in PATHS
                 or query.get("productionId") != [PRODUCTION_ID]):
             return False
+        if set(query) - (SAFE_QUERY | {"scarcity"}) or any(len(values) != 1 or not values[0] for values in query.values()):
+            return False
         for key in ("quantity", "offset", "page"):
             if key in query and query[key] != ["0"]:
                 return False
-        for key in ("recommended", "sf"):
+        for key in ("recommended", "sf", "scarcity"):
             if key in query and any(value.casefold() not in {"false", "0"} for value in query[key]):
                 return False
         return not any(key in query for key in ("limit", "pageSize"))
@@ -134,6 +137,7 @@ class Evidence:
     def __init__(self):
         self.lock, self.rows, self.inventory = threading.Lock(), [], []
         self.denial, self.phase = False, "page"
+        self.event_click_started_ms = None
 
     def response(self, event):
         params = event if isinstance(event, dict) else vars(event)
@@ -147,11 +151,18 @@ class Evidence:
         if parsed.hostname not in {"www.vividseats.com", "vividseats.com"}:
             return
         with self.lock:
+            phase = self.phase
+            request_time = (request.get("timings") or {}).get("requestTime")
+            if (self.event_click_started_ms is not None and isinstance(request_time, (int, float))
+                    and request_time < self.event_click_started_ms):
+                phase = "performer"
             self.denial |= status in (401, 403, 429)
-            if parsed.path == urlsplit(EVENT).path:
-                self.rows.append({"kind": "document", "status": status, "phase": self.phase})
+            if parsed.path.rstrip("/").endswith("/production/" + PRODUCTION_ID):
+                self.rows.append({"kind": "document", "status": status, "phase": phase})
+            elif parsed.path == urlsplit(PERFORMER).path:
+                self.rows.append({"kind": "performer-document", "status": status, "phase": phase})
             elif parsed.path in PATHS:
-                row = {"kind": "inventory", "status": status, "phase": self.phase, **safe_request(url),
+                row = {"kind": "inventory", "status": status, "phase": phase, **safe_request(url),
                        "request_header_names": header_names(request.get("headers", [])),
                        "response_header_names": header_names(response.get("headers", []))}
                 protocol = response.get("protocol")
@@ -164,7 +175,7 @@ class Evidence:
                                      if key in {"requestTime", "responseStart", "responseEnd", "connectStart", "connectEnd", "tlsStart"}
                                      and isinstance(value, (int, float)) and math.isfinite(value)}
                 self.rows.append(row)
-                self.inventory.append({"url": url, "request": request.get("request"), "status": status, "phase": self.phase})
+                self.inventory.append({"url": url, "request": request.get("request"), "status": status, "phase": phase})
 
     def snapshot(self):
         with self.lock:
@@ -248,6 +259,43 @@ def save_capture(args, report, payload, method):
     return True
 
 
+def visible_event_link(driver):
+    for link in driver.find_elements("css selector", "a[href*='/production/7302493']")[:50]:
+        try:
+            href = link.get_attribute("href") or ""
+            parsed = urlsplit(urljoin(PERFORMER, href))
+            if (parsed.scheme != "https" or parsed.netloc != urlsplit(PERFORMER).netloc
+                    or parsed.query or parsed.fragment
+                    or not parsed.path.rstrip("/").endswith("/production/" + PRODUCTION_ID)
+                    or link.get_attribute("target") not in (None, "", "_self")
+                    or not link.is_displayed() or not link.is_enabled()):
+                continue
+            return link
+        except Exception:
+            continue
+    return None
+
+
+def navigate_performer(driver, evidence, report, deadline):
+    evidence.phase = "performer"
+    driver.get(PERFORMER)
+    while time.monotonic() < deadline:
+        if evidence.snapshot()[2] or driver.execute_script(DOM_SCRIPT)["challenge_visible"]:
+            report["category"] = "access-denial-or-challenge"
+            return False
+        link = visible_event_link(driver)
+        if link is not None:
+            report["performer_time_origin"] = driver.execute_script("return performance.timeOrigin;")
+            evidence.event_click_started_ms = time.time() * 1000
+            evidence.phase = "page"
+            link.click()
+            report["visible_event_link_clicked"] = True
+            return True
+        time.sleep(0.5)
+    report["category"] = "visible-event-link-not-found"
+    return False
+
+
 def binary_version(binary):
     result = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=5, check=True)
     line = result.stdout.splitlines()[0]
@@ -271,6 +319,8 @@ def run(args, report):
     driver, collector = None, None
     started = time.monotonic()
     evidence, state = Evidence(), {"needs_clear": False, "actions": []}
+    navigation = getattr(args, "navigation", "direct")
+    report["navigation_mode"] = navigation
     try:
         driver = webdriver.Firefox(options=options, service=Service(executable_path=gecko, log_output=subprocess.DEVNULL))
         driver.command_executor._client_config.timeout = 25
@@ -290,7 +340,11 @@ def run(args, report):
             report["bidi_collection_error_type"] = type(exc).__name__
         write_json(args.output, report)
         try:
-            driver.get(EVENT)
+            if navigation == "performer":
+                if not navigate_performer(driver, evidence, report, min(started + args.timeout - 25, time.monotonic() + 35)):
+                    return False
+            else:
+                driver.get(EVENT)
         except selenium.common.exceptions.TimeoutException:
             report["navigation_timeout"] = True
         deadline, candidate, stable_since = started + args.timeout, None, time.monotonic()
@@ -325,6 +379,16 @@ def run(args, report):
                         return save_capture(args, report, payload, "original-response-bidi")
                     except Exception as exc:
                         report["bidi_body_read_error_type"] = type(exc).__name__
+            if navigation == "performer":
+                # This comparison only observes the normal navigation's native
+                # requests. It never changes quantity or replays an HTTP call.
+                if candidate and original and time.monotonic() - stable_since >= 5:
+                    report["original_inventory_statuses"] = [item["status"] for item in original]
+                    report["observed_request"] = safe_request(candidate)
+                    report["category"] = "native-inventory-unavailable"
+                    return False
+                time.sleep(0.5)
+                continue
             before = len(state["actions"])
             prepare_quantity(driver, state)
             if len(state["actions"]) != before:
@@ -333,6 +397,9 @@ def run(args, report):
                 break
             time.sleep(0.5)
         report["quantity_actions"] = state["actions"]
+        if navigation == "performer":
+            report["category"] = "no-complete-native-inventory-response"
+            return False
         if state["needs_clear"] or report.get("dom", {}).get("quantity_modal_visible"):
             report["category"] = "quantity-control-not-cleared"
             return False
@@ -376,6 +443,19 @@ def run(args, report):
         return save_capture(args, report, payload, report["acquisition_method"])
     finally:
         report["responses"] = evidence.snapshot()[0]
+        if navigation == "performer":
+            report["event_document_response_count"] = sum(row["kind"] == "document" and row["phase"] == "page" for row in report["responses"])
+            if driver is not None and report.get("visible_event_link_clicked"):
+                try:
+                    report["event_page_reached"] = urlsplit(driver.current_url).path.rstrip("/").endswith("/production/" + PRODUCTION_ID)
+                    origin_before = report.pop("performer_time_origin", None)
+                    origin_after = driver.execute_script("return performance.timeOrigin;")
+                    same_document = (isinstance(origin_before, (int, float)) and isinstance(origin_after, (int, float))
+                                     and origin_before == origin_after)
+                    report["navigation_transition"] = "client-side" if report["event_page_reached"] and same_document else "document" if report["event_page_reached"] else "unconfirmed"
+                except Exception as exc:
+                    report["navigation_probe_error_type"] = type(exc).__name__
+            report.pop("performer_time_origin", None)
         report["quantity_actions"] = state["actions"]
         report["elapsed_seconds"] = round(time.monotonic() - started, 2)
         write_json(args.output, report)
@@ -390,6 +470,7 @@ def run(args, report):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--timeout", type=int, default=75, help="Observation bound (30..85 seconds).")
+    parser.add_argument("--navigation", choices=("direct", "performer"), default="direct")
     parser.add_argument("--output", type=Path, default=Path("firefox_inventory_result.json"))
     parser.add_argument("--inventory-output", type=Path, default=Path("firefox_public_inventory.json"))
     args = parser.parse_args()
