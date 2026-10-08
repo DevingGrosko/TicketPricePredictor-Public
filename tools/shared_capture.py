@@ -125,6 +125,11 @@ class MirrorQueue:
                     or payload['captured_at'] != value['captured_at']
                     or payload['section_count'] != value['section_count']):
                 raise ValueError('Immutable shared snapshot changed')
+            from Flask_App.observation_receipt import observation_sha256
+            actual_digest = observation_sha256(self.sport, value['source_id'], value['captured_at'], payload['sections'])
+            if value.get('observation_sha256', actual_digest) != actual_digest:
+                raise ValueError('Immutable shared observation digest changed')
+            value['observation_sha256'] = actual_digest
         elif not all(value['acknowledged'].values()):
             raise ValueError('Unacknowledged observation lost its payload')
         for dest, ack in value['acknowledged'].items():
@@ -136,6 +141,7 @@ class MirrorQueue:
         return [(path, self.read(path)) for path in sorted(self.root.glob('*.json'))]
 
     def enqueue(self, payload):
+        from Flask_App.observation_receipt import observation_sha256
         source, slot, key = identity(self.sport, payload)
         digest = hashlib.sha256(encoded(payload)).hexdigest()
         path = self.root / (key + '.json')
@@ -147,6 +153,7 @@ class MirrorQueue:
             captured_at=payload['captured_at'], event_date=payload['event_date'],
             schedule_id=str((payload.get('schedule') or {}).get('schedule_id') or ''),
             section_count=payload['section_count'], payload_sha256=digest, payload=payload,
+            observation_sha256=observation_sha256(self.sport, source, payload['captured_at'], payload['sections']),
             acknowledged={dest: None for dest in DESTINATIONS})
         self._save(path, value)
         return path
@@ -157,10 +164,11 @@ class MirrorQueue:
                 or response.get('status') not in ('stored', 'duplicate')
                 or response.get('event_type') != record['sport']):
             raise ValueError('Destination did not acknowledge the matching sport')
-        if destination == 'pythonanywhere' and response['status'] == 'duplicate':
-            # The current API echoes incoming section count/slot on duplicates.
-            # That cannot establish equality with stored prices or identity.
-            raise ValueError('PythonAnywhere duplicate requires verified stored readback')
+        if destination == 'pythonanywhere':
+            from Flask_App.observation_receipt import verify_stored_receipt
+            verify_stored_receipt(response, sport=record['sport'], source_id=record['source_id'],
+                capture_slot=record['capture_slot'], section_count=record['section_count'],
+                expected_sha256=record.get('observation_sha256'))
         if any(type(response.get(k)) is not int or response[k] <= 0 for k in ('event_id', 'iteration_id', 'sections')):
             raise ValueError('Missing stored row identifiers')
         stamp = datetime.fromisoformat(response['captured_at'].replace('Z', '+00:00'))
@@ -168,7 +176,11 @@ class MirrorQueue:
             raise ValueError('Destination acknowledged a different observation slot')
         if response['sections'] != record['section_count']:
             raise ValueError('Destination acknowledged a different section count')
-        return {k: response[k] for k in ('status', 'event_type', 'event_id', 'iteration_id', 'sections', 'captured_at')}
+        clean = {k: response[k] for k in ('status', 'event_type', 'event_id', 'iteration_id', 'sections', 'captured_at')}
+        if destination == 'pythonanywhere' and response.get('stored_observation_sha256') is not None:
+            clean.update({k: response[k] for k in ('stored_source_id', 'stored_capture_slot',
+                'stored_section_count', 'stored_observation_version', 'stored_observation_sha256')})
+        return clean
 
     def acknowledge(self, payload, destination, response):
         path = self.enqueue(payload)
@@ -275,6 +287,16 @@ def run_legacy(sport, directory, pending_dir, health_output, *, timeout=45, runn
         if destination != endpoint:
             raise ValueError('Shared capture uses the fixed matching PythonAnywhere endpoint')
         response = post_original(destination, ingest_token, payload, **kwargs)
+        record = mirror.read(mirror.enqueue(payload))
+        try:
+            mirror.acknowledgment(record, 'pythonanywhere', response)
+        except ValueError as exc:
+            # A real upload can report an existing, different immutable slot.
+            # Retain it as rejected and continue independent pending games.
+            raise collector.SnapshotUploadError(
+                f'PythonAnywhere observation conflict or unverified receipt: {exc}',
+                retryable=False, status_code=409,
+            ) from exc
         mirror.acknowledge(payload, 'pythonanywhere', response)  # No synthetic acknowledgment.
         return response
     module = nfl if sport == 'nfl' else nhl

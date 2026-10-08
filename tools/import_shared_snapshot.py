@@ -165,11 +165,21 @@ def verify_receipt(payload, response, destination):
     slot = half_hour_capture_slot(_time(payload['captured_at']))
     if half_hour_capture_slot(stamp) != slot:
         raise ValueError('Destination stored a different capture slot')
-    return dict(destination=destination, event_type=sport, status=response['status'],
+    readback = False
+    if destination == 'pythonanywhere':
+        from Flask_App.observation_receipt import observation_sha256, verify_stored_receipt
+        readback = verify_stored_receipt(response, sport=sport, source_id=payload['source_id'],
+            capture_slot=slot.isoformat(), section_count=payload['section_count'],
+            expected_sha256=observation_sha256(sport, payload['source_id'], payload['captured_at'], payload['sections']))
+    receipt = dict(destination=destination, event_type=sport, status=response['status'],
         source_id=payload['source_id'], event_id=response['event_id'],
         iteration_id=response['iteration_id'], sections=response['sections'],
         observed_at=payload['captured_at'], captured_at=slot.isoformat(),
         event_date=payload['event_date'])
+    if readback:
+        receipt.update(price_readback_verified=True, identity_readback_verified=True,
+                       stored_observation_sha256=response['stored_observation_sha256'])
+    return receipt
 
 
 def deliver_pythonanywhere(payload, *, send=None):

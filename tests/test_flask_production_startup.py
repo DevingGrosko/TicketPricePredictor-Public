@@ -54,6 +54,7 @@ class FlaskProductionStartupTests(unittest.TestCase):
 
                 from models import Base, database_path
                 from Flask_App.flask_app import app
+                from Flask_App.observation_receipt import observation_sha256
 
                 Base.metadata.create_all(
                     __import__("sqlalchemy").create_engine(
@@ -117,6 +118,12 @@ class FlaskProductionStartupTests(unittest.TestCase):
                 )
                 assert duplicate.status_code == 200, duplicate.get_data(as_text=True)
                 assert duplicate.get_json()["status"] == "duplicate"
+                nfl_digest = observation_sha256("nfl", "1234567", now, nfl_sections)
+                assert first.get_json()["stored_observation_sha256"] == nfl_digest
+                assert duplicate.get_json()["stored_observation_sha256"] == nfl_digest
+                assert duplicate.get_json()["stored_source_id"] == "1234567"
+                assert duplicate.get_json()["stored_section_count"] == 10
+                assert duplicate.get_json()["stored_capture_slot"] == now.isoformat()
 
                 nhl_sections = [
                     {
@@ -171,6 +178,12 @@ class FlaskProductionStartupTests(unittest.TestCase):
                 )
                 assert duplicate_nhl.status_code == 200, duplicate_nhl.get_data(as_text=True)
                 assert duplicate_nhl.get_json()["status"] == "duplicate"
+                nhl_digest = observation_sha256("nhl", "2234567", now, nhl_sections)
+                assert first_nhl.get_json()["stored_observation_sha256"] == nhl_digest
+                assert duplicate_nhl.get_json()["stored_observation_sha256"] == nhl_digest
+                assert duplicate_nhl.get_json()["stored_source_id"] == "2234567"
+                assert duplicate_nhl.get_json()["stored_section_count"] == 10
+                assert duplicate_nhl.get_json()["stored_capture_slot"] == now.isoformat()
 
                 wrong_baseball_endpoint = client.post(
                     "/api/collector/snapshot", json=nfl_payload, headers=headers

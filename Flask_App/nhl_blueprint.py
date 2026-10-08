@@ -1010,12 +1010,24 @@ def ingest_nhl_snapshot():
     except (KeyError, TypeError, ValueError) as exc:
         return jsonify({"status": "error", "error": str(exc)}), 400
 
+    from Flask_App.observation_receipt import stored_observation_receipt
+    receipt_model = CreateNHLModel()
+    try:
+        with receipt_model.getSession()() as receipt_session:
+            stored_receipt = stored_observation_receipt(
+                receipt_session, "nhl", NHLEvent, NHLIteration, NHLTicket,
+                event_id, iteration_id,
+            )
+    finally:
+        dispose_ticket_engine(receipt_model.engine)
+
     status = "stored" if stored else "duplicate"
     return (
         jsonify(
             {
                 "status": status,
                 "event_type": "nhl",
+                **stored_receipt,
                 "timezone": "America/New_York",
                 "event_id": event_id,
                 "iteration_id": iteration_id,

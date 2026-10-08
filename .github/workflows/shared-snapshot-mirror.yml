@@ -64,6 +64,7 @@ jobs:
         run: |
           cp bridge/tools/shared_capture.py source/tools/shared_capture.py
           cp bridge/tools/import_shared_snapshot.py source/tools/import_shared_snapshot.py
+          cp bridge/Flask_App/observation_receipt.py source/Flask_App/observation_receipt.py
           cd source
           python -m tools.shared_capture deliver --sport "$SPORT" --directory "../shared-acknowledgments/$SPORT" --incoming ../incoming
       - name: Bound saved public delivery state

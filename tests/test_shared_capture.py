@@ -157,7 +157,7 @@ class SharedCaptureTests(unittest.TestCase):
         record=MirrorQueue(self.mirror,'nfl').records()[0][1]
         self.assertIsNone(record['acknowledged']['pythonanywhere'])
         self.assertEqual(record['payload'],value)
-        self.assertEqual(len(list(self.pending.glob('*.json'))),1)
+        self.assertEqual(len(list(self.pending.glob('*.rejected'))),1)
         self.assertEqual(json.loads(self.health.read_text())['status'],'queued')
 
     def test_lost_pa_queue_is_recreated_from_mirror_and_same_slot_skips_provider_work(self):
