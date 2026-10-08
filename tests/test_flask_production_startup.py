@@ -25,6 +25,7 @@ class FlaskProductionStartupTests(unittest.TestCase):
             )
             script = textwrap.dedent(
                 """
+                from copy import deepcopy
                 from datetime import datetime, timedelta, timezone
                 import importlib.abc
                 import sys
@@ -54,6 +55,7 @@ class FlaskProductionStartupTests(unittest.TestCase):
 
                 from models import Base, database_path
                 from Flask_App.flask_app import app
+                from Flask_App.observation_receipt import observation_sha256
 
                 Base.metadata.create_all(
                     __import__("sqlalchemy").create_engine(
@@ -76,6 +78,31 @@ class FlaskProductionStartupTests(unittest.TestCase):
                     "Content-Type": "application/json",
                 }
                 client = app.test_client()
+
+                def assert_conflicting_duplicates(endpoint, payload, expected_digest):
+                    for field in ("price", "listing_count"):
+                        changed = deepcopy(payload)
+                        changed["sections"][0][field] += 1
+                        conflict = client.post(endpoint, json=changed, headers=headers)
+                        assert conflict.status_code == 200, conflict.get_data(as_text=True)
+                        stored = conflict.get_json()
+                        assert stored["status"] == "duplicate"
+                        assert stored["stored_observation_sha256"] == expected_digest
+                        assert stored["stored_section_count"] == payload["section_count"]
+                        assert observation_sha256(
+                            payload["event_type"], payload["source_id"], now, changed["sections"]
+                        ) != stored["stored_observation_sha256"]
+                    changed = deepcopy(payload)
+                    extra = dict(changed["sections"][0], section="Extra section")
+                    changed["sections"].append(extra)
+                    changed["section_count"] += 1
+                    conflict = client.post(endpoint, json=changed, headers=headers)
+                    assert conflict.status_code == 200, conflict.get_data(as_text=True)
+                    stored = conflict.get_json()
+                    assert stored["status"] == "duplicate"
+                    assert stored["stored_observation_sha256"] == expected_digest
+                    assert stored["sections"] == changed["section_count"]
+                    assert stored["stored_section_count"] == payload["section_count"]
 
                 nfl_sections = [
                     {
@@ -117,6 +144,13 @@ class FlaskProductionStartupTests(unittest.TestCase):
                 )
                 assert duplicate.status_code == 200, duplicate.get_data(as_text=True)
                 assert duplicate.get_json()["status"] == "duplicate"
+                nfl_digest = observation_sha256("nfl", "1234567", now, nfl_sections)
+                assert first.get_json()["stored_observation_sha256"] == nfl_digest
+                assert duplicate.get_json()["stored_observation_sha256"] == nfl_digest
+                assert duplicate.get_json()["stored_source_id"] == "1234567"
+                assert duplicate.get_json()["stored_section_count"] == 10
+                assert duplicate.get_json()["stored_capture_slot"] == now.isoformat()
+                assert_conflicting_duplicates("/api/nfl/snapshot", nfl_payload, nfl_digest)
 
                 nhl_sections = [
                     {
@@ -171,6 +205,13 @@ class FlaskProductionStartupTests(unittest.TestCase):
                 )
                 assert duplicate_nhl.status_code == 200, duplicate_nhl.get_data(as_text=True)
                 assert duplicate_nhl.get_json()["status"] == "duplicate"
+                nhl_digest = observation_sha256("nhl", "2234567", now, nhl_sections)
+                assert first_nhl.get_json()["stored_observation_sha256"] == nhl_digest
+                assert duplicate_nhl.get_json()["stored_observation_sha256"] == nhl_digest
+                assert duplicate_nhl.get_json()["stored_source_id"] == "2234567"
+                assert duplicate_nhl.get_json()["stored_section_count"] == 10
+                assert duplicate_nhl.get_json()["stored_capture_slot"] == now.isoformat()
+                assert_conflicting_duplicates("/api/nhl/snapshot", nhl_payload, nhl_digest)
 
                 wrong_baseball_endpoint = client.post(
                     "/api/collector/snapshot", json=nfl_payload, headers=headers
