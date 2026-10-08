@@ -539,6 +539,24 @@ jobs:
       TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
       TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
 
+  publish-backup-capture:
+    if: always() && github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/main' && github.event.repository.private == false && github.event_name == 'workflow_dispatch' && github.actor == 'github-actions[bot]' && github.triggering_actor == 'github-actions[bot]' && inputs.dispatch_source == 'github_free_backup' && (needs.collect-nfl.outputs.mirror == 'true' || needs.collect-nhl.outputs.mirror == 'true')
+    needs: [collect-nfl, collect-nhl, mirror-nfl, mirror-nhl]
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Hand off valid backup captures after both mirror jobs finish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISPATCH_SOURCE: ${{ inputs.dispatch_source }}
+        run: python -m tools.single_capture_owner publication-handoff
+
   preserve-shared-cache-budget:
     if: always() && github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/main' && github.event.repository.private == false
     needs: [collect-nfl, collect-nhl, mirror-nfl, mirror-nhl]

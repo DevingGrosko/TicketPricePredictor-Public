@@ -157,6 +157,39 @@ def publication_needed(owner, jobs):
     return False, 'both-captures-skipped-and-no-delivery-attempt'
 
 
+def publication_handoff_needed(jobs):
+    """An owner end-job can publish after completed attempts while the run is active."""
+    attempted = []
+    for sport in ('nfl', 'nhl'):
+        captures = [job for job in jobs if job.get('name') == 'collect-'+sport]
+        if not captures or any(job.get('status') != 'completed' for job in captures):
+            raise RuntimeError('Publication handoff requires completed capture jobs')
+        for job in captures:
+            steps = [step for step in job.get('steps') or [] if step.get('name') in CAPTURE_STEPS[sport] | DELIVERY_STEPS]
+            if not steps and job.get('conclusion') != 'skipped':
+                raise RuntimeError('Publication handoff capture outcome is unavailable')
+            for step in steps:
+                if step.get('status') != 'completed':
+                    raise RuntimeError('Publication handoff capture outcome is still active')
+                if step.get('conclusion') not in ('success','failure','cancelled','timed_out','neutral','skipped'):
+                    raise RuntimeError('Publication handoff capture conclusion is unavailable')
+                if step.get('conclusion') != 'skipped':
+                    attempted.append(sport)
+    names = {f'mirror-{sport}-staging'+suffix for sport in ('nfl','nhl') for suffix in ('', ' / mirror')}
+    mirrors = [job for job in jobs if job.get('name') in names]
+    if any(job.get('status') != 'completed' for job in mirrors):
+        raise RuntimeError('Publication handoff must wait for mirror jobs')
+    for sport in set(attempted):
+        if not any(job.get('name') in {f'mirror-{sport}-staging', f'mirror-{sport}-staging / mirror'} for job in mirrors):
+            raise RuntimeError('Publication handoff mirror outcome is unavailable')
+    delivered = any(step.get('name') in DELIVERY_STEPS and step.get('status') == 'completed'
+                    and step.get('conclusion') != 'skipped'
+                    for job in mirrors for step in job.get('steps') or [])
+    if attempted or delivered:
+        return True, 'completed-capture-or-delivery-attempt'
+    return False, 'both-captures-skipped-and-no-delivery-attempt'
+
+
 def check_scope():
     if os.environ.get('GITHUB_REPOSITORY') != REPO or os.environ.get('GITHUB_REF') != 'refs/heads/main':
         raise RuntimeError('Owner gates are restricted to the public main workflows')
@@ -169,7 +202,26 @@ def run(kind, *, sport=None, manual_repair=False, owner_run_id=None):
         if value.get('total_count', 0) > 100:
             raise RuntimeError('Owner job inventory exceeds bounded safety limit')
         return value['jobs']
-    if kind == 'publication-gate':
+    if kind == 'publication-handoff':
+        current = int(os.environ['GITHUB_RUN_ID'])
+        if (os.environ.get('GITHUB_EVENT_NAME') != 'workflow_dispatch'
+                or os.environ.get('DISPATCH_SOURCE') != 'github_free_backup'
+                or os.environ.get('GITHUB_ACTOR') != 'github-actions[bot]'
+                or os.environ.get('GITHUB_TRIGGERING_ACTOR') != 'github-actions[bot]'
+                or owner_run_id not in (None, current) or sport is not None or manual_repair):
+            raise RuntimeError('Publication handoff is restricted to its own backup-dispatched owner')
+        owner = api('/actions/runs/'+str(current))
+        if (owner.get('id') != current or owner.get('path') != OWNER or owner.get('head_branch') != 'main'
+                or (owner.get('head_repository') or {}).get('full_name') != REPO
+                or (owner.get('repository') or {}).get('full_name') != REPO
+                or (owner.get('repository') or {}).get('private') is not False
+                or (owner.get('actor') or {}).get('login') != 'github-actions[bot]'
+                or (owner.get('triggering_actor') or {}).get('login') != 'github-actions[bot]'
+                or owner.get('status') not in ('in_progress', 'completed')):
+            raise RuntimeError('Publication handoff must belong to the canonical public main owner')
+        decision, reason = publication_handoff_needed(jobs(current))
+        evidence = {'owner_run_id':current}
+    elif kind == 'publication-gate':
         if type(owner_run_id) is not int or owner_run_id <= 0:
             raise ValueError('Publication gate requires an explicit owner run ID')
         evidence = {'owner_run_id':owner_run_id}
@@ -201,6 +253,10 @@ def run(kind, *, sport=None, manual_repair=False, owner_run_id=None):
         api('/actions/workflows/collect-ticket-prices.yml/dispatches',
             payload={'ref':'main', 'inputs':{'dispatch_source':'github_free_backup', 'shared_capture':True}})
         report['dispatched'] = True
+    if kind == 'publication-handoff' and decision:
+        api('/actions/workflows/free-ticket-site.yml/dispatches',
+            payload={'ref':'main', 'inputs':{'owner_run_id':str(evidence['owner_run_id'])}})
+        report['dispatched'] = True
     if os.environ.get('GITHUB_OUTPUT'):
         with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
             output.write('run=' + str(decision).lower() + '\n')
@@ -210,7 +266,7 @@ def run(kind, *, sport=None, manual_repair=False, owner_run_id=None):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('operation', choices=('dispatch-backup','slot-gate','publication-gate'))
+    parser.add_argument('operation', choices=('dispatch-backup','slot-gate','publication-gate','publication-handoff'))
     parser.add_argument('--sport', choices=('nfl','nhl'))
     parser.add_argument('--manual-repair', action='store_true')
     parser.add_argument('--owner-run-id', type=int)

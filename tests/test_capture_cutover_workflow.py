@@ -170,7 +170,7 @@ class CaptureCutoverWorkflowTests(unittest.TestCase):
         self.assertIn('FREE_SOURCE_REF: ' + SOURCE, publisher)
         ready = job(publisher, 'ready')
         decision = step(ready, 'Publish after a canonical capture or real delivery attempt')
-        self.assertIn('OWNER_RUN_ID: ${{ github.event.workflow_run.id }}', decision)
+        self.assertIn('OWNER_RUN_ID: ${{ github.event.workflow_run.id || inputs.owner_run_id }}', decision)
         self.assertIn('publication-gate --owner-run-id "$OWNER_RUN_ID"', decision)
         self.assertNotIn('COLLECTION_RUN_ID', decision)
         self.assertNotIn('secrets.', decision)
