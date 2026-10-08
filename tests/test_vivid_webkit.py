@@ -292,10 +292,10 @@ class WebKitTests(unittest.TestCase):
         self.assertTrue(all(not n.args and not n.keywords for n in contexts))
         import yaml
         workflow=yaml.load((root/'.github/workflows/collect-ticket-prices.yml').read_text(),Loader=yaml.BaseLoader)
-        self.assertEqual(workflow['on']['workflow_dispatch']['inputs']['browser_engine']['default'],'chrome')
+        self.assertEqual(workflow['on']['workflow_dispatch']['inputs']['browser_engine']['default'],'webkit')
         for sport in ('nfl','nhl'):
-            step=next(s for s in workflow['jobs']['collect-'+sport]['steps'] if s.get('name')=='Install the opt-in stock WebKit runtime')
-            self.assertIn("inputs.browser_engine == 'webkit'",step['if'])
+            step=next(s for s in workflow['jobs']['collect-'+sport]['steps'] if s.get('name')=='Install stock WebKit for the shared capture owner')
+            self.assertIn("env.TICKETSIGNAL_BROWSER_ENGINE == 'webkit'",step['if'])
             self.assertIn('python -m playwright install --with-deps webkit',step['run'])
 
 
