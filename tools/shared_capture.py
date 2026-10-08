@@ -89,7 +89,8 @@ class MirrorQueue:
         def reserved(record, size):
             return size + 1024 * sum(ack is None for ack in record['acknowledged'].values())
         used = sum(reserved(self.read(p), p.stat().st_size) for p in self.root.glob('*.json') if p != path)
-        used += sum(p.stat().st_size for p in self.root.rglob('*') if p.is_file() and p.parent != self.root)
+        used += sum(p.stat().st_size for p in self.root.rglob('*') if p.is_file()
+                    and (p.parent != self.root or p.suffix != '.json'))
         if used + reserved(value, len(data)) > self.byte_limit:
             raise ValueError('Shared queue budget exhausted; pending observations remain intact')
         with tempfile.NamedTemporaryFile(dir=self.root, prefix='.shared-', delete=False) as out:
@@ -290,6 +291,34 @@ def validate_export(sport, directory):
     return dict(sport=sport, records=count, bytes=total)
 
 
+def verify_delivery_checkpoint(sport, directory, incoming):
+    """Prove every exported observation is durably represented before cache save."""
+    report = validate_export(sport, incoming)
+    mirror = MirrorQueue(directory, sport)
+    for path, value in MirrorQueue(incoming, sport).records():
+        target = mirror.root / path.name
+        if not target.exists():
+            raise ValueError('Delivery checkpoint is missing an exported observation')
+        stored = mirror.read(target)
+        for key in ('payload_sha256', 'observation_sha256', 'source_id', 'capture_slot', 'captured_at', 'section_count'):
+            if stored[key] != value[key]:
+                raise ValueError('Delivery checkpoint contains a different observation')
+        # read() already rejects lost payloads unless both validated receipts exist.
+    marker = mirror.root / 'delivery.checkpoint'
+    data = (Path(incoming) / EXPORT_MANIFEST).read_bytes()
+    from tools.shared_capture_storage import QUEUE_LIMIT, queue_budget
+    used = queue_budget(mirror.root)['queue_bytes'] - (marker.stat().st_size if marker.exists() else 0)
+    if used + len(data) > QUEUE_LIMIT:
+        raise ValueError('Delivery checkpoint exceeds its byte budget')
+    with tempfile.NamedTemporaryFile(dir=mirror.root, prefix='.checkpoint-', delete=False) as stream:
+        temporary = Path(stream.name); stream.write(data); stream.flush(); os.fsync(stream.fileno())
+    try:
+        temporary.replace(marker)
+    finally:
+        temporary.unlink(missing_ok=True)
+    return report
+
+
 def saved_observations(manifest_path, expected_sha256, sport):
     project = Path(__file__).resolve().parents[1]
     def read(relative, digest):
@@ -454,7 +483,7 @@ def deliver_tidb(sport, directory, incoming, *, sender=None, legacy_free_state=N
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('collect', 'deliver', 'export'))
+    parser.add_argument('command', choices=('collect', 'deliver', 'export', 'verify-checkpoint'))
     parser.add_argument('--sport', choices=SPORTS, required=True)
     parser.add_argument('--directory', required=True)
     parser.add_argument('--pending-dir')
@@ -483,7 +512,11 @@ def main():
             return run_legacy(args.sport, args.directory, args.pending_dir, args.health_output, timeout=args.timeout,
                               acknowledgments=args.acknowledgments, saved=saved, legacy_free_state=args.legacy_free_state)
         if not args.incoming:
-            parser.error('deliver requires incoming')
+            parser.error('deliver and verify-checkpoint require incoming')
+        if args.command == 'verify-checkpoint':
+            report = verify_delivery_checkpoint(args.sport, args.directory, args.incoming)
+            print('SHARED_DELIVERY_CHECKPOINT ' + json.dumps(report), flush=True)
+            return 0
         return deliver_tidb(args.sport, args.directory, args.incoming, legacy_free_state=args.legacy_free_state)
     except Exception as exc:
         print('SHARED_CAPTURE_FAILED ' + type(exc).__name__, flush=True)
