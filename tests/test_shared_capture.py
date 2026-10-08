@@ -15,7 +15,7 @@ import nhl_schedule_collector as nhl
 from collector import EventSnapshot, SectionSnapshot, SnapshotUploadError
 from nfl_collector import nfl_snapshot_to_payload
 from nhl_collector import nhl_snapshot_to_payload
-from tools.shared_capture import MirrorQueue, deliver_tidb, run_legacy, saved_observations
+from tools.shared_capture import MirrorQueue, deliver_tidb, export_observations, run_legacy, saved_observations
 
 
 def payload(sport='nfl', pid='6493143', captured=None):
@@ -47,6 +47,11 @@ class SharedCaptureTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)
         self.mirror, self.pending, self.health = self.root/'mirror', self.root/'pending', self.root/'health.json'
+
+    def export(self, directory, sport='nfl'):
+        output = Path(tempfile.mkdtemp(dir=self.root))
+        export_observations(sport, directory, output)
+        return output
 
     def test_queue_aliases_are_durable_before_real_pa_call_and_restored_for_both_sports(self):
         for sport, module in (('nfl', nfl), ('nhl', nhl)):
@@ -126,7 +131,7 @@ class SharedCaptureTests(unittest.TestCase):
             calls = []
             def sender(observation):
                 calls.append(observation); return acknowledgment(observation, 'tidb')
-            self.assertEqual(deliver_tidb('nfl', self.root/'tidb', self.mirror, sender=sender), 0)
+            self.assertEqual(deliver_tidb('nfl', self.root/'tidb', self.export(self.mirror), sender=sender), 0)
         records = MirrorQueue(self.root/'tidb', 'nfl').records()
         self.assertEqual(len(records), 2)
         self.assertTrue(all('payload' in record and record['acknowledged']['tidb']
@@ -177,6 +182,7 @@ class SharedCaptureTests(unittest.TestCase):
     def test_temporary_tidb_failure_and_lost_ack_replay_exact_payload_without_recapture(self):
         value=payload(); captured=MirrorQueue(self.mirror,'nfl')
         captured.acknowledge(value,'pythonanywhere',acknowledgment(value))
+        incoming=self.export(self.mirror)
         delivered=self.root/'delivered'; attempts=[]
         def sender(observation):
             attempts.append(observation.copy())
@@ -187,10 +193,10 @@ class SharedCaptureTests(unittest.TestCase):
                 raise OSError('Runner interrupted after real commit')
             return save(queue,path,record)
         with patch.object(MirrorQueue,'_save',interrupted),patch('sys.stdout',StringIO()):
-            self.assertEqual(deliver_tidb('nfl',delivered,self.mirror,sender=sender),1)
+            self.assertEqual(deliver_tidb('nfl',delivered,incoming,sender=sender),1)
         with patch('sys.stdout',StringIO()):
-            self.assertEqual(deliver_tidb('nfl',delivered,self.mirror,sender=sender),0)
-            self.assertEqual(deliver_tidb('nfl',delivered,self.mirror,sender=Mock(side_effect=AssertionError('No delivery after ACK'))),0)
+            self.assertEqual(deliver_tidb('nfl',delivered,incoming,sender=sender),0)
+            self.assertEqual(deliver_tidb('nfl',delivered,incoming,sender=Mock(side_effect=AssertionError('No delivery after ACK'))),0)
         self.assertEqual(attempts,[value,value])
         self.assertNotIn('payload',MirrorQueue(delivered,'nfl').records()[0][1])
 
@@ -202,7 +208,7 @@ class SharedCaptureTests(unittest.TestCase):
             return acknowledgment(value,'tidb')
         output=StringIO()
         with patch('sys.stdout',output):
-            self.assertEqual(deliver_tidb('nfl',self.root/'tidb',self.mirror,sender=sender),1)
+            self.assertEqual(deliver_tidb('nfl',self.root/'tidb',self.export(self.mirror),sender=sender),1)
         self.assertNotIn('private connection details',output.getvalue())
         self.assertEqual(len(MirrorQueue(self.root/'tidb','nfl').pending('tidb')),1)
 
@@ -272,7 +278,7 @@ class SharedCaptureTests(unittest.TestCase):
                      patch('nfl_collector.VividNFLBrowser.__init__',side_effect=AssertionError('No browser in replay')), \
                      patch('sys.stdout',StringIO()):
                     self.assertEqual(run_legacy(sport,directory,self.root/(sport+'-pending'),health,saved=saved),0)
-                    self.assertEqual(deliver_tidb(sport,self.root/(sport+'-tidb'),directory,
+                    self.assertEqual(deliver_tidb(sport,self.root/(sport+'-tidb'),self.export(directory,sport),
                                                  sender=lambda value:acknowledgment(value,'tidb')),0)
                 report=json.loads(health.read_text())
                 self.assertEqual((report['mode'],report['captured'],report['replayed']),('delivery-only',0,2))
