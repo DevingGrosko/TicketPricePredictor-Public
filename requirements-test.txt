@@ -1,0 +1,2 @@
+# Offline workflow structure checks only; not a web application dependency.
+PyYAML>=6.0,<7

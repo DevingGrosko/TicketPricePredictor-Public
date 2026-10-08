@@ -526,6 +526,8 @@ def _capture_resolution(
             browser: VividNFLBrowser | None = None
             try:
                 browser = VividNFLBrowser(headless=headless, timeout=timeout)
+                from vivid_performer_routes import configure_schedule_navigation
+                configure_schedule_navigation(browser, 'nfl', resolution.game, url)
                 raw_payload, provider_event_date = recovery.capture(browser, url)
                 snapshot = NFLSnapshotParser.parse(raw_payload)
                 if isinstance(snapshot, NFLEventSnapshot):

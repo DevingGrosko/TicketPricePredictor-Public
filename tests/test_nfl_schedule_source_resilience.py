@@ -65,20 +65,15 @@ class NFLScheduleSourceResilienceTests(unittest.TestCase):
 
 
 class TicketCollectionWorkflowCadenceTests(unittest.TestCase):
-    def test_github_recovery_schedule_explicitly_skips_hourly_leagues(self):
+    def test_github_recovery_schedule_uses_the_same_half_hour_owner_gate(self):
         workflow = Path(".github/workflows/collect-ticket-prices.yml").read_text(
             encoding="utf-8"
         )
 
-        self.assertEqual(workflow.count('if [[ "$EVENT_NAME" == "schedule" ]]'), 2)
-        self.assertIn(
-            "Skipping NFL on the best-effort GitHub baseball recovery schedule.",
-            workflow,
-        )
-        self.assertIn(
-            "Skipping NHL on the best-effort GitHub baseball recovery schedule.",
-            workflow,
-        )
+        for sport in ('nfl', 'nhl'):
+            self.assertIn('python -m tools.single_capture_owner slot-gate --sport ' + sport, workflow)
+        self.assertNotIn('Skipping NFL on the best-effort GitHub baseball recovery schedule.', workflow)
+        self.assertNotIn('Skipping NHL on the best-effort GitHub baseball recovery schedule.', workflow)
 
     def test_late_half_hour_dispatch_evaluates_both_leagues(self):
         workflow = Path('.github/workflows/collect-ticket-prices.yml').read_text()
@@ -87,12 +82,15 @@ class TicketCollectionWorkflowCadenceTests(unittest.TestCase):
             shell = textwrap.dedent(step.split('        run: |\n', 1)[1])
             with self.subTest(sport=sport), tempfile.TemporaryDirectory() as directory:
                 output = Path(directory)/'output'
-                result = subprocess.run(['bash', '-c', "date() { printf '37\\n'; }; " + shell],
+                calls = Path(directory)/'calls'
+                stub = 'python() { printf "%s\\n" "$*" > "$CALL_LOG"; echo run=true >> "$GITHUB_OUTPUT"; }; '
+                subprocess.run(['bash', '-c', "date() { printf '37\\n'; }; " + stub + shell],
                     env={**os.environ, 'EVENT_NAME':'workflow_dispatch',
-                         'DISPATCH_SOURCE':'pythonanywhere', 'GITHUB_OUTPUT':str(output)},
+                         'DISPATCH_SOURCE':'pythonanywhere', 'GITHUB_OUTPUT':str(output),
+                         'CALL_LOG':str(calls), 'MANUAL_REPAIR':'false', 'DELIVERY_ONLY':'false'},
                     text=True, capture_output=True, check=True)
                 self.assertEqual(output.read_text().strip(), 'run=true')
-                self.assertIn('30-minute cycle', result.stdout)
+                self.assertEqual(calls.read_text().strip(), '-m tools.single_capture_owner slot-gate --sport ' + sport.lower())
 
 
 if __name__ == "__main__":

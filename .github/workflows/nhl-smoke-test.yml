@@ -26,12 +26,35 @@ on:
         description: Optional Vivid Seats NHL event URL
         required: false
         default: ""
+      mode:
+        description: Original NHL smoke or a bounded stock-browser canary
+        type: choice
+        options: [smoke, firefox_canary, webkit_canary]
+        default: smoke
+      canary_events:
+        description: JSON list of two to four distinct NFL/NHL public event URLs
+        required: false
+        default: ""
+      canary_pace_seconds:
+        description: Optional idle seconds between canary observations (0 to 90)
+        type: number
+        required: false
+        default: 0
+      canary_normal_navigation:
+        description: Follow the observed team-page link to each exact event
+        type: boolean
+        default: false
+      canary_isolated_events:
+        description: Capture each distinct event once in its own browser
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
 jobs:
   capture-nhl:
+    if: inputs.mode != 'firefox_canary' && inputs.mode != 'webkit_canary'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -146,5 +169,50 @@ jobs:
             nhl_schedule_result.json
             nhl_smoke_result.json
             nhl_smoke_result.png
+          if-no-files-found: warn
+          retention-days: 14
+
+  firefox-canary:
+    if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'firefox_canary' || inputs.mode == 'webkit_canary')
+    runs-on: ubuntu-latest
+    timeout-minutes: 16
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install the explicit Firefox collector runtime
+        run: python -m pip install -r requirements-collector.txt
+      - name: Install stock WebKit for the explicit WebKit canary
+        if: inputs.mode == 'webkit_canary'
+        run: |
+          python -m pip install -r requirements-webkit-collector.txt
+          python -m playwright install --with-deps webkit
+      - name: Verify stock Firefox and driver availability
+        if: inputs.mode == 'firefox_canary'
+        run: |
+          command -v firefox
+          command -v geckodriver
+          firefox --version
+          geckodriver --version
+      - name: Capture distinct NFL/NHL events, repeat after navigation, and restart
+        env:
+          TICKETSIGNAL_BROWSER_ENGINE: ${{ inputs.mode == 'webkit_canary' && 'webkit' || 'firefox' }}
+          CANARY_EVENTS: ${{ inputs.canary_events }}
+          CANARY_PACE_SECONDS: ${{ inputs.canary_pace_seconds || '0' }}
+          CANARY_NORMAL_NAVIGATION: ${{ inputs.canary_normal_navigation || 'false' }}
+          CANARY_ISOLATED_EVENTS: ${{ inputs.canary_isolated_events || 'false' }}
+        run: |
+          CANARY_TIMEOUT_SECONDS=$(python -c 'import os; pace = int(os.environ["CANARY_PACE_SECONDS"]); assert 0 <= pace <= 90; print(360 + 5 * pace)')
+          options=()
+          if [ "$CANARY_NORMAL_NAVIGATION" = "true" ]; then options+=(--normal-navigation); fi
+          if [ "$CANARY_ISOLATED_EVENTS" = "true" ]; then options+=(--isolated-events); fi
+          xvfb-run --auto-servernum timeout --signal=TERM --kill-after=10s "${CANARY_TIMEOUT_SECONDS}s" \
+            python -m tools.browser_capture_canary --engine "$TICKETSIGNAL_BROWSER_ENGINE" --events "$CANARY_EVENTS" --directory firefox-canary --timeout 45 --pace-seconds "$CANARY_PACE_SECONDS" "${options[@]}"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: firefox-multi-event-canary-${{ github.run_id }}
+          path: firefox-canary/*.json
           if-no-files-found: warn
           retention-days: 14
