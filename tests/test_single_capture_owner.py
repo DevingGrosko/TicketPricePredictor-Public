@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+from urllib.error import HTTPError, URLError
 
 from tools.single_capture_owner import OWNER, REPO, owner_runs, publication_needed, run, slot_decision
 
@@ -81,6 +82,43 @@ class SingleOwnerTests(unittest.TestCase):
         self.assertTrue(publication_needed(completed,[])[0])
         mirror={'name':'mirror-nhl-staging / mirror','status':'completed','conclusion':'failure','steps':[]}
         self.assertTrue(publication_needed(completed,skipped+[mirror])[0])
+
+    def test_transient_publication_owner_or_jobs_lookup_publishes_existing_data(self):
+        errors = (HTTPError('https://api.github.com/',503,'temporary',None,None),
+                  URLError(TimeoutError('private timeout details')),TimeoutError('private timeout details'),
+                  ConnectionResetError('private transport details'))
+        for error in errors:
+            for stage in ('owner','jobs'):
+                with self.subTest(error=type(error).__name__,stage=stage), tempfile.TemporaryDirectory() as directory:
+                    output=Path(directory)/'output'
+                    responses=[error] if stage=='owner' else [{**owner(1),'conclusion':'success'},error]
+                    with patch.dict(os.environ,{'GITHUB_REPOSITORY':REPO,'GITHUB_REF':'refs/heads/main','GITHUB_OUTPUT':str(output)}), \
+                         patch('tools.single_capture_owner.api',side_effect=responses):
+                        report=run('publication-gate',owner_run_id=1)
+                    self.assertTrue(report['run'])
+                    self.assertEqual(report['reason'],'publication-lookup-temporarily-unavailable')
+                    self.assertEqual(output.read_text(),'run=true\n')
+                    self.assertNotIn('private',json.dumps(report))
+
+    def test_publication_lookup_auth_not_found_wrong_scope_and_wrong_owner_remain_fail_closed(self):
+        for code in (401,403,404,422):
+            with self.subTest(code=code), tempfile.TemporaryDirectory() as directory:
+                output=Path(directory)/'output'
+                with patch.dict(os.environ,{'GITHUB_REPOSITORY':REPO,'GITHUB_REF':'refs/heads/main','GITHUB_OUTPUT':str(output)}), \
+                     patch('tools.single_capture_owner.api',side_effect=HTTPError('https://api.github.com/',code,'denied',None,None)), \
+                     self.assertRaises(HTTPError):
+                    run('publication-gate',owner_run_id=1)
+                self.assertFalse(output.exists())
+        for change in ({'path':'.github/workflows/other.yml'},{'head_branch':'feature'},
+                       {'head_repository':{'full_name':'another/repo'}},{'repository':{'full_name':'another/repo'}}):
+            with self.subTest(change=change),patch.dict(os.environ,{'GITHUB_REPOSITORY':REPO,'GITHUB_REF':'refs/heads/main'}), \
+                 patch('tools.single_capture_owner.api',return_value={**owner(1),**change}),self.assertRaises(RuntimeError):
+                run('publication-gate',owner_run_id=1)
+        for change in ({'GITHUB_REPOSITORY':'another/repo'},{'GITHUB_REF':'refs/heads/feature'}):
+            with self.subTest(change=change),patch.dict(os.environ,{'GITHUB_REPOSITORY':REPO,'GITHUB_REF':'refs/heads/main',**change}), \
+                 patch('tools.single_capture_owner.api') as read,self.assertRaises(RuntimeError):
+                run('publication-gate',owner_run_id=1)
+            read.assert_not_called()
 
     def test_active_or_queued_owner_preserved_and_newer_follower_does_not_skip_current_owner(self):
         for status in ('queued','in_progress','waiting','pending','requested'):
