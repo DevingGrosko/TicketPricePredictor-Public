@@ -29,9 +29,28 @@ on:
         required: false
         options: [chrome, firefox]
         default: chrome
+      browser_navigation:
+        description: Manual Firefox navigation mode; performer requires Firefox
+        type: choice
+        required: false
+        options: [direct, performer]
+        default: direct
+      delivery_only:
+        description: Replay the fixed verified04:00 observations to both stores with zero browser captures
+        type: boolean
+        required: false
+        default: false
+      shared_capture:
+        description: Manual pilot captures once for both stores; recurring defaults stay unchanged
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
+
+env:
+  SHARED_SAVED_MANIFEST_SHA256: 4558d24b58cb8745375403760aab4738f9a7058bf5fb672682e2fbfe97400098
 
 jobs:
   collect-baseball:
@@ -92,6 +111,7 @@ jobs:
   collect-nfl:
     env:
       TICKETSIGNAL_BROWSER_ENGINE: ${{ inputs.browser_engine || 'chrome' }}
+      TICKETSIGNAL_FIREFOX_NAVIGATION: ${{ inputs.browser_engine == 'firefox' && inputs.browser_navigation || 'direct' }}
     concurrency:
       group: nfl-ticket-price-collector
       cancel-in-progress: false
@@ -146,8 +166,30 @@ jobs:
           firefox --version
           geckodriver --version
 
+      - name: Validate explicit performer navigation is Firefox-only
+        if: inputs.browser_navigation == 'performer'
+        env:
+          BROWSER_ENGINE: ${{ inputs.browser_engine }}
+        run: python -c 'import os; assert os.environ["BROWSER_ENGINE"] == "firefox"'
+
+      - name: Restore the optional immutable NFL shared queue
+        if: steps.cadence.outputs.run == 'true' && (inputs.shared_capture || inputs.delivery_only)
+        uses: actions/cache/restore@v5
+        with:
+          path: shared-capture/nfl
+          key: shared-capture-v1-nfl-capture-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: shared-capture-v1-nfl-capture-
+
+      - name: Restore independent NFL delivery acknowledgments
+        if: steps.cadence.outputs.run == 'true' && (inputs.shared_capture || inputs.delivery_only)
+        uses: actions/cache/restore@v5
+        with:
+          path: shared-acknowledgments/nfl
+          key: shared-capture-v1-nfl-tidb-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: shared-capture-v1-nfl-tidb-
+
       - name: Collect due NFL games across the adaptive 30-day window
-        if: steps.cadence.outputs.run == 'true'
+        if: steps.cadence.outputs.run == 'true' && !(inputs.shared_capture || inputs.delivery_only)
         env:
           COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
         run: |
@@ -156,6 +198,50 @@ jobs:
             --timeout 45 \
             --health-output nfl_remote_health.json \
             --pending-dir nfl_pending
+
+      - name: Pilot one NFL capture owner or replay the verified saved observations
+        if: steps.cadence.outputs.run == 'true' && (inputs.shared_capture || inputs.delivery_only)
+        env:
+          COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
+          DELIVERY_ONLY: ${{ inputs.delivery_only }}
+        run: |
+          if [[ "$DELIVERY_ONLY" == 'true' ]]; then
+            python -m tools.shared_capture collect \
+              --sport nfl --directory shared-capture/nfl --acknowledgments shared-acknowledgments/nfl \
+              --pending-dir nfl_pending --health-output nfl_remote_health.json \
+              --saved-manifest docs/shared-observations/manifest-0400.json --manifest-sha256 "$SHARED_SAVED_MANIFEST_SHA256"
+          else
+            xvfb-run --auto-servernum python -m tools.shared_capture collect \
+              --sport nfl --directory shared-capture/nfl --acknowledgments shared-acknowledgments/nfl \
+              --pending-dir nfl_pending --health-output nfl_remote_health.json --timeout 45
+          fi
+
+      - name: Bound the optional NFL shared queue
+        id: shared-budget
+        if: always() && steps.cadence.outputs.run == 'true' && (inputs.shared_capture || inputs.delivery_only)
+        run: |
+          python - <<'PYBUDGET'
+          from pathlib import Path
+          path=Path('shared-capture/nfl')
+          assert sum(p.stat().st_size for p in path.rglob('*') if p.is_file()) <= 20*1024**2
+          PYBUDGET
+
+      - name: Checkpoint the optional NFL shared queue even after a failed capture
+        if: always() && (inputs.shared_capture || inputs.delivery_only) && steps.shared-budget.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: shared-capture/nfl
+          key: shared-capture-v1-nfl-capture-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Export only public NFL shared observations and acknowledgments
+        if: always() && (inputs.shared_capture || inputs.delivery_only) && steps.shared-budget.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: shared-observations-nfl-${{ github.run_id }}
+          overwrite: true
+          path: shared-capture/nfl/*.json
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Save pending NFL snapshot queue
         if: always() && steps.cadence.outputs.run == 'true'
@@ -176,6 +262,7 @@ jobs:
   collect-nhl:
     env:
       TICKETSIGNAL_BROWSER_ENGINE: ${{ inputs.browser_engine || 'chrome' }}
+      TICKETSIGNAL_FIREFOX_NAVIGATION: ${{ inputs.browser_engine == 'firefox' && inputs.browser_navigation || 'direct' }}
     concurrency:
       group: nhl-ticket-price-collector
       cancel-in-progress: false
@@ -230,8 +317,30 @@ jobs:
           firefox --version
           geckodriver --version
 
+      - name: Validate explicit performer navigation is Firefox-only
+        if: inputs.browser_navigation == 'performer'
+        env:
+          BROWSER_ENGINE: ${{ inputs.browser_engine }}
+        run: python -c 'import os; assert os.environ["BROWSER_ENGINE"] == "firefox"'
+
+      - name: Restore the optional immutable NHL shared queue
+        if: steps.cadence.outputs.run == 'true' && (inputs.shared_capture || inputs.delivery_only)
+        uses: actions/cache/restore@v5
+        with:
+          path: shared-capture/nhl
+          key: shared-capture-v1-nhl-capture-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: shared-capture-v1-nhl-capture-
+
+      - name: Restore independent NHL delivery acknowledgments
+        if: steps.cadence.outputs.run == 'true' && (inputs.shared_capture || inputs.delivery_only)
+        uses: actions/cache/restore@v5
+        with:
+          path: shared-acknowledgments/nhl
+          key: shared-capture-v1-nhl-tidb-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: shared-capture-v1-nhl-tidb-
+
       - name: Collect due NHL games across the adaptive seven-day window
-        if: steps.cadence.outputs.run == 'true'
+        if: steps.cadence.outputs.run == 'true' && !(inputs.shared_capture || inputs.delivery_only)
         env:
           COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
         run: |
@@ -240,6 +349,50 @@ jobs:
             --timeout 45 \
             --health-output nhl_remote_health.json \
             --pending-dir nhl_pending
+
+      - name: Pilot one NHL capture owner or replay the verified saved observations
+        if: steps.cadence.outputs.run == 'true' && (inputs.shared_capture || inputs.delivery_only)
+        env:
+          COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
+          DELIVERY_ONLY: ${{ inputs.delivery_only }}
+        run: |
+          if [[ "$DELIVERY_ONLY" == 'true' ]]; then
+            python -m tools.shared_capture collect \
+              --sport nhl --directory shared-capture/nhl --acknowledgments shared-acknowledgments/nhl \
+              --pending-dir nhl_pending --health-output nhl_remote_health.json \
+              --saved-manifest docs/shared-observations/manifest-0400.json --manifest-sha256 "$SHARED_SAVED_MANIFEST_SHA256"
+          else
+            xvfb-run --auto-servernum python -m tools.shared_capture collect \
+              --sport nhl --directory shared-capture/nhl --acknowledgments shared-acknowledgments/nhl \
+              --pending-dir nhl_pending --health-output nhl_remote_health.json --timeout 45
+          fi
+
+      - name: Bound the optional NHL shared queue
+        id: shared-budget
+        if: always() && steps.cadence.outputs.run == 'true' && (inputs.shared_capture || inputs.delivery_only)
+        run: |
+          python - <<'PYBUDGET'
+          from pathlib import Path
+          path=Path('shared-capture/nhl')
+          assert sum(p.stat().st_size for p in path.rglob('*') if p.is_file()) <= 20*1024**2
+          PYBUDGET
+
+      - name: Checkpoint the optional NHL shared queue even after a failed capture
+        if: always() && (inputs.shared_capture || inputs.delivery_only) && steps.shared-budget.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: shared-capture/nhl
+          key: shared-capture-v1-nhl-capture-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Export only public NHL shared observations and acknowledgments
+        if: always() && (inputs.shared_capture || inputs.delivery_only) && steps.shared-budget.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: shared-observations-nhl-${{ github.run_id }}
+          overwrite: true
+          path: shared-capture/nhl/*.json
+          if-no-files-found: warn
+          retention-days: 7
 
       - name: Save pending NHL snapshot queue
         if: always() && steps.cadence.outputs.run == 'true'
@@ -256,6 +409,30 @@ jobs:
           path: nhl_remote_health.json
           if-no-files-found: warn
           retention-days: 14
+
+  mirror-nfl:
+    if: always() && github.event_name == 'workflow_dispatch' && (inputs.shared_capture || inputs.delivery_only)
+    needs: collect-nfl
+    uses: ./.github/workflows/shared-snapshot-mirror.yml
+    with:
+      sport: nfl
+      source_ref: 48735f3dd9d70c193e370e8d34cbee9a347f3376
+    secrets:
+      TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
+      TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
+      TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
+
+  mirror-nhl:
+    if: always() && github.event_name == 'workflow_dispatch' && (inputs.shared_capture || inputs.delivery_only)
+    needs: collect-nhl
+    uses: ./.github/workflows/shared-snapshot-mirror.yml
+    with:
+      sport: nhl
+      source_ref: 48735f3dd9d70c193e370e8d34cbee9a347f3376
+    secrets:
+      TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
+      TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
+      TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
 
   maintain-materialized-analytics:
     if: always()

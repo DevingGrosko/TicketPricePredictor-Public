@@ -1,0 +1,89 @@
+# Called only by the explicit legacy-owner manual pilot. No timer or browser.
+name: Deliver the same saved observation to TiDB
+on:
+  workflow_call:
+    inputs:
+      sport:
+        type: string
+        required: true
+      source_ref:
+        type: string
+        required: true
+    secrets:
+      TIDB_STAGING_HOST:
+        required: false
+      TIDB_STAGING_USERNAME:
+        required: false
+      TIDB_STAGING_PASSWORD:
+        required: false
+permissions:
+  contents: read
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: tidb-staging
+    concurrency:
+      group: free-refresh-staging-${{ inputs.sport }}-writer
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          path: bridge
+          persist-credentials: false
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.source_ref }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -r source/requirements-staging.txt
+      - name: Restore immutable observations and independent acknowledgments
+        uses: actions/cache/restore@v5
+        with:
+          path: shared-acknowledgments/${{ inputs.sport }}
+          key: shared-capture-v1-${{ inputs.sport }}-tidb-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: shared-capture-v1-${{ inputs.sport }}-tidb-
+      - name: Download this sport's current public observations
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: shared-observations-${{ inputs.sport }}-${{ github.run_id }}
+          path: incoming
+      - name: Deliver original observations without contacting Vivid
+        env:
+          SPORT: ${{ inputs.sport }}
+          TICKETSIGNAL_STAGING_SITE: '1'
+          TICKETSIGNAL_ENABLE_STAGING_WRITES: '1'
+          TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
+          TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
+          TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
+        run: |
+          cp bridge/tools/shared_capture.py source/tools/shared_capture.py
+          cp bridge/tools/import_shared_snapshot.py source/tools/import_shared_snapshot.py
+          cd source
+          python -m tools.shared_capture deliver --sport "$SPORT" --directory "../shared-acknowledgments/$SPORT" --incoming ../incoming
+      - name: Bound saved public delivery state
+        id: budget
+        if: always()
+        env:
+          SPORT: ${{ inputs.sport }}
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          path=Path('shared-acknowledgments')/os.environ['SPORT']
+          assert sum(p.stat().st_size for p in path.rglob('*') if p.is_file()) <= 20*1024**2
+          PY
+      - name: Preserve independent delivery acknowledgments and failures
+        if: always() && steps.budget.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: shared-acknowledgments/${{ inputs.sport }}
+          key: shared-capture-v1-${{ inputs.sport }}-tidb-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Report missing current capture artifact as a real failure
+        if: always() && steps.download.outcome != 'success'
+        run: exit 1

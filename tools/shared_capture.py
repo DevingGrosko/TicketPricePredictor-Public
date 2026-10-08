@@ -1,0 +1,372 @@
+"""Opt-in legacy capture owner with durable, credential-separated delivery.
+
+Capture keeps the real PythonAnywhere queue and acknowledgments. The same
+immutable public observation is delivered to TiDB in a separate job. Nothing
+imports this draft from recurring production entry points.
+"""
+from __future__ import annotations
+
+import argparse
+from contextlib import ExitStack
+from datetime import datetime, timedelta, timezone
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import tempfile
+import time
+from unittest.mock import patch
+from urllib.parse import urlsplit
+
+from Flask_App.collection_cadence import half_hour_capture_slot
+
+SPORTS = ('nfl', 'nhl')
+DESTINATIONS = ('pythonanywhere', 'tidb')
+LIMIT = 20 * 1024**2
+FILE_LIMIT = 4 * 1024**2 + 8192
+FIELDS = {'schema_version', 'captured_at', 'event_date', 'source_url', 'source_id',
+          'title', 'venue', 'section_count', 'sections', 'event_type', 'currency', 'schedule', 'map_geometry'}
+PRIVATE = re.compile(r'password|secret|token|authorization|cookie|headers|api.?key', re.I)
+
+
+def encoded(value):
+    return json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False).encode()
+
+
+def public_only(value):
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if PRIVATE.search(str(key)):
+                raise ValueError('Private transport fields cannot enter shared capture state')
+            public_only(child)
+    elif isinstance(value, list):
+        for child in value:
+            public_only(child)
+
+
+def identity(sport, payload):
+    from collector import as_utc, snapshot_from_payload
+    from nfl_collector import is_nfl_game_title
+    from nhl_collector import is_nhl_game_title
+    if sport not in SPORTS or not isinstance(payload, dict) or payload.get('event_type') != sport:
+        raise ValueError('Shared capture accepts the matching NFL/NHL sport only')
+    if not set(payload) <= FIELDS or len(encoded(payload)) > 4 * 1024**2:
+        raise ValueError('Invalid bounded public snapshot')
+    public_only(payload)
+    parsed = urlsplit(payload.get('source_url', ''))
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError('Shared source URL cannot contain credentials or transport queries')
+    for key in ('captured_at', 'event_date'):
+        if datetime.fromisoformat(payload[key].replace('Z', '+00:00')).tzinfo is None:
+            raise ValueError('Original observation requires explicit timestamps')
+    _url, event, captured, snapshot = snapshot_from_payload(payload)
+    if captured.tzinfo is None or event.tzinfo is None:
+        raise ValueError('Original observation requires explicit timestamps')
+    if not (is_nfl_game_title if sport == 'nfl' else is_nhl_game_title)(snapshot.title):
+        raise ValueError('Snapshot matchup belongs to another sport')
+    if not 0 < (as_utc(event) - as_utc(captured)).total_seconds() <= 30 * 24 * 3600:
+        raise ValueError('Snapshot event is outside its original capture window')
+    slot = half_hour_capture_slot(as_utc(captured)).isoformat()
+    key = hashlib.sha256(f'{sport}\0{snapshot.source_id}\0{slot}'.encode()).hexdigest()
+    return snapshot.source_id, slot, key
+
+
+class MirrorQueue:
+    def __init__(self, directory, sport, *, byte_limit=LIMIT):
+        if sport not in SPORTS:
+            raise ValueError('MLB remains paused')
+        self.root, self.sport, self.byte_limit = Path(directory), sport, byte_limit
+        if self.root.is_symlink():
+            raise ValueError('Shared state cannot be a symlink')
+        self.root.mkdir(parents=True, exist_ok=True)
+
+    def _save(self, path, value):
+        data = encoded(value)
+        if len(data) > FILE_LIMIT:
+            raise ValueError('Shared record exceeds its budget')
+        def reserved(record, size):
+            return size + 1024 * sum(ack is None for ack in record['acknowledged'].values())
+        used = sum(reserved(self.read(p), p.stat().st_size) for p in self.root.glob('*.json') if p != path)
+        if used + reserved(value, len(data)) > self.byte_limit:
+            raise ValueError('Shared queue budget exhausted; pending observations remain intact')
+        with tempfile.NamedTemporaryFile(dir=self.root, prefix='.shared-', delete=False) as out:
+            temporary = Path(out.name)
+            out.write(data); out.flush(); os.fsync(out.fileno())
+        try:
+            temporary.replace(path)
+            fd = os.open(self.root, os.O_RDONLY)
+            try:
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def read(self, path):
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > FILE_LIMIT:
+            raise ValueError('Invalid shared state file')
+        value = json.loads(path.read_bytes())
+        if (value.get('version') != 1 or value.get('sport') != self.sport
+                or set(value.get('acknowledged', {})) != set(DESTINATIONS)):
+            raise ValueError('Wrong shared state format')
+        stamp = datetime.fromisoformat(value['captured_at'].replace('Z', '+00:00'))
+        if (stamp.tzinfo is None or half_hour_capture_slot(stamp).isoformat() != value['capture_slot']
+                or type(value['section_count']) is not int or value['section_count'] <= 0):
+            raise ValueError('Invalid original shared observation metadata')
+        public_only(value)
+        expected = hashlib.sha256(f"{self.sport}\0{value['source_id']}\0{value['capture_slot']}".encode()).hexdigest()
+        if path.name != expected + '.json' or not re.fullmatch('[0-9a-f]{64}', value['payload_sha256']):
+            raise ValueError('Shared snapshot identity mismatch')
+        if 'payload' in value:
+            payload = value['payload']
+            if (identity(self.sport, payload) != (value['source_id'], value['capture_slot'], expected)
+                    or hashlib.sha256(encoded(payload)).hexdigest() != value['payload_sha256']
+                    or payload['captured_at'] != value['captured_at']
+                    or payload['section_count'] != value['section_count']):
+                raise ValueError('Immutable shared snapshot changed')
+        elif not all(value['acknowledged'].values()):
+            raise ValueError('Unacknowledged observation lost its payload')
+        for dest, ack in value['acknowledged'].items():
+            if ack is not None and self.acknowledgment(value, dest, ack) != ack:
+                raise ValueError('Invalid saved destination acknowledgment')
+        return value
+
+    def records(self):
+        return [(path, self.read(path)) for path in sorted(self.root.glob('*.json'))]
+
+    def enqueue(self, payload):
+        source, slot, key = identity(self.sport, payload)
+        digest = hashlib.sha256(encoded(payload)).hexdigest()
+        path = self.root / (key + '.json')
+        if path.exists():
+            if self.read(path)['payload_sha256'] != digest:
+                raise ValueError('Different observation already exists for this game and slot')
+            return path
+        value = dict(version=1, sport=self.sport, source_id=source, capture_slot=slot,
+            captured_at=payload['captured_at'], event_date=payload['event_date'],
+            schedule_id=str((payload.get('schedule') or {}).get('schedule_id') or ''),
+            section_count=payload['section_count'], payload_sha256=digest, payload=payload,
+            acknowledged={dest: None for dest in DESTINATIONS})
+        self._save(path, value)
+        return path
+
+    @staticmethod
+    def acknowledgment(record, destination, response):
+        if (destination not in DESTINATIONS or not isinstance(response, dict)
+                or response.get('status') not in ('stored', 'duplicate')
+                or response.get('event_type') != record['sport']):
+            raise ValueError('Destination did not acknowledge the matching sport')
+        if destination == 'pythonanywhere' and response['status'] == 'duplicate':
+            # The current API echoes incoming section count/slot on duplicates.
+            # That cannot establish equality with stored prices or identity.
+            raise ValueError('PythonAnywhere duplicate requires verified stored readback')
+        if any(type(response.get(k)) is not int or response[k] <= 0 for k in ('event_id', 'iteration_id', 'sections')):
+            raise ValueError('Missing stored row identifiers')
+        stamp = datetime.fromisoformat(response['captured_at'].replace('Z', '+00:00'))
+        if stamp.tzinfo is None or half_hour_capture_slot(stamp).isoformat() != record['capture_slot']:
+            raise ValueError('Destination acknowledged a different observation slot')
+        if response['sections'] != record['section_count']:
+            raise ValueError('Destination acknowledged a different section count')
+        return {k: response[k] for k in ('status', 'event_type', 'event_id', 'iteration_id', 'sections', 'captured_at')}
+
+    def acknowledge(self, payload, destination, response):
+        path = self.enqueue(payload)
+        value = self.read(path)
+        value['acknowledged'][destination] = self.acknowledgment(value, destination, response)
+        if all(value['acknowledged'].values()):
+            value.pop('payload', None)
+        self._save(path, value)
+
+    def merge(self, directory):
+        incoming = MirrorQueue(directory, self.sport)
+        for path, value in incoming.records():
+            target = self.root / path.name
+            if target.exists():
+                current = self.read(target)
+                if current['payload_sha256'] != value['payload_sha256']:
+                    raise ValueError('Incoming observation collides with the stored slot')
+                for dest in DESTINATIONS:
+                    current['acknowledged'][dest] = current['acknowledged'][dest] or value['acknowledged'][dest]
+                if all(current['acknowledged'].values()):
+                    current.pop('payload', None)
+                self._save(target, current)
+            else:
+                self._save(target, value)
+
+    def pending(self, destination):
+        return [(path, value) for path, value in self.records() if value['acknowledged'][destination] is None]
+
+    def covered(self, game, slot):
+        return any(value['schedule_id'] == str(game.schedule_id) and value['capture_slot'] == slot.isoformat()
+                   and datetime.fromisoformat(value['event_date']) == game.event_date
+                   for _path, value in self.records())
+
+    def prune_receipts(self, now):
+        for path, value in self.records():
+            if 'payload' not in value and datetime.fromisoformat(value['captured_at']) < now - timedelta(days=7):
+                path.unlink()
+
+
+def saved_observations(manifest_path, expected_sha256, sport):
+    project = Path(__file__).resolve().parents[1]
+    def read(relative, digest):
+        if (not re.fullmatch(r'docs/shared-observations/[a-z0-9-]+\.json', relative)
+                or not re.fullmatch('[0-9a-f]{64}', digest)):
+            raise ValueError('Saved observations require explicit public paths and hashes')
+        path = project / relative
+        if (path.is_symlink() or not path.is_file() or path.stat().st_size > 4 * 1024**2
+                or not path.resolve().is_relative_to(project / 'docs/shared-observations')):
+            raise ValueError('Invalid bounded saved observation')
+        data = path.read_bytes()
+        if hashlib.sha256(data).hexdigest() != digest:
+            raise ValueError('Saved observation integrity mismatch')
+        return json.loads(data)
+    manifest = read(manifest_path, expected_sha256)
+    rows = manifest.get('observations')
+    if manifest.get('version') != 1 or not isinstance(rows, list) or not 2 <= len(rows) <= 4:
+        raise ValueError('Invalid bounded saved observation manifest')
+    validated = []
+    for row in rows:
+        if not isinstance(row, dict) or set(row) != {'sport', 'file', 'sha256'} or row['sport'] not in SPORTS:
+            raise ValueError('Invalid saved observation manifest entry')
+        value = read(row['file'], row['sha256'])
+        identity(row['sport'], value)
+        validated.append(value)
+    if {value['event_type'] for value in validated} != set(SPORTS):
+        raise ValueError('Saved pilot requires both explicit sports')
+    return [value for value in validated if value['event_type'] == sport]
+
+
+def run_legacy(sport, directory, pending_dir, health_output, *, timeout=45, runner=None,
+               acknowledgments=None, saved=None):
+    import collector
+    import nfl_schedule_collector as nfl
+    import nhl_schedule_collector as nhl
+    if (sport not in SPORTS or os.environ.get('TICKETSIGNAL_STAGING_SITE') == '1'
+            or any(os.environ.get(k) for k in ('TIDB_STAGING_HOST', 'TIDB_STAGING_USERNAME', 'TIDB_STAGING_PASSWORD'))):
+        raise RuntimeError('Legacy capture requires a separate PythonAnywhere credential environment')
+    token = os.environ.get('COLLECTOR_INGEST_TOKEN')
+    if not token:
+        raise RuntimeError('COLLECTOR_INGEST_TOKEN is required')
+    mirror = MirrorQueue(directory, sport)
+    if acknowledgments is not None:
+        mirror.merge(acknowledgments)
+    if saved is not None:
+        for observation in saved:
+            mirror.enqueue(observation)
+    mirror.prune_receipts(datetime.now(timezone.utc))
+    pending_dir = Path(pending_dir); pending_dir.mkdir(parents=True, exist_ok=True)
+    queue_original, post_original = collector.queue_snapshot, collector.post_snapshot_with_retry
+    # Mirror ALL existing payloads before replay can unlink an acknowledged PA file.
+    for path in sorted({*pending_dir.glob('*.json'), *pending_dir.glob('*.rejected')}):
+        if path.is_symlink() or path.stat().st_size > 4 * 1024**2:
+            raise ValueError('Invalid existing pending snapshot')
+        mirror.enqueue(json.loads(path.read_bytes()))
+    # A prior runner may have cached the mirror but missed saving the PA queue.
+    for _path, value in mirror.pending('pythonanywhere'):
+        queue_original(value['payload'], pending_dir)
+    endpoint = f'https://bunnyjeff.pythonanywhere.com/api/{sport}/snapshot'
+    def queue(payload, pending):
+        path = queue_original(payload, pending)
+        mirror.enqueue(payload)  # Always durable before any real PA upload.
+        return path
+    def post(destination, ingest_token, payload, **kwargs):
+        if destination != endpoint:
+            raise ValueError('Shared capture uses the fixed matching PythonAnywhere endpoint')
+        response = post_original(destination, ingest_token, payload, **kwargs)
+        mirror.acknowledge(payload, 'pythonanywhere', response)  # No synthetic acknowledgment.
+        return response
+    module = nfl if sport == 'nfl' else nhl
+    if (os.environ.get('TICKETSIGNAL_FIREFOX_NAVIGATION', 'direct') == 'performer'
+            and os.environ.get('TICKETSIGNAL_BROWSER_ENGINE', 'chrome') != 'firefox'):
+        raise ValueError('Performer navigation is explicitly Firefox-only')
+    due_original = module.schedule_games_due
+    reused = []
+    covered = {(value['schedule_id'], value['capture_slot'], datetime.fromisoformat(value['event_date']))
+               for _path, value in mirror.records()}
+    def due(schedule, slot):
+        selected = []
+        for game in due_original(schedule, slot):
+            if (str(game.schedule_id), slot.isoformat(), game.event_date) in covered:
+                reused.append(str(game.schedule_id))
+            else:
+                selected.append(game)
+        return selected
+    with ExitStack() as stack:
+        for target in (collector, nfl, nhl):
+            stack.enter_context(patch.object(target, 'queue_snapshot', queue))
+            stack.enter_context(patch.object(target, 'post_snapshot_with_retry', post))
+        stack.enter_context(patch.object(module, 'schedule_games_due', due))
+        if saved is not None:
+            count, available, errors = collector.replay_pending_snapshots(endpoint, token, pending_dir)
+            pending = len(list(pending_dir.glob('*.json'))) + len(list(pending_dir.glob('*.rejected')))
+            report = dict(status='healthy' if available and not errors and not pending else 'queued',
+                mode='delivery-only', event_type=sport, captured=0, scheduled_due=None, coverage_percent=None,
+                replayed=count, pending=pending, errors=errors)
+            Path(health_output).write_text(json.dumps(report, indent=2) + '\n')
+            code = int(report['status'] != 'healthy')
+        else:
+            code = (runner or module.run_schedule_collector)(endpoint, token, False, timeout, Path(health_output), pending_dir)
+    health = json.loads(Path(health_output).read_text()) if Path(health_output).exists() else {'status': 'report-unavailable'}
+    report = dict(sport=sport, reused_current_observations=sorted(set(reused)),
+        pending_pythonanywhere=len(mirror.pending('pythonanywhere')), pending_tidb=len(mirror.pending('tidb')),
+        legacy_status=health['status'], legacy_exit_code=code, mode=health.get('mode', 'capture'))
+    print('SHARED_CAPTURE_REPORT ' + json.dumps(report), flush=True)
+    return code or int(health['status'] != 'healthy' or report['pending_pythonanywhere'] > 0)
+
+
+def deliver_tidb(sport, directory, incoming, *, sender=None):
+    mirror = MirrorQueue(directory, sport)
+    mirror.merge(incoming)
+    if sender is None:
+        from tools.import_shared_snapshot import deliver_tidb as sender
+    errors = []
+    for _path, value in mirror.pending('tidb'):
+        try:
+            response = sender(value['payload'])
+            if (response.get('source_id') != value['source_id']
+                    or response.get('observed_at') != value['captured_at']
+                    or response.get('price_readback_verified') is not True
+                    or response.get('identity_readback_verified') is not True):
+                raise ValueError('TiDB readback did not verify the original observation')
+            mirror.acknowledge(value['payload'], 'tidb', response)
+        except Exception as exc:
+            errors.append(type(exc).__name__)
+    report = dict(sport=sport, pending_tidb=len(mirror.pending('tidb')), error_types=errors)
+    print('SHARED_TIDB_REPORT ' + json.dumps(report), flush=True)
+    return int(bool(errors or report['pending_tidb']))
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('command', choices=('collect', 'deliver'))
+    parser.add_argument('--sport', choices=SPORTS, required=True)
+    parser.add_argument('--directory', required=True)
+    parser.add_argument('--pending-dir')
+    parser.add_argument('--health-output')
+    parser.add_argument('--incoming')
+    parser.add_argument('--timeout', type=int, default=45)
+    parser.add_argument('--acknowledgments')
+    parser.add_argument('--saved-manifest')
+    parser.add_argument('--manifest-sha256')
+    args = parser.parse_args()
+    try:
+        if args.command == 'collect':
+            if not args.pending_dir or not args.health_output:
+                parser.error('collect requires pending-dir and health-output')
+            if bool(args.saved_manifest) != bool(args.manifest_sha256):
+                parser.error('Saved replay requires both public manifest and its SHA-256')
+            saved = saved_observations(args.saved_manifest, args.manifest_sha256, args.sport) if args.saved_manifest else None
+            return run_legacy(args.sport, args.directory, args.pending_dir, args.health_output, timeout=args.timeout,
+                              acknowledgments=args.acknowledgments, saved=saved)
+        if not args.incoming:
+            parser.error('deliver requires incoming')
+        return deliver_tidb(args.sport, args.directory, args.incoming)
+    except Exception as exc:
+        print('SHARED_CAPTURE_FAILED ' + type(exc).__name__, flush=True)
+        return 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())

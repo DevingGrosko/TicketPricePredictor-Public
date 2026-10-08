@@ -1,0 +1,2127 @@
+{
+  "captured_at": "2026-10-08T04:04:25.789438+00:00",
+  "event_date": "2026-10-11T17:00:00+00:00",
+  "event_type": "nfl",
+  "schedule": {
+    "canonical_venue": "Caesars Superdome",
+    "country": null
+  },
+  "schema_version": 1,
+  "section_count": 211,
+  "sections": [
+    {
+      "alternate_price": "272.00",
+      "displayed_price": "195.00",
+      "listing_count": 4,
+      "price": 195,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "4",
+      "section": "Club Level 215"
+    },
+    {
+      "alternate_price": "362.00",
+      "displayed_price": "261.00",
+      "listing_count": 2,
+      "price": 261,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "4",
+      "section": "Club Level 219"
+    },
+    {
+      "alternate_price": "594.00",
+      "displayed_price": "429.00",
+      "listing_count": 1,
+      "price": 429,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "2",
+      "section": "Club Level 221"
+    },
+    {
+      "alternate_price": "350.00",
+      "displayed_price": "252.00",
+      "listing_count": 3,
+      "price": 252,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "3",
+      "section": "Club Level 223"
+    },
+    {
+      "alternate_price": "414.00",
+      "displayed_price": "298.00",
+      "listing_count": 1,
+      "price": 298,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "1",
+      "section": "Club Level 225"
+    },
+    {
+      "alternate_price": "386.00",
+      "displayed_price": "278.00",
+      "listing_count": 1,
+      "price": 278,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "2",
+      "section": "Club Level 227"
+    },
+    {
+      "alternate_price": "293.00",
+      "displayed_price": "211.00",
+      "listing_count": 1,
+      "price": 211,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "4",
+      "section": "Club Level 229"
+    },
+    {
+      "alternate_price": "399.00",
+      "displayed_price": "288.00",
+      "listing_count": 3,
+      "price": 288,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "1",
+      "section": "Club Level 257"
+    },
+    {
+      "alternate_price": "324.00",
+      "displayed_price": "233.00",
+      "listing_count": 2,
+      "price": 233,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "2",
+      "section": "Club Level 259"
+    },
+    {
+      "alternate_price": "363.00",
+      "displayed_price": "262.00",
+      "listing_count": 3,
+      "price": 262,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "1",
+      "section": "Club Level 261"
+    },
+    {
+      "alternate_price": "362.00",
+      "displayed_price": "261.00",
+      "listing_count": 2,
+      "price": 261,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "3",
+      "section": "Club Level 263"
+    },
+    {
+      "alternate_price": "478.00",
+      "displayed_price": "345.00",
+      "listing_count": 1,
+      "price": 345,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "4",
+      "section": "Club Level 265"
+    },
+    {
+      "alternate_price": "490.00",
+      "displayed_price": "354.00",
+      "listing_count": 1,
+      "price": 354,
+      "price_source": "p",
+      "quantity": "5",
+      "row": "1",
+      "section": "Club Level 267"
+    },
+    {
+      "alternate_price": "402.00",
+      "displayed_price": "290.00",
+      "listing_count": 2,
+      "price": 290,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "3",
+      "section": "Club Level 269"
+    },
+    {
+      "alternate_price": "258.00",
+      "displayed_price": "185.00",
+      "listing_count": 3,
+      "price": 185,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "2",
+      "section": "Club Level 271"
+    },
+    {
+      "alternate_price": "231.00",
+      "displayed_price": "166.00",
+      "listing_count": 6,
+      "price": 166,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "11",
+      "section": "Club Level 308"
+    },
+    {
+      "alternate_price": "213.00",
+      "displayed_price": "152.00",
+      "listing_count": 6,
+      "price": 152,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "17",
+      "section": "Club Level 309"
+    },
+    {
+      "alternate_price": "287.00",
+      "displayed_price": "206.00",
+      "listing_count": 3,
+      "price": 206,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "12",
+      "section": "Club Level 310"
+    },
+    {
+      "alternate_price": "322.00",
+      "displayed_price": "232.00",
+      "listing_count": 5,
+      "price": 232,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "8",
+      "section": "Club Level 311"
+    },
+    {
+      "alternate_price": "336.00",
+      "displayed_price": "242.00",
+      "listing_count": 1,
+      "price": 242,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "9",
+      "section": "Club Level 312"
+    },
+    {
+      "alternate_price": "295.00",
+      "displayed_price": "212.00",
+      "listing_count": 3,
+      "price": 212,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "12",
+      "section": "Club Level 313"
+    },
+    {
+      "alternate_price": "271.00",
+      "displayed_price": "195.00",
+      "listing_count": 6,
+      "price": 195,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "13",
+      "section": "Club Level 314"
+    },
+    {
+      "alternate_price": "238.00",
+      "displayed_price": "171.00",
+      "listing_count": 5,
+      "price": 171,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "15",
+      "section": "Club Level 315"
+    },
+    {
+      "alternate_price": "240.00",
+      "displayed_price": "173.00",
+      "listing_count": 4,
+      "price": 173,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "14",
+      "section": "Club Level 316"
+    },
+    {
+      "alternate_price": "187.00",
+      "displayed_price": "134.00",
+      "listing_count": 9,
+      "price": 134,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "16",
+      "section": "Club Level 332"
+    },
+    {
+      "alternate_price": "279.00",
+      "displayed_price": "201.00",
+      "listing_count": 3,
+      "price": 201,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "10",
+      "section": "Club Level 333"
+    },
+    {
+      "alternate_price": "277.00",
+      "displayed_price": "199.00",
+      "listing_count": 5,
+      "price": 199,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "16",
+      "section": "Club Level 334"
+    },
+    {
+      "alternate_price": "283.00",
+      "displayed_price": "203.00",
+      "listing_count": 7,
+      "price": 203,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "16",
+      "section": "Club Level 335"
+    },
+    {
+      "alternate_price": "330.00",
+      "displayed_price": "238.00",
+      "listing_count": 1,
+      "price": 238,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "10",
+      "section": "Club Level 336"
+    },
+    {
+      "alternate_price": "280.00",
+      "displayed_price": "201.00",
+      "listing_count": 1,
+      "price": 201,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "12",
+      "section": "Club Level 337"
+    },
+    {
+      "alternate_price": "274.00",
+      "displayed_price": "197.00",
+      "listing_count": 4,
+      "price": 197,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "16",
+      "section": "Club Level 338"
+    },
+    {
+      "alternate_price": "221.00",
+      "displayed_price": "159.00",
+      "listing_count": 4,
+      "price": 159,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "17",
+      "section": "Club Level 339"
+    },
+    {
+      "alternate_price": "213.00",
+      "displayed_price": "152.00",
+      "listing_count": 3,
+      "price": 152,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "16",
+      "section": "Club Level 340"
+    },
+    {
+      "alternate_price": "410.00",
+      "displayed_price": "296.00",
+      "listing_count": 1,
+      "price": 296,
+      "price_source": "p",
+      "quantity": "5",
+      "row": "3",
+      "section": "Loge Level 201"
+    },
+    {
+      "alternate_price": "213.00",
+      "displayed_price": "153.00",
+      "listing_count": 2,
+      "price": 153,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "3",
+      "section": "Loge Level 203"
+    },
+    {
+      "alternate_price": "403.00",
+      "displayed_price": "290.00",
+      "listing_count": 2,
+      "price": 290,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "2",
+      "section": "Loge Level 207"
+    },
+    {
+      "alternate_price": "223.00",
+      "displayed_price": "160.00",
+      "listing_count": 1,
+      "price": 160,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "1",
+      "section": "Loge Level 212WC"
+    },
+    {
+      "alternate_price": "386.00",
+      "displayed_price": "278.00",
+      "listing_count": 1,
+      "price": 278,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "1",
+      "section": "Loge Level 235"
+    },
+    {
+      "alternate_price": "456.00",
+      "displayed_price": "329.00",
+      "listing_count": 1,
+      "price": 329,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "4",
+      "section": "Loge Level 235C"
+    },
+    {
+      "alternate_price": "250.00",
+      "displayed_price": "180.00",
+      "listing_count": 2,
+      "price": 180,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "2",
+      "section": "Loge Level 237"
+    },
+    {
+      "alternate_price": "290.00",
+      "displayed_price": "209.00",
+      "listing_count": 1,
+      "price": 209,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "4",
+      "section": "Loge Level 239"
+    },
+    {
+      "alternate_price": "221.00",
+      "displayed_price": "159.00",
+      "listing_count": 2,
+      "price": 159,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "2",
+      "section": "Loge Level 241"
+    },
+    {
+      "alternate_price": "365.00",
+      "displayed_price": "263.00",
+      "listing_count": 2,
+      "price": 263,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "3",
+      "section": "Loge Level 243"
+    },
+    {
+      "alternate_price": "971.00",
+      "displayed_price": "702.00",
+      "listing_count": 1,
+      "price": 702,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "1",
+      "section": "Loge Level 245"
+    },
+    {
+      "alternate_price": "490.00",
+      "displayed_price": "354.00",
+      "listing_count": 1,
+      "price": 354,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "1",
+      "section": "Loge Level 247"
+    },
+    {
+      "alternate_price": "570.00",
+      "displayed_price": "412.00",
+      "listing_count": 1,
+      "price": 412,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "1",
+      "section": "Loge Level 249"
+    },
+    {
+      "alternate_price": "410.00",
+      "displayed_price": "296.00",
+      "listing_count": 1,
+      "price": 296,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "1",
+      "section": "Loge Level 277C"
+    },
+    {
+      "alternate_price": "354.00",
+      "displayed_price": "255.00",
+      "listing_count": 2,
+      "price": 255,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "1",
+      "section": "Loge Level 279"
+    },
+    {
+      "alternate_price": "333.00",
+      "displayed_price": "240.00",
+      "listing_count": 1,
+      "price": 240,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "1",
+      "section": "Loge Level 281"
+    },
+    {
+      "alternate_price": "249.00",
+      "displayed_price": "178.00",
+      "listing_count": 4,
+      "price": 178,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "2",
+      "section": "Loge Level 283"
+    },
+    {
+      "alternate_price": "146.00",
+      "displayed_price": "104.00",
+      "listing_count": 4,
+      "price": 104,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "16",
+      "section": "Loge Level 301"
+    },
+    {
+      "alternate_price": "148.00",
+      "displayed_price": "106.00",
+      "listing_count": 5,
+      "price": 106,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "14",
+      "section": "Loge Level 302"
+    },
+    {
+      "alternate_price": "149.00",
+      "displayed_price": "106.00",
+      "listing_count": 2,
+      "price": 106,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "12",
+      "section": "Loge Level 303"
+    },
+    {
+      "alternate_price": "330.00",
+      "displayed_price": "238.00",
+      "listing_count": 1,
+      "price": 238,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "9",
+      "section": "Loge Level 304"
+    },
+    {
+      "alternate_price": "197.00",
+      "displayed_price": "141.00",
+      "listing_count": 5,
+      "price": 141,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "5",
+      "section": "Loge Level 304C"
+    },
+    {
+      "alternate_price": "172.00",
+      "displayed_price": "123.00",
+      "listing_count": 1,
+      "price": 123,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "12",
+      "section": "Loge Level 305"
+    },
+    {
+      "alternate_price": "197.00",
+      "displayed_price": "141.00",
+      "listing_count": 3,
+      "price": 141,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "15",
+      "section": "Loge Level 306"
+    },
+    {
+      "alternate_price": "215.00",
+      "displayed_price": "154.00",
+      "listing_count": 5,
+      "price": 154,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "13",
+      "section": "Loge Level 307"
+    },
+    {
+      "alternate_price": "207.00",
+      "displayed_price": "148.00",
+      "listing_count": 4,
+      "price": 148,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "14",
+      "section": "Loge Level 317"
+    },
+    {
+      "alternate_price": "197.00",
+      "displayed_price": "141.00",
+      "listing_count": 3,
+      "price": 141,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "15",
+      "section": "Loge Level 318"
+    },
+    {
+      "alternate_price": "202.00",
+      "displayed_price": "144.00",
+      "listing_count": 2,
+      "price": 144,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "15",
+      "section": "Loge Level 319"
+    },
+    {
+      "alternate_price": "167.00",
+      "displayed_price": "119.00",
+      "listing_count": 3,
+      "price": 119,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "17",
+      "section": "Loge Level 320"
+    },
+    {
+      "alternate_price": "198.00",
+      "displayed_price": "142.00",
+      "listing_count": 2,
+      "price": 142,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "10",
+      "section": "Loge Level 320C"
+    },
+    {
+      "alternate_price": "149.00",
+      "displayed_price": "106.00",
+      "listing_count": 5,
+      "price": 106,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "13",
+      "section": "Loge Level 321"
+    },
+    {
+      "alternate_price": "148.00",
+      "displayed_price": "106.00",
+      "listing_count": 6,
+      "price": 106,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "13",
+      "section": "Loge Level 322"
+    },
+    {
+      "alternate_price": "146.00",
+      "displayed_price": "104.00",
+      "listing_count": 5,
+      "price": 104,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "17",
+      "section": "Loge Level 323"
+    },
+    {
+      "alternate_price": "150.00",
+      "displayed_price": "107.00",
+      "listing_count": 4,
+      "price": 107,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "15",
+      "section": "Loge Level 324"
+    },
+    {
+      "alternate_price": "150.00",
+      "displayed_price": "107.00",
+      "listing_count": 3,
+      "price": 107,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "14",
+      "section": "Loge Level 325"
+    },
+    {
+      "alternate_price": "150.00",
+      "displayed_price": "107.00",
+      "listing_count": 2,
+      "price": 107,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "16",
+      "section": "Loge Level 326"
+    },
+    {
+      "alternate_price": "152.00",
+      "displayed_price": "108.00",
+      "listing_count": 2,
+      "price": 108,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "16",
+      "section": "Loge Level 327"
+    },
+    {
+      "alternate_price": "209.00",
+      "displayed_price": "149.00",
+      "listing_count": 2,
+      "price": 149,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "12",
+      "section": "Loge Level 328C"
+    },
+    {
+      "alternate_price": "197.00",
+      "displayed_price": "141.00",
+      "listing_count": 2,
+      "price": 141,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "13",
+      "section": "Loge Level 329"
+    },
+    {
+      "alternate_price": "196.00",
+      "displayed_price": "140.00",
+      "listing_count": 3,
+      "price": 140,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "16",
+      "section": "Loge Level 330"
+    },
+    {
+      "alternate_price": "249.00",
+      "displayed_price": "178.00",
+      "listing_count": 3,
+      "price": 178,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "13",
+      "section": "Loge Level 331"
+    },
+    {
+      "alternate_price": "315.00",
+      "displayed_price": "226.00",
+      "listing_count": 1,
+      "price": 226,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "11",
+      "section": "Loge Level 341"
+    },
+    {
+      "alternate_price": "171.00",
+      "displayed_price": "123.00",
+      "listing_count": 4,
+      "price": 123,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "17",
+      "section": "Loge Level 342"
+    },
+    {
+      "alternate_price": "176.00",
+      "displayed_price": "126.00",
+      "listing_count": 4,
+      "price": 126,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "16",
+      "section": "Loge Level 344"
+    },
+    {
+      "alternate_price": "136.00",
+      "displayed_price": "97.00",
+      "listing_count": 4,
+      "price": 97,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "17",
+      "section": "Loge Level 345"
+    },
+    {
+      "alternate_price": "152.00",
+      "displayed_price": "108.00",
+      "listing_count": 3,
+      "price": 108,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "14",
+      "section": "Loge Level 346"
+    },
+    {
+      "alternate_price": "147.00",
+      "displayed_price": "105.00",
+      "listing_count": 3,
+      "price": 105,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "15",
+      "section": "Loge Level 347"
+    },
+    {
+      "alternate_price": "178.00",
+      "displayed_price": "127.00",
+      "listing_count": 4,
+      "price": 127,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "11",
+      "section": "Loge Level 348"
+    },
+    {
+      "alternate_price": "713.00",
+      "displayed_price": "515.00",
+      "listing_count": 3,
+      "price": 515,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "BAR",
+      "section": "Luxury Suite"
+    },
+    {
+      "alternate_price": "217.00",
+      "displayed_price": "156.00",
+      "listing_count": 2,
+      "price": 156,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "26",
+      "section": "PLAZA 126"
+    },
+    {
+      "alternate_price": "166.00",
+      "displayed_price": "119.00",
+      "listing_count": 8,
+      "price": 119,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "27",
+      "section": "Plaza Level 101"
+    },
+    {
+      "alternate_price": "1011.00",
+      "displayed_price": "731.00",
+      "listing_count": 1,
+      "price": 731,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "1",
+      "section": "Plaza Level 101C"
+    },
+    {
+      "alternate_price": "175.00",
+      "displayed_price": "125.00",
+      "listing_count": 8,
+      "price": 125,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "24",
+      "section": "Plaza Level 102"
+    },
+    {
+      "alternate_price": "518.00",
+      "displayed_price": "373.00",
+      "listing_count": 2,
+      "price": 373,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "6",
+      "section": "Plaza Level 102C"
+    },
+    {
+      "alternate_price": "174.00",
+      "displayed_price": "124.00",
+      "listing_count": 12,
+      "price": 124,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "27",
+      "section": "Plaza Level 104"
+    },
+    {
+      "alternate_price": "204.00",
+      "displayed_price": "146.00",
+      "listing_count": 3,
+      "price": 146,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "25",
+      "section": "Plaza Level 106"
+    },
+    {
+      "alternate_price": "179.00",
+      "displayed_price": "128.00",
+      "listing_count": 12,
+      "price": 128,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "28",
+      "section": "Plaza Level 107"
+    },
+    {
+      "alternate_price": "187.00",
+      "displayed_price": "134.00",
+      "listing_count": 8,
+      "price": 134,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "32",
+      "section": "Plaza Level 109"
+    },
+    {
+      "alternate_price": "221.00",
+      "displayed_price": "158.00",
+      "listing_count": 11,
+      "price": 158,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "34",
+      "section": "Plaza Level 111"
+    },
+    {
+      "alternate_price": "270.00",
+      "displayed_price": "194.00",
+      "listing_count": 10,
+      "price": 194,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "27",
+      "section": "Plaza Level 112"
+    },
+    {
+      "alternate_price": "317.00",
+      "displayed_price": "228.00",
+      "listing_count": 6,
+      "price": 228,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "35",
+      "section": "Plaza Level 113"
+    },
+    {
+      "alternate_price": "285.00",
+      "displayed_price": "205.00",
+      "listing_count": 10,
+      "price": 205,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "24",
+      "section": "Plaza Level 114"
+    },
+    {
+      "alternate_price": "231.00",
+      "displayed_price": "166.00",
+      "listing_count": 11,
+      "price": 166,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "28",
+      "section": "Plaza Level 115"
+    },
+    {
+      "alternate_price": "263.00",
+      "displayed_price": "189.00",
+      "listing_count": 7,
+      "price": 189,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "30",
+      "section": "Plaza Level 116"
+    },
+    {
+      "alternate_price": "211.00",
+      "displayed_price": "151.00",
+      "listing_count": 18,
+      "price": 151,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "17",
+      "section": "Plaza Level 117"
+    },
+    {
+      "alternate_price": "202.00",
+      "displayed_price": "145.00",
+      "listing_count": 6,
+      "price": 145,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "26",
+      "section": "Plaza Level 119"
+    },
+    {
+      "alternate_price": "178.00",
+      "displayed_price": "127.00",
+      "listing_count": 16,
+      "price": 127,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "25",
+      "section": "Plaza Level 121"
+    },
+    {
+      "alternate_price": "187.00",
+      "displayed_price": "134.00",
+      "listing_count": 2,
+      "price": 134,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "33",
+      "section": "Plaza Level 122"
+    },
+    {
+      "alternate_price": "175.00",
+      "displayed_price": "125.00",
+      "listing_count": 25,
+      "price": 125,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "25",
+      "section": "Plaza Level 124"
+    },
+    {
+      "alternate_price": "162.00",
+      "displayed_price": "116.00",
+      "listing_count": 10,
+      "price": 116,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "28",
+      "section": "Plaza Level 126"
+    },
+    {
+      "alternate_price": "155.00",
+      "displayed_price": "111.00",
+      "listing_count": 11,
+      "price": 111,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "24",
+      "section": "Plaza Level 127"
+    },
+    {
+      "alternate_price": "175.00",
+      "displayed_price": "125.00",
+      "listing_count": 6,
+      "price": 125,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "24",
+      "section": "Plaza Level 128"
+    },
+    {
+      "alternate_price": "167.00",
+      "displayed_price": "119.00",
+      "listing_count": 17,
+      "price": 119,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "28",
+      "section": "Plaza Level 129"
+    },
+    {
+      "alternate_price": "167.00",
+      "displayed_price": "119.00",
+      "listing_count": 11,
+      "price": 119,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "27",
+      "section": "Plaza Level 130"
+    },
+    {
+      "alternate_price": "160.00",
+      "displayed_price": "114.00",
+      "listing_count": 10,
+      "price": 114,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "20",
+      "section": "Plaza Level 132"
+    },
+    {
+      "alternate_price": "196.00",
+      "displayed_price": "140.00",
+      "listing_count": 2,
+      "price": 140,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "24",
+      "section": "Plaza Level 134"
+    },
+    {
+      "alternate_price": "183.00",
+      "displayed_price": "131.00",
+      "listing_count": 11,
+      "price": 131,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "34",
+      "section": "Plaza Level 135"
+    },
+    {
+      "alternate_price": "186.00",
+      "displayed_price": "133.00",
+      "listing_count": 7,
+      "price": 133,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "34",
+      "section": "Plaza Level 137"
+    },
+    {
+      "alternate_price": "205.00",
+      "displayed_price": "147.00",
+      "listing_count": 10,
+      "price": 147,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "30",
+      "section": "Plaza Level 139"
+    },
+    {
+      "alternate_price": "250.00",
+      "displayed_price": "179.00",
+      "listing_count": 11,
+      "price": 179,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "32",
+      "section": "Plaza Level 140"
+    },
+    {
+      "alternate_price": "291.00",
+      "displayed_price": "209.00",
+      "listing_count": 8,
+      "price": 209,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "33",
+      "section": "Plaza Level 141"
+    },
+    {
+      "alternate_price": "242.00",
+      "displayed_price": "173.00",
+      "listing_count": 15,
+      "price": 173,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "27",
+      "section": "Plaza Level 142"
+    },
+    {
+      "alternate_price": "237.00",
+      "displayed_price": "170.00",
+      "listing_count": 10,
+      "price": 170,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "34",
+      "section": "Plaza Level 143"
+    },
+    {
+      "alternate_price": "260.00",
+      "displayed_price": "187.00",
+      "listing_count": 11,
+      "price": 187,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "30",
+      "section": "Plaza Level 144"
+    },
+    {
+      "alternate_price": "215.00",
+      "displayed_price": "154.00",
+      "listing_count": 16,
+      "price": 154,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "30",
+      "section": "Plaza Level 145"
+    },
+    {
+      "alternate_price": "184.00",
+      "displayed_price": "132.00",
+      "listing_count": 8,
+      "price": 132,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "28",
+      "section": "Plaza Level 147"
+    },
+    {
+      "alternate_price": "188.00",
+      "displayed_price": "134.00",
+      "listing_count": 15,
+      "price": 134,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "14",
+      "section": "Plaza Level 149"
+    },
+    {
+      "alternate_price": "187.00",
+      "displayed_price": "134.00",
+      "listing_count": 4,
+      "price": 134,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "31",
+      "section": "Plaza Level 150"
+    },
+    {
+      "alternate_price": "177.00",
+      "displayed_price": "127.00",
+      "listing_count": 7,
+      "price": 127,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "28",
+      "section": "Plaza Level 152"
+    },
+    {
+      "alternate_price": "168.00",
+      "displayed_price": "120.00",
+      "listing_count": 7,
+      "price": 120,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "21",
+      "section": "Plaza Level 154"
+    },
+    {
+      "alternate_price": "811.00",
+      "displayed_price": "586.00",
+      "listing_count": 2,
+      "price": 586,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "4",
+      "section": "Plaza Level 154C"
+    },
+    {
+      "alternate_price": "180.00",
+      "displayed_price": "129.00",
+      "listing_count": 6,
+      "price": 129,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "21",
+      "section": "Plaza Level 155"
+    },
+    {
+      "alternate_price": "643.00",
+      "displayed_price": "464.00",
+      "listing_count": 1,
+      "price": 464,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "5",
+      "section": "Plaza Level 155C"
+    },
+    {
+      "alternate_price": "164.00",
+      "displayed_price": "117.00",
+      "listing_count": 2,
+      "price": 117,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "21",
+      "section": "Plaza Level 156"
+    },
+    {
+      "alternate_price": "838.00",
+      "displayed_price": "606.00",
+      "listing_count": 1,
+      "price": 606,
+      "price_source": "p",
+      "quantity": "22",
+      "row": "22TIX",
+      "section": "Suite 315"
+    },
+    {
+      "alternate_price": "69.00",
+      "displayed_price": "48.00",
+      "listing_count": 7,
+      "price": 48,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "14",
+      "section": "Terrace Level 601"
+    },
+    {
+      "alternate_price": "56.00",
+      "displayed_price": "39.00",
+      "listing_count": 11,
+      "price": 39,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "12",
+      "section": "Terrace Level 602"
+    },
+    {
+      "alternate_price": "56.00",
+      "displayed_price": "39.00",
+      "listing_count": 11,
+      "price": 39,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "16",
+      "section": "Terrace Level 603"
+    },
+    {
+      "alternate_price": "56.00",
+      "displayed_price": "39.00",
+      "listing_count": 9,
+      "price": 39,
+      "price_source": "p",
+      "quantity": "8",
+      "row": "19",
+      "section": "Terrace Level 604"
+    },
+    {
+      "alternate_price": "53.00",
+      "displayed_price": "37.00",
+      "listing_count": 9,
+      "price": 37,
+      "price_source": "p",
+      "quantity": "7",
+      "row": "19",
+      "section": "Terrace Level 605"
+    },
+    {
+      "alternate_price": "57.00",
+      "displayed_price": "39.00",
+      "listing_count": 10,
+      "price": 39,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "21",
+      "section": "Terrace Level 606"
+    },
+    {
+      "alternate_price": "58.00",
+      "displayed_price": "40.00",
+      "listing_count": 5,
+      "price": 40,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "19",
+      "section": "Terrace Level 607"
+    },
+    {
+      "alternate_price": "56.00",
+      "displayed_price": "39.00",
+      "listing_count": 11,
+      "price": 39,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "23",
+      "section": "Terrace Level 608"
+    },
+    {
+      "alternate_price": "74.00",
+      "displayed_price": "52.00",
+      "listing_count": 8,
+      "price": 52,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "22",
+      "section": "Terrace Level 609"
+    },
+    {
+      "alternate_price": "64.00",
+      "displayed_price": "45.00",
+      "listing_count": 13,
+      "price": 45,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "35",
+      "section": "Terrace Level 610"
+    },
+    {
+      "alternate_price": "76.00",
+      "displayed_price": "53.00",
+      "listing_count": 16,
+      "price": 53,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "38",
+      "section": "Terrace Level 611"
+    },
+    {
+      "alternate_price": "86.00",
+      "displayed_price": "61.00",
+      "listing_count": 15,
+      "price": 61,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "25",
+      "section": "Terrace Level 612"
+    },
+    {
+      "alternate_price": "80.00",
+      "displayed_price": "56.00",
+      "listing_count": 10,
+      "price": 56,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "40",
+      "section": "Terrace Level 613"
+    },
+    {
+      "alternate_price": "91.00",
+      "displayed_price": "64.00",
+      "listing_count": 8,
+      "price": 64,
+      "price_source": "p",
+      "quantity": "5",
+      "row": "40",
+      "section": "Terrace Level 614"
+    },
+    {
+      "alternate_price": "79.00",
+      "displayed_price": "56.00",
+      "listing_count": 11,
+      "price": 56,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "41",
+      "section": "Terrace Level 615"
+    },
+    {
+      "alternate_price": "74.00",
+      "displayed_price": "52.00",
+      "listing_count": 16,
+      "price": 52,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "39",
+      "section": "Terrace Level 616"
+    },
+    {
+      "alternate_price": "71.00",
+      "displayed_price": "50.00",
+      "listing_count": 12,
+      "price": 50,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "32",
+      "section": "Terrace Level 617"
+    },
+    {
+      "alternate_price": "64.00",
+      "displayed_price": "45.00",
+      "listing_count": 19,
+      "price": 45,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "34",
+      "section": "Terrace Level 618"
+    },
+    {
+      "alternate_price": "76.00",
+      "displayed_price": "53.00",
+      "listing_count": 3,
+      "price": 53,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "23",
+      "section": "Terrace Level 619"
+    },
+    {
+      "alternate_price": "59.00",
+      "displayed_price": "41.00",
+      "listing_count": 8,
+      "price": 41,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "18",
+      "section": "Terrace Level 620"
+    },
+    {
+      "alternate_price": "64.00",
+      "displayed_price": "45.00",
+      "listing_count": 4,
+      "price": 45,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "28",
+      "section": "Terrace Level 621"
+    },
+    {
+      "alternate_price": "56.00",
+      "displayed_price": "39.00",
+      "listing_count": 7,
+      "price": 39,
+      "price_source": "p",
+      "quantity": "5",
+      "row": "18",
+      "section": "Terrace Level 622"
+    },
+    {
+      "alternate_price": "57.00",
+      "displayed_price": "39.00",
+      "listing_count": 9,
+      "price": 39,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "21",
+      "section": "Terrace Level 623"
+    },
+    {
+      "alternate_price": "52.00",
+      "displayed_price": "36.08",
+      "listing_count": 9,
+      "price": 36,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "19",
+      "section": "Terrace Level 624"
+    },
+    {
+      "alternate_price": "67.00",
+      "displayed_price": "47.00",
+      "listing_count": 10,
+      "price": 47,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "16",
+      "section": "Terrace Level 625"
+    },
+    {
+      "alternate_price": "65.00",
+      "displayed_price": "45.00",
+      "listing_count": 9,
+      "price": 45,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "16",
+      "section": "Terrace Level 626"
+    },
+    {
+      "alternate_price": "59.00",
+      "displayed_price": "41.00",
+      "listing_count": 8,
+      "price": 41,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "12",
+      "section": "Terrace Level 627"
+    },
+    {
+      "alternate_price": "63.00",
+      "displayed_price": "44.00",
+      "listing_count": 12,
+      "price": 44,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "17",
+      "section": "Terrace Level 628"
+    },
+    {
+      "alternate_price": "72.00",
+      "displayed_price": "51.00",
+      "listing_count": 6,
+      "price": 51,
+      "price_source": "p",
+      "quantity": "10",
+      "row": "20",
+      "section": "Terrace Level 629"
+    },
+    {
+      "alternate_price": "58.00",
+      "displayed_price": "40.00",
+      "listing_count": 8,
+      "price": 40,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "19",
+      "section": "Terrace Level 630"
+    },
+    {
+      "alternate_price": "58.00",
+      "displayed_price": "40.00",
+      "listing_count": 9,
+      "price": 40,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "20",
+      "section": "Terrace Level 631"
+    },
+    {
+      "alternate_price": "52.00",
+      "displayed_price": "36.08",
+      "listing_count": 11,
+      "price": 36,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "26",
+      "section": "Terrace Level 632"
+    },
+    {
+      "alternate_price": "58.00",
+      "displayed_price": "40.00",
+      "listing_count": 3,
+      "price": 40,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "21",
+      "section": "Terrace Level 633"
+    },
+    {
+      "alternate_price": "59.00",
+      "displayed_price": "41.00",
+      "listing_count": 15,
+      "price": 41,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "19",
+      "section": "Terrace Level 634"
+    },
+    {
+      "alternate_price": "53.00",
+      "displayed_price": "37.00",
+      "listing_count": 7,
+      "price": 37,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "21",
+      "section": "Terrace Level 635"
+    },
+    {
+      "alternate_price": "70.00",
+      "displayed_price": "49.00",
+      "listing_count": 12,
+      "price": 49,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "24",
+      "section": "Terrace Level 636"
+    },
+    {
+      "alternate_price": "72.00",
+      "displayed_price": "51.00",
+      "listing_count": 9,
+      "price": 51,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "35",
+      "section": "Terrace Level 637"
+    },
+    {
+      "alternate_price": "75.00",
+      "displayed_price": "53.00",
+      "listing_count": 12,
+      "price": 53,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "31",
+      "section": "Terrace Level 638"
+    },
+    {
+      "alternate_price": "80.00",
+      "displayed_price": "56.00",
+      "listing_count": 7,
+      "price": 56,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "35",
+      "section": "Terrace Level 639"
+    },
+    {
+      "alternate_price": "91.00",
+      "displayed_price": "64.00",
+      "listing_count": 10,
+      "price": 64,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "35",
+      "section": "Terrace Level 640"
+    },
+    {
+      "alternate_price": "87.00",
+      "displayed_price": "62.00",
+      "listing_count": 11,
+      "price": 62,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "27",
+      "section": "Terrace Level 641"
+    },
+    {
+      "alternate_price": "72.00",
+      "displayed_price": "51.00",
+      "listing_count": 12,
+      "price": 51,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "36",
+      "section": "Terrace Level 642"
+    },
+    {
+      "alternate_price": "78.00",
+      "displayed_price": "55.00",
+      "listing_count": 8,
+      "price": 55,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "24",
+      "section": "Terrace Level 643"
+    },
+    {
+      "alternate_price": "72.00",
+      "displayed_price": "51.00",
+      "listing_count": 5,
+      "price": 51,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "23",
+      "section": "Terrace Level 644"
+    },
+    {
+      "alternate_price": "73.00",
+      "displayed_price": "51.00",
+      "listing_count": 10,
+      "price": 51,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "22",
+      "section": "Terrace Level 645"
+    },
+    {
+      "alternate_price": "70.00",
+      "displayed_price": "49.00",
+      "listing_count": 7,
+      "price": 49,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "26",
+      "section": "Terrace Level 646"
+    },
+    {
+      "alternate_price": "53.00",
+      "displayed_price": "37.00",
+      "listing_count": 6,
+      "price": 37,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "22",
+      "section": "Terrace Level 647"
+    },
+    {
+      "alternate_price": "52.00",
+      "displayed_price": "36.08",
+      "listing_count": 12,
+      "price": 36,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "22",
+      "section": "Terrace Level 648"
+    },
+    {
+      "alternate_price": "52.00",
+      "displayed_price": "36.08",
+      "listing_count": 11,
+      "price": 36,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "18",
+      "section": "Terrace Level 649"
+    },
+    {
+      "alternate_price": "53.00",
+      "displayed_price": "37.00",
+      "listing_count": 7,
+      "price": 37,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "18",
+      "section": "Terrace Level 650"
+    },
+    {
+      "alternate_price": "52.00",
+      "displayed_price": "36.08",
+      "listing_count": 11,
+      "price": 36,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "21",
+      "section": "Terrace Level 651"
+    },
+    {
+      "alternate_price": "55.00",
+      "displayed_price": "38.00",
+      "listing_count": 9,
+      "price": 38,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "19",
+      "section": "Terrace Level 652"
+    },
+    {
+      "alternate_price": "101.00",
+      "displayed_price": "72.00",
+      "listing_count": 3,
+      "price": 72,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "2",
+      "section": "Upper Box 501"
+    },
+    {
+      "alternate_price": "142.00",
+      "displayed_price": "101.00",
+      "listing_count": 1,
+      "price": 101,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "4",
+      "section": "Upper Box 503"
+    },
+    {
+      "alternate_price": "143.00",
+      "displayed_price": "102.00",
+      "listing_count": 4,
+      "price": 102,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "6",
+      "section": "Upper Box 504"
+    },
+    {
+      "alternate_price": "266.00",
+      "displayed_price": "191.00",
+      "listing_count": 1,
+      "price": 191,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "3",
+      "section": "Upper Box 507"
+    },
+    {
+      "alternate_price": "314.00",
+      "displayed_price": "226.00",
+      "listing_count": 1,
+      "price": 226,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "1",
+      "section": "Upper Box 509"
+    },
+    {
+      "alternate_price": "199.00",
+      "displayed_price": "143.00",
+      "listing_count": 2,
+      "price": 143,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "5",
+      "section": "Upper Box 511"
+    },
+    {
+      "alternate_price": "203.00",
+      "displayed_price": "145.00",
+      "listing_count": 5,
+      "price": 145,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "4",
+      "section": "Upper Box 513"
+    },
+    {
+      "alternate_price": "295.00",
+      "displayed_price": "212.00",
+      "listing_count": 1,
+      "price": 212,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "3",
+      "section": "Upper Box 515"
+    },
+    {
+      "alternate_price": "211.00",
+      "displayed_price": "151.00",
+      "listing_count": 2,
+      "price": 151,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "5",
+      "section": "Upper Box 517"
+    },
+    {
+      "alternate_price": "297.00",
+      "displayed_price": "214.00",
+      "listing_count": 1,
+      "price": 214,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "1",
+      "section": "Upper Box 519"
+    },
+    {
+      "alternate_price": "199.00",
+      "displayed_price": "143.00",
+      "listing_count": 1,
+      "price": 143,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "4",
+      "section": "Upper Box 523"
+    },
+    {
+      "alternate_price": "178.00",
+      "displayed_price": "127.00",
+      "listing_count": 1,
+      "price": 127,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "3",
+      "section": "Upper Box 524"
+    },
+    {
+      "alternate_price": "153.00",
+      "displayed_price": "109.00",
+      "listing_count": 1,
+      "price": 109,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "1",
+      "section": "Upper Box 525WC"
+    },
+    {
+      "alternate_price": "152.00",
+      "displayed_price": "109.00",
+      "listing_count": 1,
+      "price": 109,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "4",
+      "section": "Upper Box 527"
+    },
+    {
+      "alternate_price": "104.00",
+      "displayed_price": "73.00",
+      "listing_count": 2,
+      "price": 73,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "4",
+      "section": "Upper Box 529"
+    },
+    {
+      "alternate_price": "111.00",
+      "displayed_price": "78.00",
+      "listing_count": 2,
+      "price": 78,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "4",
+      "section": "Upper Box 531"
+    },
+    {
+      "alternate_price": "125.00",
+      "displayed_price": "89.00",
+      "listing_count": 1,
+      "price": 89,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "1",
+      "section": "Upper Box 533"
+    },
+    {
+      "alternate_price": "322.00",
+      "displayed_price": "232.00",
+      "listing_count": 1,
+      "price": 232,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "4",
+      "section": "Upper Box 534"
+    },
+    {
+      "alternate_price": "341.00",
+      "displayed_price": "246.00",
+      "listing_count": 1,
+      "price": 246,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "1",
+      "section": "Upper Box 536WC"
+    },
+    {
+      "alternate_price": "135.00",
+      "displayed_price": "96.00",
+      "listing_count": 3,
+      "price": 96,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "3",
+      "section": "Upper Box 537"
+    },
+    {
+      "alternate_price": "226.00",
+      "displayed_price": "162.00",
+      "listing_count": 2,
+      "price": 162,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "2",
+      "section": "Upper Box 539"
+    },
+    {
+      "alternate_price": "132.00",
+      "displayed_price": "94.00",
+      "listing_count": 4,
+      "price": 94,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "6",
+      "section": "Upper Box 541"
+    },
+    {
+      "alternate_price": "302.00",
+      "displayed_price": "217.00",
+      "listing_count": 2,
+      "price": 217,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "2",
+      "section": "Upper Box 543"
+    },
+    {
+      "alternate_price": "217.00",
+      "displayed_price": "156.00",
+      "listing_count": 4,
+      "price": 156,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "2",
+      "section": "Upper Box 545"
+    },
+    {
+      "alternate_price": "229.00",
+      "displayed_price": "164.00",
+      "listing_count": 3,
+      "price": 164,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "2",
+      "section": "Upper Box 547"
+    },
+    {
+      "alternate_price": "183.00",
+      "displayed_price": "131.00",
+      "listing_count": 3,
+      "price": 131,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "3",
+      "section": "Upper Box 549"
+    },
+    {
+      "alternate_price": "212.00",
+      "displayed_price": "152.00",
+      "listing_count": 2,
+      "price": 152,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "5",
+      "section": "Upper Box 551"
+    },
+    {
+      "alternate_price": "196.00",
+      "displayed_price": "140.00",
+      "listing_count": 1,
+      "price": 140,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "2",
+      "section": "Upper Box 553"
+    },
+    {
+      "alternate_price": "242.00",
+      "displayed_price": "174.00",
+      "listing_count": 1,
+      "price": 174,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "1",
+      "section": "Upper Box 554"
+    },
+    {
+      "alternate_price": "142.00",
+      "displayed_price": "101.00",
+      "listing_count": 2,
+      "price": 101,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "3",
+      "section": "Upper Box 557"
+    },
+    {
+      "alternate_price": "187.00",
+      "displayed_price": "134.00",
+      "listing_count": 4,
+      "price": 134,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "2",
+      "section": "Upper Box 559"
+    }
+  ],
+  "source_id": "6493143",
+  "source_url": "https://www.vividseats.com/en/new-orleans-saints-tickets-new-orleans-caesars-superdome-3-7-2027/production/6493143",
+  "title": "Minnesota Vikings at New Orleans Saints",
+  "venue": "Caesars Superdome"
+}

@@ -1,0 +1,15 @@
+{
+  "observations": [
+    {
+      "file": "docs/shared-observations/snapshot-nhl-7302493-0400.json",
+      "sha256": "bff227ac9dba60ceace84b8ca25caa291902b80f7dc3435135f91130637c3343",
+      "sport": "nhl"
+    },
+    {
+      "file": "docs/shared-observations/snapshot-nfl-6493143-0400.json",
+      "sha256": "1ae4c04e90b67caf9b1e55bc172bc5dbc961b530fce7de139aefc26d7e4307fc",
+      "sport": "nfl"
+    }
+  ],
+  "version": 1
+}
