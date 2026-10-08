@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
+import time
 from urllib.parse import urlsplit
 
 
@@ -85,13 +86,15 @@ def safe_diagnostics(value):
     return result
 
 
-def run_canary(events, directory, *, timeout=45, factory=None):
+def run_canary(events, directory, *, timeout=45, pace_seconds=0, factory=None):
+    if type(pace_seconds) is not int or not 0 <= pace_seconds <= 90:
+        raise ValueError('pace_seconds must be an integer between 0 and 90')
     import selenium
     from nfl_collector import VividNFLBrowser, NFLSnapshotParser, nfl_snapshot_to_payload
     from nhl_collector import NHLSnapshotParser, nhl_snapshot_to_payload
     from vivid_inventory import validate_inventory
     directory = Path(directory); directory.mkdir(parents=True, exist_ok=True)
-    report = dict(status='running', database_calls=0, upload_calls=0,
+    report = dict(status='running', database_calls=0, upload_calls=0, pace_seconds=pace_seconds,
                   observations=[], browser_sessions=[], selenium_version=selenium.__version__,
                   started_at=datetime.now(timezone.utc).isoformat())
     report_path = directory / 'report.json'
@@ -99,7 +102,12 @@ def run_canary(events, directory, *, timeout=45, factory=None):
     factory = factory or VividNFLBrowser
 
     def observe(browser, event, phase):
-        entry = dict(sport=event['sport'], source_id=event['production_id'], phase=phase)
+        # Optional lower request cadence is a diagnostic control, not a retry.
+        # The shared report keeps this delay across browser-session boundaries.
+        if report['observations'] and pace_seconds:
+            time.sleep(pace_seconds)
+        entry = dict(sport=event['sport'], source_id=event['production_id'], phase=phase,
+                     started_at=datetime.now(timezone.utc).isoformat())
         try:
             raw, event_at = browser.capture(event['url'])
             validate_inventory(raw, event['production_id'])
@@ -130,6 +138,7 @@ def run_canary(events, directory, *, timeout=45, factory=None):
             if type(getattr(exc, 'retryable', None)) is bool:
                 entry['retryable'] = exc.retryable
         entry['diagnostics'] = safe_diagnostics(getattr(browser, 'capture_diagnostics', {}))
+        entry['finished_at'] = datetime.now(timezone.utc).isoformat()
         report['observations'].append(entry)
         _write(report_path, report)
 
@@ -175,10 +184,14 @@ def main():
     parser.add_argument('--events', required=True, help='JSON list with sport and public event URL')
     parser.add_argument('--directory', type=Path, default=Path('firefox-canary'))
     parser.add_argument('--timeout', type=int, default=45)
+    parser.add_argument('--pace-seconds', type=int, default=0,
+                        help='Idle seconds between observations, including browser restarts (0..90; default 0).')
     args = parser.parse_args()
     if not 20 <= args.timeout <= 60:
         parser.error('timeout must be between20 and60 seconds')
-    result = run_canary(events_from_json(args.events), args.directory, timeout=args.timeout)
+    if not 0 <= args.pace_seconds <= 90:
+        parser.error('pace-seconds must be between 0 and 90')
+    result = run_canary(events_from_json(args.events), args.directory, timeout=args.timeout, pace_seconds=args.pace_seconds)
     print('BROWSER_CAPTURE_CANARY ' + json.dumps(result, sort_keys=True))
     return int(result['status'] != 'passed')
 

@@ -35,6 +35,11 @@ on:
         description: JSON list of two to four distinct NFL/NHL public event URLs
         required: false
         default: ""
+      canary_pace_seconds:
+        description: Optional idle seconds between canary observations (0 to 90)
+        type: number
+        required: false
+        default: 0
 
 permissions:
   contents: read
@@ -162,7 +167,7 @@ jobs:
   firefox-canary:
     if: github.event_name == 'workflow_dispatch' && inputs.mode == 'firefox_canary'
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 16
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
@@ -180,9 +185,11 @@ jobs:
         env:
           TICKETSIGNAL_BROWSER_ENGINE: firefox
           CANARY_EVENTS: ${{ inputs.canary_events }}
+          CANARY_PACE_SECONDS: ${{ inputs.canary_pace_seconds || '0' }}
         run: |
-          xvfb-run --auto-servernum timeout --signal=TERM --kill-after=10s 360s \
-            python -m tools.browser_capture_canary --events "$CANARY_EVENTS" --directory firefox-canary --timeout 45
+          CANARY_TIMEOUT_SECONDS=$(python -c 'import os; pace = int(os.environ["CANARY_PACE_SECONDS"]); assert 0 <= pace <= 90; print(360 + 5 * pace)')
+          xvfb-run --auto-servernum timeout --signal=TERM --kill-after=10s "${CANARY_TIMEOUT_SECONDS}s" \
+            python -m tools.browser_capture_canary --events "$CANARY_EVENTS" --directory firefox-canary --timeout 45 --pace-seconds "$CANARY_PACE_SECONDS"
       - uses: actions/upload-artifact@v7
         if: always()
         with:

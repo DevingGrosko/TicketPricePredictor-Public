@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from tools.browser_capture_canary import events_from_json, run_canary, safe_diagnostics
 
@@ -32,6 +33,40 @@ class Browser:
 
 
 class CanaryTests(unittest.TestCase):
+    def test_pacing_is_between_every_observation_including_restarted_session(self):
+        trace = []
+        class Paced(Browser):
+            def capture(self, url):
+                trace.append(('capture', url))
+                return super().capture(url)
+            def close(self):
+                trace.append(('close', None))
+                super().close()
+        with tempfile.TemporaryDirectory() as directory, \
+                patch('tools.browser_capture_canary.time.sleep', side_effect=lambda value: trace.append(('wait', value))):
+            report = run_canary(events_from_json(json.dumps(EVENTS)), directory, pace_seconds=60,
+                                factory=lambda **kwargs: Paced())
+        self.assertEqual(report['pace_seconds'], 60)
+        self.assertEqual([kind for kind, _ in trace],
+                         ['capture', 'wait', 'capture', 'wait', 'capture', 'close', 'wait', 'capture', 'close'])
+        self.assertEqual([value for kind, value in trace if kind == 'wait'], [60, 60, 60])
+        self.assertEqual(report['status'], 'passed')
+        self.assertEqual((report['database_calls'], report['upload_calls']), (0, 0))
+        self.assertTrue(all('started_at' in row and 'finished_at' in row for row in report['observations']))
+
+    def test_default_pacing_adds_no_sleep_or_capture_and_invalid_values_fail_before_startup(self):
+        with tempfile.TemporaryDirectory() as directory, patch('tools.browser_capture_canary.time.sleep') as sleep:
+            report = run_canary(events_from_json(json.dumps(EVENTS)), directory, factory=lambda **kwargs: Browser())
+        sleep.assert_not_called()
+        self.assertEqual(report['pace_seconds'], 0)
+        self.assertEqual(len(report['observations']), 4)
+        for pace in (-1, 91, True, 0.5, '60'):
+            with self.subTest(pace=pace), tempfile.TemporaryDirectory() as directory, \
+                    patch('tools.browser_capture_canary.time.sleep') as sleep:
+                with self.assertRaises(ValueError):
+                    run_canary(EVENTS, directory, pace_seconds=pace, factory=lambda **kwargs: self.fail('Browser started'))
+                sleep.assert_not_called()
+
     def test_multiple_sports_repeat_and_restart_use_correct_context_and_close_browsers(self):
         with tempfile.TemporaryDirectory() as directory:
             sessions = []
@@ -48,13 +83,14 @@ class CanaryTests(unittest.TestCase):
             self.assertEqual(len(list(Path(directory).glob('observation-*.json'))), 4)
 
     def test_one_failure_remains_red_without_blocking_other_event_or_cleanup(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory() as directory, patch('tools.browser_capture_canary.time.sleep') as sleep:
             sessions = []
             def factory(**kwargs):
                 browser = Browser({EVENTS[0]['url']}); sessions.append(browser); return browser
-            report = run_canary(events_from_json(json.dumps(EVENTS)), directory, factory=factory)
+            report = run_canary(events_from_json(json.dumps(EVENTS)), directory, pace_seconds=90, factory=factory)
             self.assertEqual(report['status'], 'failed')
             self.assertEqual([row['status'] for row in report['observations']], ['failed', 'captured', 'failed', 'failed'])
+            self.assertEqual(sleep.call_args_list, [unittest.mock.call(90)] * 3)
             self.assertTrue(all(browser.closed for browser in sessions))
             self.assertNotIn('private-error-text', json.dumps(report))
 
@@ -80,6 +116,10 @@ class CanaryTests(unittest.TestCase):
         self.assertIn('selenium==4.26.1', (root / 'requirements.txt').read_text())
         self.assertIn('selenium==4.50.0', (root / 'requirements-collector.txt').read_text())
         self.assertEqual(collect.count('Verify stock Firefox and geckodriver for this manual trial'), 2)
+        self.assertIn('canary_pace_seconds:', smoke)
+        self.assertIn("CANARY_PACE_SECONDS: ${{ inputs.canary_pace_seconds || '0' }}", smoke)
+        self.assertIn('print(360 + 5 * pace)', smoke)
+        self.assertIn('--pace-seconds "$CANARY_PACE_SECONDS"', smoke)
 
     def test_failure_report_keeps_category_and_safe_native_response_evidence(self):
         from vivid_inventory import VividCaptureError
