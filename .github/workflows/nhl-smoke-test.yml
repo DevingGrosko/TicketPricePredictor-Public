@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 jobs:
-  pre-free-control:
+  firefox-inventory-diagnostic:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -15,32 +15,28 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.13"
-      - name: Install the historical workflow dependencies
-        run: python -m pip install "selenium==4.49.0" "SQLAlchemy>=2,<3"
-      - name: Install the browser versions shipped with the successful September runner
+      - name: Install standard Selenium
+        run: python -m pip install "selenium==4.50.0"
+      - name: Verify the installed browser and driver
         run: |
-          mkdir -p "$RUNNER_TEMP/pre-free-browser"
-          curl --fail --location --max-time 90 \
-            https://storage.googleapis.com/chrome-for-testing-public/153.0.8010.52/linux64/chrome-linux64.zip \
-            --output "$RUNNER_TEMP/pre-free-browser/chrome.zip"
-          curl --fail --location --max-time 45 \
-            https://storage.googleapis.com/chrome-for-testing-public/153.0.8010.52/linux64/chromedriver-linux64.zip \
-            --output "$RUNNER_TEMP/pre-free-browser/driver.zip"
-          unzip -q "$RUNNER_TEMP/pre-free-browser/chrome.zip" -d "$RUNNER_TEMP/pre-free-browser"
-          unzip -q "$RUNNER_TEMP/pre-free-browser/driver.zip" -d "$RUNNER_TEMP/pre-free-browser"
-          "$RUNNER_TEMP/pre-free-browser/chrome-linux64/chrome" --version
-          "$RUNNER_TEMP/pre-free-browser/chromedriver-linux64/chromedriver" --version
-      - name: Capture one event with unchanged pre-free collector code
+          command -v firefox
+          command -v geckodriver
+          command -v xvfb-run
+          firefox --version
+          geckodriver --version
+      - name: Observe one public event in headed Firefox
         run: |
-          export CHROMEDRIVER_PATH="$RUNNER_TEMP/pre-free-browser/chromedriver-linux64/chromedriver"
-          timeout --signal=TERM --kill-after=10s 120s python run_pre_free_control.py \
-            --headless --timeout 45 --output pre_free_result.json \
-            --chrome-binary "$RUNNER_TEMP/pre-free-browser/chrome-linux64/chrome"
-      - name: Save comparison evidence
+          timeout --signal=TERM --kill-after=10s 120s xvfb-run -a \
+            python tools/firefox_inventory_diagnostic.py --timeout 75 \
+            --output firefox_inventory_result.json \
+            --inventory-output firefox_public_inventory.json
+      - name: Save sanitized diagnostics and public inventory
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: pre-free-control-${{ github.run_id }}
-          path: pre_free_result.json
+          name: firefox-inventory-${{ github.run_id }}
+          path: |
+            firefox_inventory_result.json
+            firefox_public_inventory.json
           if-no-files-found: warn
           retention-days: 14
