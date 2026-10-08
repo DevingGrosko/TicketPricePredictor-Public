@@ -5,6 +5,7 @@ import argparse
 from datetime import datetime, timezone
 import json
 import os
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -171,11 +172,23 @@ def run(kind, *, sport=None, manual_repair=False, owner_run_id=None):
     if kind == 'publication-gate':
         if type(owner_run_id) is not int or owner_run_id <= 0:
             raise ValueError('Publication gate requires an explicit owner run ID')
-        owner = api('/actions/runs/' + str(owner_run_id))
-        if owner.get('path') != OWNER or owner.get('head_branch') != 'main':
-            raise RuntimeError('Publication completion must belong to the canonical main owner')
-        decision, reason = publication_needed(owner, jobs(owner_run_id))
         evidence = {'owner_run_id':owner_run_id}
+        try:
+            owner = api('/actions/runs/' + str(owner_run_id))
+            if (owner.get('path') != OWNER or owner.get('head_branch') != 'main'
+                    or owner.get('head_repository', {}).get('full_name', REPO) != REPO
+                    or owner.get('repository', {}).get('full_name', REPO) != REPO):
+                raise RuntimeError('Publication completion must belong to the canonical main owner')
+            decision, reason = publication_needed(owner, jobs(owner_run_id))
+        except (HTTPError, URLError, TimeoutError, ConnectionError) as exc:
+            if isinstance(exc, HTTPError) and not 500 <= exc.code <= 599:
+                raise
+            # The lookup only avoids duplicate builds. A temporary read failure
+            # must not hide already committed valid observations from the site.
+            decision, reason = True, 'publication-lookup-temporarily-unavailable'
+            evidence['lookup_error_type'] = type(exc).__name__
+            if isinstance(exc, HTTPError):
+                evidence['lookup_status'] = exc.code
     else:
         rows = owner_runs()
         current = int(os.environ['GITHUB_RUN_ID']) if kind == 'slot-gate' else None
