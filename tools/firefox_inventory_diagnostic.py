@@ -31,12 +31,24 @@ SAFE_HEADERS = {"accept", "brand-name", "if-none-match", "if-modified-since", "c
                 "content-type", "x-user-id", "x-performer-id"}
 
 
-def unfiltered_url(url):
+def validate_target(event_url, performer_url, production_id):
+    if not isinstance(production_id, str) or not re.fullmatch(r"[0-9]{1,12}", production_id):
+        raise ValueError("invalid-production-id")
+    for url, suffix in ((event_url, "/production/" + production_id), (performer_url, None)):
+        parsed = urlsplit(url)
+        invalid_url = parsed.scheme != "https" or parsed.netloc != "www.vividseats.com" or parsed.query or parsed.fragment
+        wrong_path = not parsed.path.rstrip("/").endswith(suffix) if suffix else not re.search(r"/performer/[0-9]+$", parsed.path.rstrip("/"))
+        if invalid_url or wrong_path:
+            raise ValueError("invalid-public-target-url")
+    return event_url, performer_url, production_id
+
+
+def unfiltered_url(url, production_id=PRODUCTION_ID):
     try:
         parsed = urlsplit(url)
         query = parse_qs(parsed.query, keep_blank_values=True)
         if (parsed.scheme != "https" or parsed.netloc != "www.vividseats.com" or parsed.path not in PATHS
-                or query.get("productionId") != [PRODUCTION_ID]):
+                or query.get("productionId") != [production_id]):
             return False
         if set(query) - (SAFE_QUERY | {"scarcity"}) or any(len(values) != 1 or not values[0] for values in query.values()):
             return False
@@ -51,13 +63,13 @@ def unfiltered_url(url):
         return False
 
 
-def safe_request(url):
+def safe_request(url, production_id=PRODUCTION_ID):
     parsed = urlsplit(url)
     query = parse_qs(parsed.query, keep_blank_values=True)
     return {"path": parsed.path, "query": {
         key: values for key, values in query.items() if key in SAFE_QUERY
         and len(values) <= 2 and all(re.fullmatch(r"[A-Za-z0-9_,. -]{0,60}", value) for value in values)
-    }, "unfiltered": unfiltered_url(url)}
+    }, "unfiltered": unfiltered_url(url, production_id)}
 
 
 def header_names(headers):
@@ -65,13 +77,13 @@ def header_names(headers):
                    and isinstance(item.get("name"), str) and item["name"].casefold() in SAFE_HEADERS})
 
 
-def sanitize_inventory(payload):
+def sanitize_inventory(payload, production_id=PRODUCTION_ID):
     if not isinstance(payload, dict):
         raise ValueError("invalid-payload")
     metadata, tickets = payload.get("global"), payload.get("tickets")
     if not isinstance(metadata, list) or not metadata or not isinstance(metadata[0], dict):
         raise ValueError("invalid-global")
-    if str(metadata[0].get("productionId", "")) != PRODUCTION_ID:
+    if str(metadata[0].get("productionId", "")) != production_id:
         raise ValueError("identity-mismatch")
     if not isinstance(tickets, list) or not tickets:
         raise ValueError("empty-inventory")
@@ -134,10 +146,11 @@ def decode_bidi_body(result):
 
 
 class Evidence:
-    def __init__(self):
+    def __init__(self, production_id=PRODUCTION_ID, performer_url=PERFORMER):
         self.lock, self.rows, self.inventory = threading.Lock(), [], []
         self.denial, self.phase = False, "page"
         self.event_click_started_ms = None
+        self.production_id, self.performer_url = production_id, performer_url
 
     def response(self, event):
         params = event if isinstance(event, dict) else vars(event)
@@ -157,12 +170,12 @@ class Evidence:
                     and request_time < self.event_click_started_ms):
                 phase = "performer"
             self.denial |= status in (401, 403, 429)
-            if parsed.path.rstrip("/").endswith("/production/" + PRODUCTION_ID):
+            if parsed.path.rstrip("/").endswith("/production/" + self.production_id):
                 self.rows.append({"kind": "document", "status": status, "phase": phase})
-            elif parsed.path == urlsplit(PERFORMER).path:
+            elif parsed.path == urlsplit(self.performer_url).path:
                 self.rows.append({"kind": "performer-document", "status": status, "phase": phase})
             elif parsed.path in PATHS:
-                row = {"kind": "inventory", "status": status, "phase": phase, **safe_request(url),
+                row = {"kind": "inventory", "status": status, "phase": phase, **safe_request(url, self.production_id),
                        "request_header_names": header_names(request.get("headers", [])),
                        "response_header_names": header_names(response.get("headers", []))}
                 protocol = response.get("protocol")
@@ -194,14 +207,14 @@ return {ready_state: document.readyState, listing_count: count ? Number(count[1]
 """
 
 FETCH_SCRIPT = """
-const url = arguments[0], done = arguments[arguments.length - 1];
+const url = arguments[0], productionId = arguments[1], done = arguments[arguments.length - 1];
 const actual = performance.getEntriesByType('resource').some(e => e.name === url);
 const u = new URL(url), q = u.searchParams;
 const filtered = ['quantity','offset','page'].some(k => q.has(k) && q.getAll(k).some(v => v !== '0')) ||
  ['recommended','sf'].some(k => q.has(k) && q.getAll(k).some(v => !['0','false'].includes(v.toLowerCase()))) ||
  ['limit','pageSize'].some(k => q.has(k));
 if (!actual || u.origin !== location.origin || !['/hermes/api/v1/listings','/hermes/api/v2/listings'].includes(u.pathname) ||
- q.getAll('productionId').length !== 1 || q.get('productionId') !== '7302493' || filtered) {
+ q.getAll('productionId').length !== 1 || q.get('productionId') !== productionId || filtered) {
  done({error: 'unobserved-or-filtered-url'}); return;
 }
 const abort = new AbortController(), timer = setTimeout(() => abort.abort(), 15000);
@@ -249,8 +262,47 @@ def write_json(path, value):
     path.write_text(json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
 
 
-def save_capture(args, report, payload, method):
-    clean = sanitize_inventory(payload)
+METADATA_SCRIPT = """
+try {
+ const p = JSON.parse(document.getElementById('__NEXT_DATA__').textContent).props.pageProps;
+ const e = p.initialProductionDetailsData.data;
+ return {id:e.id, page_id:p.id, utc_date:e.utcDate, title:e.name, venue:e.venue?.name};
+} catch (_) { return null; }
+"""
+
+
+def utc_stamp(value):
+    if not isinstance(value, str) or not value:
+        raise ValueError("explicit-utc-required")
+    stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if stamp.tzinfo is None or stamp.utcoffset().total_seconds() != 0:
+        raise ValueError("explicit-utc-required")
+    return stamp.astimezone(timezone.utc)
+
+
+def save_capture(args, report, payload, method, driver=None):
+    production_id = getattr(args, "production_id", PRODUCTION_ID)
+    clean = sanitize_inventory(payload, production_id)
+    expected = getattr(args, "expected_event_utc", None)
+    if expected:
+        metadata = driver.execute_script(METADATA_SCRIPT)
+        identity = (isinstance(metadata, dict) and str(metadata.get("id")) == production_id
+                    and str(metadata.get("page_id")) == production_id)
+        report["metadata_identity_match"] = identity
+        try:
+            actual = utc_stamp(metadata["utc_date"]) if identity else None
+            matching_time = actual is not None and actual == utc_stamp(expected)
+        except (TypeError, ValueError, KeyError):
+            matching_time = False
+        report["metadata_time_match"] = matching_time
+        if not matching_time:
+            report["category"] = "event-metadata-unavailable-or-mismatch"
+            return False
+        report["event_date"] = actual.isoformat()
+        for field in ("title", "venue"):
+            value = metadata.get(field)
+            if isinstance(value, str) and len(value) <= 300:
+                report["event_" + field] = value
     write_json(args.inventory_output, clean)
     report["acquisition_method"] = method
     report["captured_listing_count"] = len(clean["tickets"])
@@ -259,14 +311,14 @@ def save_capture(args, report, payload, method):
     return True
 
 
-def visible_event_link(driver):
-    for link in driver.find_elements("css selector", "a[href*='/production/7302493']")[:50]:
+def visible_event_link(driver, production_id=PRODUCTION_ID, performer_url=PERFORMER):
+    for link in driver.find_elements("css selector", f"a[href*='/production/{production_id}']")[:50]:
         try:
             href = link.get_attribute("href") or ""
-            parsed = urlsplit(urljoin(PERFORMER, href))
-            if (parsed.scheme != "https" or parsed.netloc != urlsplit(PERFORMER).netloc
+            parsed = urlsplit(urljoin(performer_url, href))
+            if (parsed.scheme != "https" or parsed.netloc != urlsplit(performer_url).netloc
                     or parsed.query or parsed.fragment
-                    or not parsed.path.rstrip("/").endswith("/production/" + PRODUCTION_ID)
+                    or not parsed.path.rstrip("/").endswith("/production/" + production_id)
                     or link.get_attribute("target") not in (None, "", "_self", "_blank")
                     or not link.is_displayed() or not link.is_enabled()):
                 continue
@@ -276,17 +328,18 @@ def visible_event_link(driver):
     return None
 
 
-def navigate_performer(driver, evidence, report, deadline):
+def navigate_performer(driver, evidence, report, deadline, *, production_id=PRODUCTION_ID, performer_url=PERFORMER):
     evidence.phase = "performer"
-    driver.get(PERFORMER)
+    driver.get(performer_url)
     while time.monotonic() < deadline:
         if evidence.snapshot()[2] or driver.execute_script(DOM_SCRIPT)["challenge_visible"]:
             report["category"] = "access-denial-or-challenge"
             return False
-        link = visible_event_link(driver)
+        link = visible_event_link(driver, production_id, performer_url)
         if link is not None:
             report["performer_time_origin"] = driver.execute_script("return performance.timeOrigin;")
             new_window = link.get_attribute("target") == "_blank"
+            report["selected_event_path"] = urlsplit(urljoin(performer_url, link.get_attribute("href"))).path
             owned_before = set(driver.window_handles)
             evidence.event_click_started_ms = time.time() * 1000
             evidence.phase = "page"
@@ -302,8 +355,8 @@ def navigate_performer(driver, evidence, report, deadline):
                     for handle in windows:
                         driver.switch_to.window(handle)
                         parsed = urlsplit(driver.current_url)
-                        if (parsed.scheme == "https" and parsed.netloc == urlsplit(PERFORMER).netloc
-                                and parsed.path.rstrip("/").endswith("/production/" + PRODUCTION_ID)):
+                        if (parsed.scheme == "https" and parsed.netloc == urlsplit(performer_url).netloc
+                                and parsed.path.rstrip("/").endswith("/production/" + production_id)):
                             report["event_opened_new_window"] = True
                             report["owned_new_window_count"] = len(windows)
                             return True
@@ -338,7 +391,9 @@ def run(args, report):
     options.binary_location, options.enable_bidi = firefox, True
     driver, collector = None, None
     started = time.monotonic()
-    evidence, state = Evidence(), {"needs_clear": False, "actions": []}
+    event_url, performer_url, production_id = validate_target(getattr(args, "event_url", EVENT), getattr(args, "performer_url", PERFORMER), getattr(args, "production_id", PRODUCTION_ID))
+    evidence, state = Evidence(production_id, performer_url), {"needs_clear": False, "actions": []}
+    report["production_id"] = production_id
     navigation = getattr(args, "navigation", "direct")
     report["navigation_mode"] = navigation
     try:
@@ -362,10 +417,10 @@ def run(args, report):
         write_json(args.output, report)
         try:
             if navigation == "performer":
-                if not navigate_performer(driver, evidence, report, min(started + args.timeout - 25, time.monotonic() + 35)):
+                if not navigate_performer(driver, evidence, report, min(started + args.timeout - 25, time.monotonic() + 35), production_id=production_id, performer_url=performer_url):
                     return False
             else:
-                driver.get(EVENT)
+                driver.get(event_url)
         except selenium.common.exceptions.TimeoutException:
             report["navigation_timeout"] = True
         deadline, candidate, stable_since = started + args.timeout, None, time.monotonic()
@@ -379,10 +434,10 @@ def run(args, report):
                 return False
             # The resource-timing buffer can fill before inventory completes.
             # Passive BiDi events retain the actual request URL and body ID.
-            urls = [row["url"] for row in inventory if row["phase"] == "page" and unfiltered_url(row["url"])]
+            urls = [row["url"] for row in inventory if row["phase"] == "page" and unfiltered_url(row["url"], production_id)]
             if not urls:
                 observed = driver.execute_script("return performance.getEntriesByType('resource').map(e => e.name);")
-                urls = [url for url in observed if unfiltered_url(url)]
+                urls = [url for url in observed if unfiltered_url(url, production_id)]
             candidate = urls[-1] if urls else None
             # A completed native whole-market response is sufficient even while
             # a quantity dialog overlays the page. Do not change that UI first.
@@ -395,9 +450,9 @@ def run(args, report):
                     try:
                         payload = decode_bidi_body(network.get_data(data_type="response", collector=collector,
                                                                     request=row["request"], disown=True))
-                        report["observed_request"] = safe_request(candidate)
+                        report["observed_request"] = safe_request(candidate, production_id)
                         report["original_inventory_statuses"] = [item["status"] for item in original]
-                        return save_capture(args, report, payload, "original-response-bidi")
+                        return save_capture(args, report, payload, "original-response-bidi", driver)
                     except Exception as exc:
                         report["bidi_body_read_error_type"] = type(exc).__name__
             if navigation == "performer":
@@ -405,7 +460,7 @@ def run(args, report):
                 # requests. It never changes quantity or replays an HTTP call.
                 if candidate and original and time.monotonic() - stable_since >= 5:
                     report["original_inventory_statuses"] = [item["status"] for item in original]
-                    report["observed_request"] = safe_request(candidate)
+                    report["observed_request"] = safe_request(candidate, production_id)
                     report["category"] = "native-inventory-unavailable"
                     return False
                 time.sleep(0.5)
@@ -427,7 +482,7 @@ def run(args, report):
         if not candidate:
             report["category"] = "no-observed-unfiltered-inventory-url"
             return False
-        report["observed_request"] = safe_request(candidate)
+        report["observed_request"] = safe_request(candidate, production_id)
         rows, inventory, denial = evidence.snapshot()
         report["responses"] = rows
         if denial:
@@ -453,7 +508,7 @@ def run(args, report):
             report["acquisition_method"] = "one-same-origin-fetch-of-observed-url"
             report["follow_up_fetch_attempted"] = True
             write_json(args.output, report)
-            result = driver.execute_async_script(FETCH_SCRIPT, candidate)
+            result = driver.execute_async_script(FETCH_SCRIPT, candidate, production_id)
             report["follow_up_status"] = result.get("status")
             if result.get("error"):
                 report["follow_up_error"] = result["error"]
@@ -461,14 +516,14 @@ def run(args, report):
                 report["category"] = "follow-up-inventory-unavailable"
                 return False
             payload = result["payload"]
-        return save_capture(args, report, payload, report["acquisition_method"])
+        return save_capture(args, report, payload, report["acquisition_method"], driver)
     finally:
         report["responses"] = evidence.snapshot()[0]
         if navigation == "performer":
             report["event_document_response_count"] = sum(row["kind"] == "document" and row["phase"] == "page" for row in report["responses"])
             if driver is not None and report.get("visible_event_link_clicked"):
                 try:
-                    report["event_page_reached"] = urlsplit(driver.current_url).path.rstrip("/").endswith("/production/" + PRODUCTION_ID)
+                    report["event_page_reached"] = urlsplit(driver.current_url).path.rstrip("/").endswith("/production/" + production_id)
                     origin_before = report.pop("performer_time_origin", None)
                     origin_after = driver.execute_script("return performance.timeOrigin;")
                     same_document = (isinstance(origin_before, (int, float)) and isinstance(origin_after, (int, float))
@@ -494,12 +549,22 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--timeout", type=int, default=75, help="Observation bound (30..85 seconds).")
     parser.add_argument("--navigation", choices=("direct", "performer"), default="direct")
+    parser.add_argument("--event-url", default=EVENT)
+    parser.add_argument("--performer-url", default=PERFORMER)
+    parser.add_argument("--production-id", default=PRODUCTION_ID)
+    parser.add_argument("--expected-event-utc")
     parser.add_argument("--output", type=Path, default=Path("firefox_inventory_result.json"))
     parser.add_argument("--inventory-output", type=Path, default=Path("firefox_public_inventory.json"))
     args = parser.parse_args()
     if not 30 <= args.timeout <= 85:
         parser.error("--timeout must be between 30 and 85 seconds")
-    report = {"started_at": datetime.now(timezone.utc).isoformat(), "production_id": PRODUCTION_ID,
+    try:
+        validate_target(args.event_url, args.performer_url, args.production_id)
+        if args.expected_event_utc:
+            utc_stamp(args.expected_event_utc)
+    except (TypeError, ValueError):
+        parser.error("URLs, production ID and explicit UTC date must match a public Vivid target")
+    report = {"started_at": datetime.now(timezone.utc).isoformat(), "production_id": args.production_id,
               "status": "started", "profile": "fresh-diagnostic-owned", "database_calls": 0}
     write_json(args.output, report)
     success = False

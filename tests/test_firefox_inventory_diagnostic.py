@@ -21,6 +21,7 @@ class FakeNetwork:
     def __init__(self, driver, body_supported=True, status=200):
         self.driver, self.body_supported, self.status = driver, body_supported, status
         self.events, self.body_calls = [], []
+        self.payload = PAYLOAD
 
     def add_event_handler(self, name, callback):
         self.events.append(name)
@@ -34,7 +35,7 @@ class FakeNetwork:
 
     def get_data(self, **kwargs):
         self.body_calls.append(kwargs)
-        return {"bytes": {"type": "string", "value": json.dumps(PAYLOAD)}}
+        return {"bytes": {"type": "string", "value": json.dumps(self.payload)}}
 
 
 class FakeDriver:
@@ -51,6 +52,7 @@ class FakeDriver:
         self.window_handles = [self.current_window_handle]
         self.window_urls = {self.current_window_handle: self.current_url}
         self.switch_to = SimpleNamespace(window=self.switch_window)
+        self.metadata = None
 
     def switch_window(self, handle):
         assert handle in self.window_handles
@@ -78,10 +80,12 @@ class FakeDriver:
                     "challenge_visible": False, "quantity_modal_visible": self.modal, "webdriver": True}
         if source == "return performance.timeOrigin;":
             return 123
+        if source == diagnostic.METADATA_SCRIPT:
+            return self.metadata
         # Real Firefox can omit this request after its resource buffer fills.
         return [] if self.modal else [self.inventory_url]
 
-    def execute_async_script(self, source, url):
+    def execute_async_script(self, source, url, production_id=diagnostic.PRODUCTION_ID):
         assert source == diagnostic.FETCH_SCRIPT and url == URL
         self.fetches += 1
         return {"status": 200, "payload": PAYLOAD}
@@ -103,9 +107,9 @@ class Link:
                 if not self.open_window:
                     return
                 self.driver.window_handles.append("new-event-window")
-                self.driver.window_urls["new-event-window"] = self.window_url or diagnostic.EVENT
+                self.driver.window_urls["new-event-window"] = self.window_url or self.href
             else:
-                self.driver.current_url = diagnostic.EVENT
+                self.driver.current_url = self.href
             self.driver.network.callback({"request": {"url": self.driver.inventory_url, "request": "event-request", "method": "GET"},
                                           "response": {"status": self.driver.network.status}})
 
@@ -266,6 +270,35 @@ class FirefoxDiagnosticTests(unittest.TestCase):
                 self.assertEqual(driver.navigations, [diagnostic.PERFORMER, "visible-event-link-click"])
                 self.assertEqual(report["category"], category)
                 self.assertEqual(driver.fetches, 0)
+
+    def test_generalized_identity_and_explicit_urls_do_not_trust_date_slug(self):
+        nfl = "https://www.vividseats.com/saints-3-7-2027/production/6493143"
+        performer = "https://www.vividseats.com/en/saints/performer/597"
+        self.assertEqual(diagnostic.validate_target(nfl, performer, "6493143"), (nfl, performer, "6493143"))
+        native = URL.replace("7302493", "6493143")
+        self.assertTrue(diagnostic.unfiltered_url(native, "6493143"))
+        self.assertFalse(diagnostic.unfiltered_url(native, "7302493"))
+        value = json.loads(json.dumps(PAYLOAD)); value["global"][0]["productionId"] = "6493143"
+        self.assertEqual(diagnostic.sanitize_inventory(value, "6493143")["global"][0]["productionId"], "6493143")
+        with self.assertRaises(ValueError): diagnostic.sanitize_inventory(value, "7302493")
+        for event, feed, pid in ((nfl, performer, "123"), (nfl + "?quantity=2", performer, "6493143"),
+                                  (nfl, performer.replace("www.vividseats.com", "other.example"), "6493143"),
+                                  (nfl, performer, "not-a-number")):
+            with self.assertRaises(ValueError): diagnostic.validate_target(event, feed, pid)
+
+    def test_explicit_utc_metadata_mismatch_cannot_save_full_inventory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            driver = FakeDriver()
+            driver.metadata = {"id": "7302493", "page_id": "7302493", "utc_date": "2026-10-09T23:00:00Z"}
+            args = SimpleNamespace(inventory_output=Path(tmp) / "inventory.json", production_id="7302493", expected_event_utc="2026-10-08T23:00:00Z")
+            report = {}
+            self.assertFalse(diagnostic.save_capture(args, report, PAYLOAD, "original-response-bidi", driver))
+            self.assertFalse(args.inventory_output.exists())
+            self.assertEqual(report["category"], "event-metadata-unavailable-or-mismatch")
+            driver.metadata["utc_date"] = args.expected_event_utc
+            self.assertTrue(diagnostic.save_capture(args, report, PAYLOAD, "original-response-bidi", driver))
+            self.assertTrue(args.inventory_output.exists())
+            self.assertEqual(report["event_date"], "2026-10-08T23:00:00+00:00")
 
 
 if __name__ == "__main__":

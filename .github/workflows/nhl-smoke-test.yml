@@ -3,6 +3,20 @@ name: NHL collector smoke test
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: One target or the fixed four-capture normal-link comparison
+        type: choice
+        options:
+          - single
+          - linkcanary
+        default: single
+      diagnostic_target:
+        description: Single-mode target on a fresh runner
+        type: choice
+        options:
+          - nhl
+          - nfl
+        default: nhl
       navigation:
         description: Normal navigation to the public event
         type: choice
@@ -17,7 +31,7 @@ permissions:
 jobs:
   firefox-inventory-diagnostic:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 11
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
@@ -33,14 +47,34 @@ jobs:
           firefox --version
           geckodriver --version
       - name: Observe one public event in headed Firefox
+        if: inputs.mode != 'linkcanary'
         env:
           DIAGNOSTIC_NAVIGATION: ${{ inputs.navigation || 'direct' }}
+          DIAGNOSTIC_TARGET: ${{ inputs.diagnostic_target || 'nhl' }}
         run: |
+          if [ "$DIAGNOSTIC_TARGET" = "nfl" ]; then
+            event_url='https://www.vividseats.com/new-orleans-saints-tickets-new-orleans-caesars-superdome-3-7-2027/production/6493143'
+            performer_url='https://www.vividseats.com/en/new-orleans-saints-tickets--sports-nfl-football/performer/597'
+            production_id='6493143'
+            expected_event_utc='2026-10-11T17:00:00Z'
+          else
+            event_url='https://www.vividseats.com/boston-bruins-tickets-td-garden-10-8-2026/production/7302493'
+            performer_url='https://www.vividseats.com/boston-bruins-tickets--sports-nhl-hockey/performer/104'
+            production_id='7302493'
+            expected_event_utc='2026-10-08T23:00:00Z'
+          fi
           timeout --signal=TERM --kill-after=10s 120s xvfb-run -a \
             python tools/firefox_inventory_diagnostic.py --timeout 75 \
             --navigation "$DIAGNOSTIC_NAVIGATION" \
+            --event-url "$event_url" --performer-url "$performer_url" \
+            --production-id "$production_id" --expected-event-utc "$expected_event_utc" \
             --output firefox_inventory_result.json \
             --inventory-output firefox_public_inventory.json
+      - name: Compare four normal team-to-event link captures
+        if: inputs.mode == 'linkcanary'
+        run: |
+          timeout --signal=TERM --kill-after=10s 540s xvfb-run -a \
+            python tools/firefox_link_canary.py --directory firefox-link-canary
       - name: Save sanitized diagnostics and public inventory
         if: always()
         uses: actions/upload-artifact@v7
@@ -49,5 +83,6 @@ jobs:
           path: |
             firefox_inventory_result.json
             firefox_public_inventory.json
+            firefox-link-canary/
           if-no-files-found: warn
           retention-days: 14
