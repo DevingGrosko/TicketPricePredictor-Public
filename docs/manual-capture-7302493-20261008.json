@@ -1,0 +1,619 @@
+{
+  "captured_at": "2026-10-08T02:59:13.786678+00:00",
+  "currency": "USD",
+  "event_date": "2026-10-08T23:00:00+00:00",
+  "event_type": "nhl",
+  "schedule": {
+    "canonical_venue": "TD Garden",
+    "country": "US",
+    "venue_timezone": "America/New_York"
+  },
+  "schema_version": 1,
+  "section_count": 60,
+  "sections": [
+    {
+      "alternate_price": "89.00",
+      "displayed_price": "63.00",
+      "listing_count": 21,
+      "price": 63,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "11",
+      "section": "Balcony Level 301"
+    },
+    {
+      "alternate_price": "78.00",
+      "displayed_price": "55.00",
+      "listing_count": 26,
+      "price": 55,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "14",
+      "section": "Balcony Level 302"
+    },
+    {
+      "alternate_price": "64.00",
+      "displayed_price": "44.00",
+      "listing_count": 18,
+      "price": 44,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "13",
+      "section": "Balcony Level 303"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 19,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "13",
+      "section": "Balcony Level 304"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 17,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "15",
+      "section": "Balcony Level 305"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 11,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "10",
+      "section": "Balcony Level 306"
+    },
+    {
+      "alternate_price": "59.00",
+      "displayed_price": "40.95",
+      "listing_count": 10,
+      "price": 41,
+      "price_source": "p",
+      "quantity": "8",
+      "row": "14",
+      "section": "Balcony Level 307"
+    },
+    {
+      "alternate_price": "64.00",
+      "displayed_price": "45.00",
+      "listing_count": 28,
+      "price": 45,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "13",
+      "section": "Balcony Level 308"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 17,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "14",
+      "section": "Balcony Level 309"
+    },
+    {
+      "alternate_price": "63.00",
+      "displayed_price": "44.00",
+      "listing_count": 14,
+      "price": 44,
+      "price_source": "p",
+      "quantity": "8",
+      "row": "13",
+      "section": "Balcony Level 310"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 20,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "8",
+      "row": "14",
+      "section": "Balcony Level 311"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 19,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "14",
+      "section": "Balcony Level 312"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 10,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "14",
+      "section": "Balcony Level 313"
+    },
+    {
+      "alternate_price": "68.00",
+      "displayed_price": "48.00",
+      "listing_count": 6,
+      "price": 48,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "13",
+      "section": "Balcony Level 314"
+    },
+    {
+      "alternate_price": "72.00",
+      "displayed_price": "50.00",
+      "listing_count": 19,
+      "price": 50,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "13",
+      "section": "Balcony Level 315"
+    },
+    {
+      "alternate_price": "71.00",
+      "displayed_price": "50.00",
+      "listing_count": 22,
+      "price": 50,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "13",
+      "section": "Balcony Level 316"
+    },
+    {
+      "alternate_price": "64.00",
+      "displayed_price": "45.00",
+      "listing_count": 17,
+      "price": 45,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "11",
+      "section": "Balcony Level 317"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 11,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "11",
+      "section": "Balcony Level 318"
+    },
+    {
+      "alternate_price": "59.00",
+      "displayed_price": "40.95",
+      "listing_count": 12,
+      "price": 41,
+      "price_source": "p",
+      "quantity": "8",
+      "row": "14",
+      "section": "Balcony Level 319"
+    },
+    {
+      "alternate_price": "127.00",
+      "displayed_price": "90.00",
+      "listing_count": 2,
+      "price": 90,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "7",
+      "section": "Balcony Level 320"
+    },
+    {
+      "alternate_price": "79.00",
+      "displayed_price": "56.00",
+      "listing_count": 5,
+      "price": 56,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "11",
+      "section": "Balcony Level 321"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 8,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "8",
+      "section": "Balcony Level 322"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 10,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "10",
+      "section": "Balcony Level 323"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 9,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "13",
+      "section": "Balcony Level 324"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 9,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "10",
+      "section": "Balcony Level 325"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 4,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "8",
+      "row": "15",
+      "section": "Balcony Level 326"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "42.00",
+      "listing_count": 20,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "8",
+      "row": "13",
+      "section": "Balcony Level 327"
+    },
+    {
+      "alternate_price": "63.00",
+      "displayed_price": "44.00",
+      "listing_count": 19,
+      "price": 44,
+      "price_source": "p",
+      "quantity": "8",
+      "row": "14",
+      "section": "Balcony Level 328"
+    },
+    {
+      "alternate_price": "74.00",
+      "displayed_price": "52.00",
+      "listing_count": 8,
+      "price": 52,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "8",
+      "section": "Balcony Level 329"
+    },
+    {
+      "alternate_price": "83.00",
+      "displayed_price": "59.00",
+      "listing_count": 21,
+      "price": 59,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "11",
+      "section": "Balcony Level 330"
+    },
+    {
+      "alternate_price": "231.00",
+      "displayed_price": "165.00",
+      "listing_count": 1,
+      "price": 165,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "H",
+      "section": "Club Level 111"
+    },
+    {
+      "alternate_price": "224.00",
+      "displayed_price": "160.00",
+      "listing_count": 1,
+      "price": 160,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "H",
+      "section": "Club Level 113"
+    },
+    {
+      "alternate_price": "158.00",
+      "displayed_price": "113.00",
+      "listing_count": 1,
+      "price": 113,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "F",
+      "section": "Club Level 115"
+    },
+    {
+      "alternate_price": "251.00",
+      "displayed_price": "180.00",
+      "listing_count": 1,
+      "price": 180,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "C",
+      "section": "Club Level 139"
+    },
+    {
+      "alternate_price": "224.00",
+      "displayed_price": "160.00",
+      "listing_count": 2,
+      "price": 160,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "C",
+      "section": "Club Level 141"
+    },
+    {
+      "alternate_price": "180.00",
+      "displayed_price": "128.00",
+      "listing_count": 2,
+      "price": 128,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "D",
+      "section": "Club Level 145"
+    },
+    {
+      "alternate_price": "14.00",
+      "displayed_price": "8.00",
+      "listing_count": 2,
+      "price": 8,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "PASS..",
+      "section": "LEGENDS CLUB"
+    },
+    {
+      "alternate_price": "29.00",
+      "displayed_price": "22.00",
+      "listing_count": 1,
+      "price": 22,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "GA",
+      "section": "Legends club pass"
+    },
+    {
+      "alternate_price": "172.00",
+      "displayed_price": "123.00",
+      "listing_count": 20,
+      "price": 123,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "9",
+      "section": "Loge Level 1"
+    },
+    {
+      "alternate_price": "120.00",
+      "displayed_price": "85.00",
+      "listing_count": 32,
+      "price": 85,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "23",
+      "section": "Loge Level 10"
+    },
+    {
+      "alternate_price": "169.00",
+      "displayed_price": "121.00",
+      "listing_count": 30,
+      "price": 121,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "7",
+      "section": "Loge Level 11"
+    },
+    {
+      "alternate_price": "180.00",
+      "displayed_price": "128.00",
+      "listing_count": 30,
+      "price": 128,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "4",
+      "section": "Loge Level 12"
+    },
+    {
+      "alternate_price": "149.00",
+      "displayed_price": "106.00",
+      "listing_count": 26,
+      "price": 106,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "18",
+      "section": "Loge Level 13"
+    },
+    {
+      "alternate_price": "143.00",
+      "displayed_price": "102.00",
+      "listing_count": 16,
+      "price": 102,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "7",
+      "section": "Loge Level 14"
+    },
+    {
+      "alternate_price": "101.00",
+      "displayed_price": "71.00",
+      "listing_count": 19,
+      "price": 71,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "20",
+      "section": "Loge Level 15"
+    },
+    {
+      "alternate_price": "105.00",
+      "displayed_price": "74.00",
+      "listing_count": 16,
+      "price": 74,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "25",
+      "section": "Loge Level 16"
+    },
+    {
+      "alternate_price": "107.00",
+      "displayed_price": "76.00",
+      "listing_count": 18,
+      "price": 76,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "20",
+      "section": "Loge Level 17"
+    },
+    {
+      "alternate_price": "110.00",
+      "displayed_price": "78.00",
+      "listing_count": 33,
+      "price": 78,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "18",
+      "section": "Loge Level 18"
+    },
+    {
+      "alternate_price": "106.00",
+      "displayed_price": "75.00",
+      "listing_count": 22,
+      "price": 75,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "23",
+      "section": "Loge Level 19"
+    },
+    {
+      "alternate_price": "186.00",
+      "displayed_price": "133.00",
+      "listing_count": 9,
+      "price": 133,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "5",
+      "section": "Loge Level 2"
+    },
+    {
+      "alternate_price": "133.00",
+      "displayed_price": "95.00",
+      "listing_count": 27,
+      "price": 95,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "12",
+      "section": "Loge Level 20"
+    },
+    {
+      "alternate_price": "180.00",
+      "displayed_price": "128.00",
+      "listing_count": 27,
+      "price": 128,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "10",
+      "section": "Loge Level 21"
+    },
+    {
+      "alternate_price": "126.00",
+      "displayed_price": "90.00",
+      "listing_count": 39,
+      "price": 90,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "21",
+      "section": "Loge Level 3"
+    },
+    {
+      "alternate_price": "138.00",
+      "displayed_price": "98.00",
+      "listing_count": 20,
+      "price": 98,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "13",
+      "section": "Loge Level 4"
+    },
+    {
+      "alternate_price": "114.00",
+      "displayed_price": "81.00",
+      "listing_count": 9,
+      "price": 81,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "24",
+      "section": "Loge Level 5"
+    },
+    {
+      "alternate_price": "115.00",
+      "displayed_price": "82.00",
+      "listing_count": 37,
+      "price": 82,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "24",
+      "section": "Loge Level 6"
+    },
+    {
+      "alternate_price": "117.00",
+      "displayed_price": "83.00",
+      "listing_count": 27,
+      "price": 83,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "25",
+      "section": "Loge Level 7"
+    },
+    {
+      "alternate_price": "111.00",
+      "displayed_price": "79.00",
+      "listing_count": 16,
+      "price": 79,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "25",
+      "section": "Loge Level 8"
+    },
+    {
+      "alternate_price": "142.00",
+      "displayed_price": "101.00",
+      "listing_count": 20,
+      "price": 101,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "6",
+      "section": "Loge Level 9"
+    },
+    {
+      "alternate_price": "484.00",
+      "displayed_price": "349.00",
+      "listing_count": 1,
+      "price": 349,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "B",
+      "section": "RAFTERS"
+    }
+  ],
+  "source_id": "7302493",
+  "source_url": "https://www.vividseats.com/boston-bruins-tickets-td-garden-10-8-2026/production/7302493",
+  "title": "Utah Mammoth at Boston Bruins",
+  "venue": "TD Garden"
+}

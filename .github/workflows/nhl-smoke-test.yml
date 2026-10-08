@@ -1,150 +1,120 @@
-name: NHL collector smoke test
-
+# Diagnostic-branch draft only. Do not replace the main smoke workflow.
+name: Import one verified NHL observation (manual draft)
 on:
-  pull_request:
-    branches:
-      - main
-    paths:
-      - "nhl_collector.py"
-      - "nhl_schedule_collector.py"
-      - "collector.py"
-      - "nfl_collector.py"
-      - "vivid_inventory.py"
-      - "tests/test_vivid_inventory.py"
-      - "tests/test_nfl_geometry_matching.py"
-      - "nfl_metadata.py"
-      - "Flask_App/nhl_blueprint.py"
-      - "Flask_App/static/js/nhl-map.js"
-      - "Flask_App/templates/nhl_map.html"
-      - "tests/test_nhl_collector.py"
-      - "tests/test_nhl_schedule_collector.py"
-      - "tests/test_nhl_blueprint.py"
-      - ".github/workflows/nhl-smoke-test.yml"
   workflow_dispatch:
     inputs:
-      event_url:
-        description: Optional Vivid Seats NHL event URL
-        required: false
-        default: ""
-
+      destination:
+        description: Verify the saved observation or deliver it to both existing stores
+        type: choice
+        options: [verify_only, both]
+        default: verify_only
 permissions:
   contents: read
-
+env:
+  CAPTURE_SOURCE_REF: 48735f3dd9d70c193e370e8d34cbee9a347f3376
+  SNAPSHOT_SHA256: 5376f1333dd4fbd7881ca79c721cc9a5eb60d4b7dc858a3c4e3fa8864c82dba5
 jobs:
-  capture-nhl:
+  verify:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-python@v6
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
         with:
-          python-version: "3.13"
-          cache: pip
-
-      - name: Install collector dependencies
-        run: python -m pip install "selenium>=4.26.1,<5" "SQLAlchemy>=2,<3"
-
-      - name: Show browser versions
+          path: bridge
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.CAPTURE_SOURCE_REF }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --disable-pip-version-check -r source/requirements-staging.txt
+      - name: Verify the immutable saved observation without database or browser access
         run: |
-          google-chrome --version || chromium --version || true
-          chromedriver --version || true
-
-      - name: Validate the official NHL schedule source
-        run: |
-          python nhl_schedule_collector.py schedule \
-            --horizon-hours 1080 \
-            > nhl_schedule_result.json
-
-      - name: Capture one NHL event in ordinary headed Chrome without writing to production
+          cp bridge/tools/import_shared_snapshot.py source/tools/import_shared_snapshot.py
+          cp bridge/docs/manual-capture-7302493-20261008.json source/import-input.json
+          cd source
+          python -m tools.import_shared_snapshot verify --payload import-input.json --sha256 "$SNAPSHOT_SHA256" --receipt verify-receipt.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: shared-snapshot-verification-${{ github.run_id }}
+          path: source/verify-receipt.json
+          retention-days: 14
+  pythonanywhere:
+    needs: verify
+    if: github.event_name == 'workflow_dispatch' && inputs.destination == 'both'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          path: bridge
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.CAPTURE_SOURCE_REF }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --disable-pip-version-check -r source/requirements-staging.txt
+      - name: Deliver the original observation to the existing PythonAnywhere API
         env:
-          REQUESTED_EVENT_URL: ${{ inputs.event_url }}
+          COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
         run: |
-          xvfb-run --auto-servernum timeout --signal=TERM --kill-after=10s 120s \
-            python nhl_schedule_collector.py smoke "$REQUESTED_EVENT_URL" \
-            --timeout 45 \
-            --output nhl_smoke_result.json
-
-      - name: Validate NHL section prices, currency, and optional geometry
-        run: |
-          python - <<'PY'
-          import json
-          import math
-          from pathlib import Path
-
-          payload = json.loads(
-              Path("nhl_smoke_result.json").read_text(encoding="utf-8")
-          )
-          if payload.get("status") != "success":
-              raise SystemExit(f"NHL smoke status was {payload.get('status')!r}")
-
-          section_count = int(payload.get("section_count") or 0)
-          if section_count < 8:
-              raise SystemExit(f"NHL smoke returned only {section_count} sections")
-
-          listing_count = int(payload.get("inventory_listing_count") or 0)
-          if listing_count < section_count:
-              raise SystemExit("NHL smoke did not retain its complete inventory count")
-          diagnostics = payload.get("capture_diagnostics") or {}
-          if str(diagnostics.get("production_id")) != str(payload.get("source_id")):
-              raise SystemExit("NHL inventory diagnostics do not match the captured event")
-          if not any(row.get("status") == 200 for row in diagnostics.get("responses") or []):
-              raise SystemExit("NHL smoke did not capture a successful inventory response")
-          print(f"Captured {listing_count} unfiltered listings for event {payload['source_id']}.")
-
-          currency = str(payload.get("currency") or "").upper()
-          if len(currency) != 3 or not currency.isalpha():
-              raise SystemExit(f"Invalid NHL currency code: {currency!r}")
-
-          geometry = payload.get("map_geometry") or {}
-          if geometry:
-              mapped = int(geometry.get("mapped_section_count") or 0)
-              known = int(
-                  geometry.get("known_section_count")
-                  or section_count
-                  or 0
-              )
-              ratio = float(geometry.get("coverage_ratio") or 0)
-              shape_count = sum(
-                  len(row.get("shapes") or [])
-                  for row in geometry.get("sections") or []
-              )
-              required = max(4, min(12, math.ceil(known * 0.6)))
-              if (mapped < 1 or mapped > known or shape_count < mapped
-                  or not math.isfinite(ratio) or not 0 <= ratio <= 1
-                  or not math.isclose(ratio, mapped / max(1, known), abs_tol=0.0001)):
-                  raise SystemExit(
-                      "Returned NHL geometry is invalid: "
-                      f"{mapped}/{known} sections ({ratio:.1%}), "
-                      f"{shape_count} shapes"
-                  )
-              if mapped >= required and ratio >= 0.6:
-                  print(
-                      f"Verified {section_count} NHL sections in {currency} and "
-                      f"{mapped}/{known} provider-map sections ({ratio:.1%})."
-                  )
-              else:
-                  print(
-                      f"Verified {section_count} NHL sections in {currency}; "
-                      f"provider geometry is partial ({mapped}/{known}, {ratio:.1%}). "
-                      "The interface will use its rink fallback."
-                  )
-          else:
-              print(
-                  f"Verified {section_count} NHL sections in {currency}; "
-                  "the interface will use its rink fallback until provider "
-                  "geometry is available."
-              )
-          PY
-
-      - name: Upload diagnostic results
+          cp bridge/tools/import_shared_snapshot.py source/tools/import_shared_snapshot.py
+          cp bridge/docs/manual-capture-7302493-20261008.json source/import-input.json
+          cd source
+          python -m tools.import_shared_snapshot pythonanywhere --payload import-input.json --sha256 "$SNAPSHOT_SHA256" --receipt pythonanywhere-receipt.json
+      - uses: actions/upload-artifact@v7
         if: always()
-        uses: actions/upload-artifact@v7
         with:
-          name: nhl-smoke-result-${{ github.run_id }}
-          path: |
-            nhl_schedule_result.json
-            nhl_smoke_result.json
-            nhl_smoke_result.png
+          name: shared-snapshot-pythonanywhere-${{ github.run_id }}
+          path: source/pythonanywhere-receipt.json
+          if-no-files-found: warn
+          retention-days: 14
+  tidb:
+    needs: verify
+    if: github.event_name == 'workflow_dispatch' && inputs.destination == 'both'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    environment: tidb-staging
+    concurrency:
+      group: free-refresh-staging-nhl-writer
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          path: bridge
+          persist-credentials: false
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+        with:
+          ref: ${{ env.CAPTURE_SOURCE_REF }}
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: '3.13'
+      - run: python -m pip install --disable-pip-version-check -r source/requirements-staging.txt
+      - name: Deliver and read back the identical observation in existing TiDB raw tables
+        env:
+          TICKETSIGNAL_STAGING_SITE: '1'
+          TICKETSIGNAL_ENABLE_STAGING_WRITES: '1'
+          TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
+          TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
+          TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
+        run: |
+          cp bridge/tools/import_shared_snapshot.py source/tools/import_shared_snapshot.py
+          cp bridge/docs/manual-capture-7302493-20261008.json source/import-input.json
+          cd source
+          python -m tools.import_shared_snapshot tidb --payload import-input.json --sha256 "$SNAPSHOT_SHA256" --receipt tidb-receipt.json
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: shared-snapshot-tidb-${{ github.run_id }}
+          path: source/tidb-receipt.json
           if-no-files-found: warn
           retention-days: 14
