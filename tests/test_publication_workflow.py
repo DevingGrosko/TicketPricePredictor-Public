@@ -10,7 +10,7 @@ class PublicationWorkflowTests(unittest.TestCase):
 
     def test_reviewed_source_keeps_recurring_triggers_and_pipeline_scope(self):
         text = self.text()
-        self.assertIn('  FREE_SOURCE_REF: e68c46746b50c5c1b529318940085492bcbe3ceb\n', text)
+        self.assertIn('  FREE_SOURCE_REF: c0f940ca1199a81306dfa87249912c6cca9e8991\n', text)
         self.assertIn("    - cron: '17,47 * * * *'", text)
         self.assertIn('    workflows: [Collect ticket prices]', text)
         self.assertIn('  group: ticketsignal-free-publication\n  cancel-in-progress: false', text)

@@ -17,7 +17,7 @@ concurrency:
   group: ticketsignal-free-publication
   cancel-in-progress: false
 env:
-  FREE_SOURCE_REF: e68c46746b50c5c1b529318940085492bcbe3ceb
+  FREE_SOURCE_REF: c0f940ca1199a81306dfa87249912c6cca9e8991
 jobs:
   ready:
     if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/main' && github.event.repository.private == false && (github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)

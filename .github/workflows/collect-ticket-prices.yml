@@ -493,7 +493,7 @@ jobs:
     uses: ./.github/workflows/shared-snapshot-mirror.yml
     with:
       sport: nfl
-      source_ref: e68c46746b50c5c1b529318940085492bcbe3ceb
+      source_ref: c0f940ca1199a81306dfa87249912c6cca9e8991
     secrets:
       TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
       TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
@@ -509,7 +509,7 @@ jobs:
     uses: ./.github/workflows/shared-snapshot-mirror.yml
     with:
       sport: nhl
-      source_ref: e68c46746b50c5c1b529318940085492bcbe3ceb
+      source_ref: c0f940ca1199a81306dfa87249912c6cca9e8991
     secrets:
       TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
       TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
