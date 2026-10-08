@@ -408,9 +408,15 @@ class VividNFLBrowser(VividBrowser):
 
     def __init__(self, headless: bool = False, timeout: int = 25):
         engine = os.environ.get("TICKETSIGNAL_BROWSER_ENGINE", "chrome").strip().casefold() or "chrome"
-        if engine not in {"chrome", "firefox"}:
-            raise ValueError("TICKETSIGNAL_BROWSER_ENGINE must be chrome or firefox")
+        if engine not in {"chrome", "firefox", "webkit"}:
+            raise ValueError("TICKETSIGNAL_BROWSER_ENGINE must be chrome, firefox or webkit")
         self.browser_engine = engine
+        if engine == "webkit":
+            from vivid_webkit import WebKitInventorySession
+
+            self.timeout = timeout
+            self._webkit_session = WebKitInventorySession(self, headless=headless, timeout=timeout)
+            return
         if engine == "firefox":
             from vivid_firefox import FirefoxInventorySession
 
@@ -440,7 +446,7 @@ class VividNFLBrowser(VividBrowser):
         )
 
     def close(self) -> None:
-        session = getattr(self, "_firefox_session", None)
+        session = getattr(self, "_webkit_session", None) or getattr(self, "_firefox_session", None)
         if session is not None:
             session.close()
         else:
@@ -702,7 +708,7 @@ return best;
         return sanitize_map_geometry(raw, known_sections)
 
     def capture(self, url: str, *, reload_page: bool = False) -> tuple[dict[str, Any], datetime]:
-        session = getattr(self, "_firefox_session", None)
+        session = getattr(self, "_webkit_session", None) or getattr(self, "_firefox_session", None)
         if session is not None:
             return session.capture(url, reload_page=reload_page)
         from selenium.common.exceptions import TimeoutException

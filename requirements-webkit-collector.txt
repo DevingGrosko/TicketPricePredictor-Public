@@ -1,0 +1,2 @@
+# Manual opt-in stock WebKit collection; browser installed explicitly in CI.
+playwright==1.63.0

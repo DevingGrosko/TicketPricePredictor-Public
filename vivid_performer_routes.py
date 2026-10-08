@@ -39,12 +39,16 @@ def performer_url(sport, home_team):
 
 def configure_schedule_navigation(browser, sport, game, event_url):
     mode = os.environ.get('TICKETSIGNAL_FIREFOX_NAVIGATION', 'direct').strip().casefold()
+    webkit = getattr(browser, '_webkit_session', None)
+    # WebKit supports only the ordinary public route validated in its canary.
+    if webkit is not None:
+        mode = 'performer'
     if mode == 'direct':
         return
     if mode != 'performer':
         raise ValueError('TICKETSIGNAL_FIREFOX_NAVIGATION must be direct or performer')
-    if getattr(browser, '_firefox_session', None) is None:
-        raise ValueError('Team navigation requires the explicitly selected Firefox engine')
+    if webkit is None and getattr(browser, '_firefox_session', None) is None:
+        raise ValueError('Team navigation requires an explicitly selected Firefox or WebKit engine')
     parsed = urlsplit(event_url)
     match = re.fullmatch(r'/(?:[a-zA-Z0-9_-]+/)*[a-zA-Z0-9_-]+/production/([0-9]+)', parsed.path.rstrip('/'))
     if (parsed.scheme != 'https' or parsed.netloc != 'www.vividseats.com'
@@ -54,7 +58,10 @@ def configure_schedule_navigation(browser, sport, game, event_url):
     if not isinstance(stamp, datetime) or stamp.tzinfo is None or stamp.utcoffset() is None:
         raise ValueError('Team navigation requires an aware official event date')
     production_id = match.group(1)
-    from vivid_firefox import configure_normal_navigation
-    configure_normal_navigation(browser,
-        performer_urls={production_id: performer_url(sport, game.home_team)},
-        expected_event_dates={production_id: stamp.astimezone(timezone.utc)})
+    routes = {production_id: performer_url(sport, game.home_team)}
+    dates = {production_id: stamp.astimezone(timezone.utc)}
+    if webkit is not None:
+        webkit.configure_normal_navigation(routes, dates)
+    else:
+        from vivid_firefox import configure_normal_navigation
+        configure_normal_navigation(browser, performer_urls=routes, expected_event_dates=dates)

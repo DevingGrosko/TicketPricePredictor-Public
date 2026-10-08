@@ -301,8 +301,8 @@ def run_legacy(sport, directory, pending_dir, health_output, *, timeout=45, runn
         return response
     module = nfl if sport == 'nfl' else nhl
     if (os.environ.get('TICKETSIGNAL_FIREFOX_NAVIGATION', 'direct') == 'performer'
-            and os.environ.get('TICKETSIGNAL_BROWSER_ENGINE', 'chrome') != 'firefox'):
-        raise ValueError('Performer navigation is explicitly Firefox-only')
+            and os.environ.get('TICKETSIGNAL_BROWSER_ENGINE', 'chrome') not in {'firefox', 'webkit'}):
+        raise ValueError('Performer navigation requires Firefox or WebKit')
     due_original = module.schedule_games_due
     reused = []
     covered = {(value['schedule_id'], value['capture_slot'], datetime.fromisoformat(value['event_date']))

@@ -27,10 +27,10 @@ on:
         description: Browser for this manual collection; recurring dispatches keep Chrome
         type: choice
         required: false
-        options: [chrome, firefox]
+        options: [chrome, firefox, webkit]
         default: chrome
       browser_navigation:
-        description: Manual Firefox navigation mode; performer requires Firefox
+        description: Firefox navigation mode; WebKit always uses ordinary team links
         type: choice
         required: false
         options: [direct, performer]
@@ -158,6 +158,12 @@ jobs:
         if: steps.cadence.outputs.run == 'true' && inputs.browser_engine == 'firefox'
         run: python -m pip install -r requirements-collector.txt
 
+      - name: Install the opt-in stock WebKit runtime
+        if: steps.cadence.outputs.run == 'true' && inputs.browser_engine == 'webkit' && !inputs.delivery_only
+        run: |
+          python -m pip install -r requirements-webkit-collector.txt
+          python -m playwright install --with-deps webkit
+
       - name: Verify stock Firefox and geckodriver for this manual trial
         if: steps.cadence.outputs.run == 'true' && inputs.browser_engine == 'firefox'
         run: |
@@ -166,11 +172,11 @@ jobs:
           firefox --version
           geckodriver --version
 
-      - name: Validate explicit performer navigation is Firefox-only
+      - name: Validate explicit performer navigation uses a supported engine
         if: inputs.browser_navigation == 'performer'
         env:
           BROWSER_ENGINE: ${{ inputs.browser_engine }}
-        run: python -c 'import os; assert os.environ["BROWSER_ENGINE"] == "firefox"'
+        run: python -c 'import os; assert os.environ["BROWSER_ENGINE"] in {"firefox", "webkit"}'
 
       - name: Restore the optional immutable NFL shared queue
         if: steps.cadence.outputs.run == 'true' && (inputs.shared_capture || inputs.delivery_only)
@@ -309,6 +315,12 @@ jobs:
         if: steps.cadence.outputs.run == 'true' && inputs.browser_engine == 'firefox'
         run: python -m pip install -r requirements-collector.txt
 
+      - name: Install the opt-in stock WebKit runtime
+        if: steps.cadence.outputs.run == 'true' && inputs.browser_engine == 'webkit' && !inputs.delivery_only
+        run: |
+          python -m pip install -r requirements-webkit-collector.txt
+          python -m playwright install --with-deps webkit
+
       - name: Verify stock Firefox and geckodriver for this manual trial
         if: steps.cadence.outputs.run == 'true' && inputs.browser_engine == 'firefox'
         run: |
@@ -317,11 +329,11 @@ jobs:
           firefox --version
           geckodriver --version
 
-      - name: Validate explicit performer navigation is Firefox-only
+      - name: Validate explicit performer navigation uses a supported engine
         if: inputs.browser_navigation == 'performer'
         env:
           BROWSER_ENGINE: ${{ inputs.browser_engine }}
-        run: python -c 'import os; assert os.environ["BROWSER_ENGINE"] == "firefox"'
+        run: python -c 'import os; assert os.environ["BROWSER_ENGINE"] in {"firefox", "webkit"}'
 
       - name: Restore the optional immutable NHL shared queue
         if: steps.cadence.outputs.run == 'true' && (inputs.shared_capture || inputs.delivery_only)
