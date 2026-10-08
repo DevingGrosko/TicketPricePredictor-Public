@@ -43,7 +43,7 @@ class Response:
         self.status = status
         self.request = SimpleNamespace(url=self.url, method=method,
             resource_type='document' if document else 'xhr',
-            timing={'startTime': context.clock.time()*1000+1 if when is None else when}, frame=SimpleNamespace(page=page))
+            timing={'startTime': context.clock.time()*1000+1 if when is None else when}, frame=page.main_frame)
         # SimpleNamespace is unhashable; native Playwright Request objects are hashable.
         self.request = type('Request', (), self.request.__dict__)()
         self.context, self.pid = context, pid
@@ -56,30 +56,49 @@ class Response:
 
 class Link:
     def __init__(self, page): self.page = page
-    def evaluate(self, _script): return self.page.context.popup.url
-    def get_attribute(self, _name): return '_blank'
+    def evaluate(self, _script, **options):
+        if self.page.context.browser.fail_phase == 'performer-link-scan':
+            self.page.context.clock.advance(options['timeout'])
+            raise self.page.context.browser.timeout_error('Private timeout message must not enter diagnostics')
+        return self.page.context.popup.url
+    def get_attribute(self, _name, **_options): return '_blank'
     def is_visible(self): return True
-    def is_enabled(self): return True
-    def click(self):
+    def is_enabled(self, **_options): return True
+    def click(self, **options):
         self.page.context.clicks += 1
+        if self.page.context.browser.fail_phase == 'event-link-click':
+            self.page.context.clock.advance(options['timeout'])
+            raise self.page.context.browser.timeout_error('Private timeout message must not enter diagnostics')
         self.page.context.emit_event()
 
 
 class Page:
     def __init__(self, context, url='about:blank', *, event=False):
         self.context, self.url, self.event = context, url, event
+        self.main_frame = SimpleNamespace(page=self)
         self.reloads = 0
-    def goto(self, url, **_options):
+    def goto(self, url, **options):
         self.url = url
         self.context.navigations.append(url)
         response = Response(self.context, self, self.context.browser.performer_status, document=True)
         self.context.emit(response)
+        if self.context.browser.iframe_status:
+            iframe=Response(self.context,self,self.context.browser.iframe_status,document=True)
+            iframe.request.frame=SimpleNamespace(page=self)
+            self.context.emit(iframe)
         # A same-ID prefetch must not satisfy a later clicked event observation.
         self.context.emit(Response(self.context, self, 200, when=self.context.clock.time()*1000-1))
+        self.context.browser.navigation_options.append(options)
+        self.context.clock.advance(self.context.browser.performer_delay_ms)
+        if (self.context.browser.fail_phase == 'performer-navigation'
+                or self.context.browser.load_stall and options.get('wait_until') == 'load'):
+            self.context.clock.advance(options['timeout']-self.context.browser.performer_delay_ms)
+            raise self.context.browser.timeout_error('Private timeout message must not enter diagnostics')
         return response
     def evaluate(self, script, *_args):
         if script == PUBLIC_PAGE_SCRIPT:
             return {'challenge_visible': self.context.browser.challenge,
+                    'ready_state': self.context.browser.ready_state,
                     'event': (self.context.browser.metadata or metadata(self.context.browser.pid)) if self.event else None}
         return 'public-eval'
     def locator(self, _selector):
@@ -88,9 +107,17 @@ class Page:
         context = self.context
         class Popup:
             def __enter__(self): return SimpleNamespace(value=context.popup)
-            def __exit__(self, *_args): return False
+            def __exit__(self, *_args):
+                if context.browser.fail_phase == 'event-popup':
+                    context.clock.advance(_options['timeout'])
+                    raise context.browser.timeout_error('Private timeout message must not enter diagnostics')
+                return False
         return Popup()
-    def wait_for_load_state(self, *_args): pass
+    def wait_for_load_state(self, *_args, **options):
+        self.context.browser.popup_dom_options.append(options)
+        if self.context.browser.fail_phase == 'event-domcontentloaded':
+            self.context.clock.advance(options['timeout'])
+            raise self.context.browser.timeout_error('Private timeout message must not enter diagnostics')
     def wait_for_timeout(self, milliseconds):
         self.context.clock.advance(milliseconds)
         if self.context.pending_finish and self.context.clock.value >= self.context.browser.delayed_finish_seconds:
@@ -128,6 +155,8 @@ class Context:
     def emit_event(self):
         status = self.browser.statuses.pop(0) if len(self.browser.statuses)>1 else self.browser.statuses[0]
         self.emit(Response(self, self.popup, 200, document=True))
+        if self.browser.fail_phase == 'inventory-wait':
+            return
         if self.browser.unrelated_status:
             self.emit(Response(self, self.popup, self.browser.unrelated_status, pid='999'))
         self.emit(Response(self, self.popup, status, query=self.browser.query))
@@ -143,6 +172,12 @@ class Browser:
         self.body, self.metadata = options.get('body'), options.get('metadata')
         self.query, self.unrelated_status = options.get('query', ''), options.get('unrelated_status')
         self.delayed_finish_seconds, self.late200=options.get('delayed_finish_seconds',0),options.get('late200',False)
+        self.fail_phase = options.get('fail_phase')
+        self.load_stall = options.get('load_stall',False)
+        self.ready_state = options.get('ready_state','interactive')
+        self.performer_delay_ms = options.get('performer_delay_ms',0)
+        self.iframe_status=options.get('iframe_status')
+        self.navigation_options,self.popup_dom_options = [],[]
         self.context = Context(self, clock)
     def new_context(self): return self.context
     def close(self): self.closed = True
@@ -152,6 +187,8 @@ def session(clock, browsers):
     value = WebKitInventorySession.__new__(WebKitInventorySession)
     value.owner = SimpleNamespace(); value.headless=False; value.timeout=8
     value.timeout_error = type('PlaywrightTimeout', (Exception,), {})
+    for browser in browsers:
+        browser.timeout_error=value.timeout_error
     value.playwright = SimpleNamespace(webkit=SimpleNamespace(launch=Mock(side_effect=browsers)), stop=Mock())
     value.runtime = {'engine':'webkit', 'playwright':'1.63.0', 'headed':True}
     value.routes, value.expected_dates = {}, {}
@@ -183,6 +220,61 @@ class WebKitTests(unittest.TestCase):
         self.assertNotIn('_map_geometry',clean)
         self.assertEqual(clean['_map_geometry_diagnostics']['status'],'unavailable')
         adapter.close();self.assertTrue(browser.closed);adapter.playwright.stop.assert_called_once()
+
+    def test_dom_ready_performer_captures_native_inventory_even_when_full_load_would_stall(self):
+        browser=Browser(self.clock,load_stall=True,ready_state='interactive',iframe_status=502)
+        adapter=session(self.clock,[browser])
+        raw,stamp=adapter.capture(URL)
+        self.assertEqual(stamp,AT);self.assertEqual(len(raw['tickets']),12)
+        self.assertEqual(browser.navigation_options,[dict(wait_until='domcontentloaded',timeout=8000)])
+        self.assertEqual(browser.context.clicks,1);self.assertEqual(browser.context.body_reads,['123'])
+        diagnostic=adapter.owner.capture_diagnostics
+        self.assertEqual(diagnostic['performer_document_status'],200)  # The iframe502 cannot replace it.
+        self.assertTrue(diagnostic['performer_domcontentloaded'])
+        self.assertEqual(diagnostic['performer_ready_state_at_click'],'interactive')
+        self.assertEqual(diagnostic['phase'],'complete')
+        self.assertIn('event-identity',diagnostic['phase_times_ms'])
+        adapter.close();self.assertTrue(browser.closed)
+
+    def test_timeout_phase_is_retained_without_private_error_text_and_owned_resources_close(self):
+        for phase in ('performer-navigation','performer-link-scan','event-link-click',
+                      'event-popup','event-domcontentloaded','inventory-wait'):
+            with self.subTest(phase=phase):
+                clock=Clock()
+                with patch('vivid_webkit.time.monotonic',clock.monotonic),patch('vivid_webkit.time.time',clock.time):
+                    browser=Browser(clock,fail_phase=phase);adapter=session(clock,[browser])
+                    with self.assertRaises(VividCaptureError) as error:adapter.capture(URL)
+                    self.assertEqual(error.exception.category,'provider-inventory-timeout')
+                    diagnostic=adapter.owner.capture_diagnostics
+                    self.assertEqual(diagnostic['timeout_phase'],phase)
+                    self.assertEqual(diagnostic['phase'],phase)
+                    self.assertLessEqual(diagnostic['capture_elapsed_ms'],8000)
+                    self.assertNotIn('Private',json.dumps(diagnostic))
+                    self.assertLessEqual(len(diagnostic['phase_times_ms']),10)
+                    self.assertTrue(browser.closed);self.assertEqual(browser.context.body_reads,[])
+                    self.assertEqual(set(browser.context.removed),{'response','requestfinished'})
+                    adapter.close()
+
+    def test_popup_dom_wait_uses_only_remaining_budget_after_a_slow_performer(self):
+        browser=Browser(self.clock,performer_delay_ms=7500,fail_phase='event-domcontentloaded')
+        adapter=session(self.clock,[browser])
+        with self.assertRaises(VividCaptureError):adapter.capture(URL)
+        self.assertEqual(browser.popup_dom_options,[dict(timeout=500)])
+        self.assertEqual(adapter.owner.capture_diagnostics['capture_elapsed_ms'],8000)
+        self.assertEqual(adapter.owner.capture_diagnostics['timeout_phase'],'event-domcontentloaded')
+        self.assertTrue(browser.closed);adapter.close()
+
+    def test_response_denial_remains_authoritative_when_performer_navigation_also_times_out(self):
+        for status in (401,403,429):
+            with self.subTest(status=status),patch('vivid_webkit._blocked_category',None):
+                browser=Browser(self.clock,performer_status=status,fail_phase='performer-navigation')
+                adapter=session(self.clock,[browser])
+                with self.assertRaises(VividCaptureError) as error:adapter.capture(URL)
+                expected='provider-rate-limited' if status==429 else 'provider-access-denied'
+                self.assertEqual(error.exception.category,expected);self.assertFalse(error.exception.retryable)
+                self.assertEqual(adapter.owner.capture_diagnostics['performer_document_status'],status)
+                self.assertEqual(browser.context.clicks,0);self.assertEqual(browser.context.body_reads,[])
+                self.assertTrue(browser.closed);adapter.close()
 
     def test_each_normal_capture_uses_fresh_owned_process_even_same_game(self):
         browsers=[Browser(self.clock),Browser(self.clock)];adapter=session(self.clock,browsers)
