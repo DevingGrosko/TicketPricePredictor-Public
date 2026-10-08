@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from nfl_collector import VividNFLBrowser
-from nfl_metadata import extract_map_geometry_from_svg, match_section_name
+from nfl_metadata import extract_map_geometry_from_json, extract_map_geometry_from_svg, match_section_name
 
 
 CASES = (
@@ -25,6 +25,38 @@ CASES = (
 
 
 class GeometryMatchingTests(unittest.TestCase):
+    def test_listing_only_json_skips_expensive_label_matching(self):
+        payload = {"global": [{"productionName": "Home at Away", "viewBox": "0 0 100 100"}],
+                   "tickets": [{"sectionName": str(i), "l": str(i), "p": "25", "q": "2"}
+                               for i in range(2000)]}
+        with patch('nfl_metadata.match_section_name', side_effect=AssertionError('No shapes to match')):
+            self.assertIsNone(extract_map_geometry_from_json(payload, [str(i) for i in range(200)]))
+
+    def test_shape_preflight_preserves_nested_inherited_path_polygon_and_rectangle(self):
+        shapes = ({'SVG_Path':'M0 0 L10 0 L10 10 Z'},
+                  {'Polygon':[[0,0],[10,0],[10,10],[0,10]]},
+                  {'x':0,'y':0,'width':10,'height':10})
+        for shape in shapes:
+            with self.subTest(shape=shape):
+                payload = {'viewBox':'0 0 100 100','nested':{'sectionName':'Section101','child':[shape]}}
+                geometry=extract_map_geometry_from_json(payload,['Section101'])
+                self.assertIsNotNone(geometry)
+                self.assertEqual([row['name'] for row in geometry['sections']],['Section101'])
+                self.assertTrue(geometry['sections'][0]['shapes'][0]['path'])
+        keyed={'viewBox':'0 0 100 100','map':{'Section101':{'pathData':'M0 0 L10 0 L10 10 Z'}}}
+        geometry=extract_map_geometry_from_json(keyed,['Section101'])
+        self.assertEqual([row['name'] for row in geometry['sections']],['Section101'])
+
+    def test_invalid_or_out_of_bounds_shapes_do_not_trigger_matching(self):
+        deep={'sectionName':'Section101','d':'M0 0 L10 0 L10 10 Z'}
+        for _ in range(13):deep={'nested':deep}
+        invalid = ({'name':'Section101','path':'not-an-svg-path'},
+                   {'name':'Section101','points':[[0,0]]},
+                   {'name':'Section101','width':0,'height':10},deep)
+        for payload in invalid:
+            with self.subTest(payload=payload),patch('nfl_metadata.match_section_name',side_effect=AssertionError('No supported shape')):
+                self.assertIsNone(extract_map_geometry_from_json(payload,['Section101']))
+
     def test_numeric_labels_do_not_match_suite_letter_codes_or_ui_hashes(self):
         for hint, known, expected in CASES:
             with self.subTest(hint=hint, known=known):

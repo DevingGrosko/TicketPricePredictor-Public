@@ -432,6 +432,34 @@ def extract_map_geometry_from_json(
     strings, rectangles, and polygon-like point arrays. Everything else is
     ignored.
     """
+    # Most inventory JSON contains prices and labels but no section shapes.
+    # Reject that case before repeatedly matching thousands of ticket fields
+    # against every known section. Use the walk's same depth/node bounds and
+    # actual shape sanitizers so nested supported geometry is preserved.
+    checked = 0
+
+    def has_shape(value: Any, depth: int = 0) -> bool:
+        nonlocal checked
+        if depth > 12 or checked > 20_000:
+            return False
+        checked += 1
+        if isinstance(value, dict):
+            for key, child in value.items():
+                normalized = _normalized_key(key)
+                if normalized in _PATH_KEYS and sanitize_svg_path(child):
+                    return True
+                if normalized in _POINTS_KEYS and _points_to_path(child):
+                    return True
+            if {"width", "height"}.issubset(value) and _rect_to_path(value):
+                return True
+            return any(has_shape(child, depth + 1) for child in value.values())
+        if isinstance(value, list):
+            return any(has_shape(child, depth + 1) for child in value)
+        return False
+
+    if not has_shape(payload):
+        return None
+
     known = list(known_sections)
     sections: list[dict[str, Any]] = []
     view_boxes: list[list[float]] = []
