@@ -17,7 +17,7 @@ concurrency:
   group: ticketsignal-free-publication
   cancel-in-progress: false
 env:
-  FREE_SOURCE_REF: 48735f3dd9d70c193e370e8d34cbee9a347f3376
+  FREE_SOURCE_REF: 34c0bae5639b1b34f4b56b152f52d79e229516fd
 jobs:
   ready:
     if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/main' && github.event.repository.private == false && (github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)
@@ -123,7 +123,7 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     permissions:
       contents: read
       pages: write
@@ -145,13 +145,23 @@ jobs:
         with:
           python-version: '3.13'
       - name: Verify exact published version and per-sport freshness
+        id: verification
         env:
           EXPECTED_GENERATED_AT: ${{ needs.build.outputs.generated_at }}
+          FREE_LIVE_VERIFICATION_REPORT: publication-verification.json
         run: |
           python -m pip install --disable-pip-version-check -r requirements-staging.txt
           python -u -m tools.free_live_verify
-      - name: Remove this run's temporary public artifact
+      - name: Save bounded public-version verification evidence
         if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: ticketsignal-free-publication-verification
+          path: publication-verification.json
+          retention-days: 1
+          if-no-files-found: ignore
+      - name: Remove this run's temporary public artifact
+        if: always() && steps.verification.outputs.version_verified == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           ARTIFACT_ID: ${{ needs.build.outputs.artifact_id }}
