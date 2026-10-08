@@ -37,12 +37,14 @@ class FakeNetwork:
 
 
 class FakeDriver:
-    def __init__(self, body_supported=True, status=200):
+    def __init__(self, body_supported=True, status=200, modal=False, filtered=False):
         self.command_executor = SimpleNamespace(_client_config=SimpleNamespace(timeout=None))
         self.capabilities = {"browserVersion": "1", "moz:geckodriverVersion": "2"}
         self.current_window_handle = "local-test-window"
         self.network = FakeNetwork(self, body_supported, status)
         self.fetches, self.navigations = 0, []
+        self.modal = modal
+        self.inventory_url = URL + "&quantity=2" if filtered else URL
 
     def set_page_load_timeout(self, value): pass
     def set_script_timeout(self, value): pass
@@ -51,7 +53,7 @@ class FakeDriver:
 
     def get(self, url):
         self.navigations.append(url)
-        self.network.callback({"request": {"url": URL, "request": "transient-request", "method": "GET",
+        self.network.callback({"request": {"url": self.inventory_url, "request": "transient-request", "method": "GET",
                                           "headers": [{"name": "Cookie", "value": "PRIVATE-COOKIE"},
                                                       {"name": "if-none-match", "value": "PRIVATE-ETAG"}]},
                                "response": {"status": self.network.status, "protocol": "h3", "fromCache": False,
@@ -60,8 +62,8 @@ class FakeDriver:
     def execute_script(self, source):
         if source == diagnostic.DOM_SCRIPT:
             return {"ready_state": "complete", "listing_count": 1, "inventory_error": False,
-                    "challenge_visible": False, "quantity_modal_visible": False, "webdriver": True}
-        return [URL]
+                    "challenge_visible": False, "quantity_modal_visible": self.modal, "webdriver": True}
+        return [self.inventory_url]
 
     def execute_async_script(self, source, url):
         assert source == diagnostic.FETCH_SCRIPT and url == URL
@@ -110,9 +112,11 @@ class FirefoxDiagnosticTests(unittest.TestCase):
     def test_original_body_then_single_observed_url_fallback(self):
         import selenium.webdriver
         import selenium.webdriver.firefox.service
-        for supported, status in ((True, 200), (False, 404), (True, 403)):
-            with self.subTest(supported=supported, status=status), tempfile.TemporaryDirectory() as tmp:
-                driver = FakeDriver(supported, status)
+        for supported, status, modal, filtered in ((True, 200, False, False), (False, 404, False, False),
+                                                   (True, 403, False, False), (True, 200, True, False),
+                                                   (True, 200, True, True)):
+            with self.subTest(supported=supported, status=status, modal=modal, filtered=filtered), tempfile.TemporaryDirectory() as tmp:
+                driver = FakeDriver(supported, status, modal, filtered)
                 args = SimpleNamespace(output=Path(tmp) / "result.json", inventory_output=Path(tmp) / "inventory.json", timeout=75)
                 report = {}
                 clock = [0]
@@ -123,6 +127,7 @@ class FirefoxDiagnosticTests(unittest.TestCase):
                      patch.object(selenium.webdriver.firefox.service, "Service", return_value=object()), \
                      patch.object(diagnostic.shutil, "which", side_effect=lambda value: "/installed/" + value), \
                      patch.object(diagnostic, "binary_version", return_value="test1"), \
+                     patch.object(diagnostic, "prepare_quantity", wraps=diagnostic.prepare_quantity) as controls, \
                      patch.object(diagnostic.time, "monotonic", side_effect=tick), \
                      patch.object(diagnostic.time, "sleep"):
                     success = diagnostic.run(args, report)
@@ -132,7 +137,7 @@ class FirefoxDiagnosticTests(unittest.TestCase):
                 self.assertEqual(launch.call_args.kwargs["options"].arguments, [])
                 self.assertNotIn("PRIVATE", args.output.read_text())
                 self.assertTrue(report["browser_closed"])
-                if status == 403:
+                if status == 403 or filtered:
                     self.assertFalse(success)
                     self.assertEqual(driver.fetches, 0)
                     self.assertFalse(args.inventory_output.exists())
@@ -141,6 +146,10 @@ class FirefoxDiagnosticTests(unittest.TestCase):
                     self.assertEqual(driver.fetches, 0 if supported else 1)
                     self.assertNotIn("PRIVATE", args.inventory_output.read_text())
                     self.assertEqual(report["original_inventory_statuses"], [status])
+                    if supported:
+                        controls.assert_not_called()
+                        self.assertEqual(report["acquisition_method"], "original-response-bidi")
+                        self.assertEqual(report["quantity_actions"], [])
 
     def test_bidi_string_and_base64_body(self):
         raw = json.dumps(PAYLOAD)

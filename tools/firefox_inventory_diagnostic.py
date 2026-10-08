@@ -238,6 +238,16 @@ def write_json(path, value):
     path.write_text(json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
 
 
+def save_capture(args, report, payload, method):
+    clean = sanitize_inventory(payload)
+    write_json(args.inventory_output, clean)
+    report["acquisition_method"] = method
+    report["captured_listing_count"] = len(clean["tickets"])
+    report["captured_section_count"] = len({row["l"] for row in clean["tickets"]})
+    report["category"] = "captured-full-observed-unfiltered-inventory"
+    return True
+
+
 def binary_version(binary):
     result = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=5, check=True)
     line = result.stdout.splitlines()[0]
@@ -284,6 +294,7 @@ def run(args, report):
         except selenium.common.exceptions.TimeoutException:
             report["navigation_timeout"] = True
         deadline, candidate, stable_since = started + args.timeout, None, time.monotonic()
+        body_attempts = set()
         while time.monotonic() < deadline - 20:
             report["dom"] = driver.execute_script(DOM_SCRIPT)
             rows, inventory, denial = evidence.snapshot()
@@ -291,13 +302,29 @@ def run(args, report):
             if denial or report["dom"]["challenge_visible"]:
                 report["category"] = "access-denial-or-challenge"
                 return False
+            observed = driver.execute_script("return performance.getEntriesByType('resource').map(e => e.name);")
+            urls = [url for url in observed if unfiltered_url(url)]
+            candidate = urls[-1] if urls else None
+            # A completed native whole-market response is sufficient even while
+            # a quantity dialog overlays the page. Do not change that UI first.
+            original = [row for row in inventory if row["url"] == candidate and row["phase"] == "page"]
+            if collector and candidate:
+                for row in reversed(original):
+                    if row["status"] != 200 or not row["request"] or row["request"] in body_attempts:
+                        continue
+                    body_attempts.add(row["request"])
+                    try:
+                        payload = decode_bidi_body(network.get_data(data_type="response", collector=collector,
+                                                                    request=row["request"], disown=True))
+                        report["observed_request"] = safe_request(candidate)
+                        report["original_inventory_statuses"] = [item["status"] for item in original]
+                        return save_capture(args, report, payload, "original-response-bidi")
+                    except Exception as exc:
+                        report["bidi_body_read_error_type"] = type(exc).__name__
             before = len(state["actions"])
             prepare_quantity(driver, state)
             if len(state["actions"]) != before:
                 stable_since = time.monotonic()
-            observed = driver.execute_script("return performance.getEntriesByType('resource').map(e => e.name);")
-            urls = [url for url in observed if unfiltered_url(url)]
-            candidate = urls[-1] if urls else None
             if candidate and not state["needs_clear"] and not report["dom"]["quantity_modal_visible"] and time.monotonic() - stable_since >= 5:
                 break
             time.sleep(0.5)
@@ -319,8 +346,9 @@ def run(args, report):
         report["original_inventory_statuses"] = [row["status"] for row in original]
         if collector:
             for row in reversed(original):
-                if row["status"] != 200 or not row["request"]:
+                if row["status"] != 200 or not row["request"] or row["request"] in body_attempts:
                     continue
+                body_attempts.add(row["request"])
                 try:
                     payload = decode_bidi_body(network.get_data(data_type="response", collector=collector,
                                                                 request=row["request"], disown=True))
@@ -341,12 +369,7 @@ def run(args, report):
                 report["category"] = "follow-up-inventory-unavailable"
                 return False
             payload = result["payload"]
-        clean = sanitize_inventory(payload)
-        write_json(args.inventory_output, clean)
-        report["captured_listing_count"] = len(clean["tickets"])
-        report["captured_section_count"] = len({row["l"] for row in clean["tickets"]})
-        report["category"] = "captured-full-observed-unfiltered-inventory"
-        return True
+        return save_capture(args, report, payload, report["acquisition_method"])
     finally:
         report["responses"] = evidence.snapshot()[0]
         report["quantity_actions"] = state["actions"]
