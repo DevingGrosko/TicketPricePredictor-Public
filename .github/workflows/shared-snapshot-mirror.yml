@@ -55,7 +55,7 @@ jobs:
           path: free-capture/${{ inputs.sport }}
           key: ticketsignal-free-v1-state-${{ inputs.sport }}-shared-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: ticketsignal-free-v1-state-${{ inputs.sport }}-
-      - name: Download this sport's current public observations
+      - name: Download this sport's validated public export including empty checkpoints
         id: download
         continue-on-error: true
         uses: actions/download-artifact@v7

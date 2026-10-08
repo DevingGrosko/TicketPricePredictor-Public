@@ -262,14 +262,19 @@ jobs:
           path: shared-capture/nfl
           key: shared-capture-v1-nfl-capture-${{ github.run_id }}-${{ github.run_attempt }}
 
-      - name: Export only public NFL shared observations and acknowledgments
+      - name: Prepare a public NFL export including an explicit empty checkpoint
+        id: shared-export
         if: always() && steps.shared-budget.outcome == 'success'
+        run: python -m tools.shared_capture export --sport nfl --directory shared-capture/nfl --output shared-export/nfl
+
+      - name: Export only public NFL shared observations and acknowledgments
+        if: always() && steps.shared-export.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
           name: shared-observations-nfl-${{ github.run_id }}
           overwrite: true
-          path: shared-capture/nfl/*.json
-          if-no-files-found: warn
+          path: shared-export/nfl/
+          if-no-files-found: error
           retention-days: 7
 
       - name: Bound pending NFL delivery files without discarding them
@@ -452,14 +457,19 @@ jobs:
           path: shared-capture/nhl
           key: shared-capture-v1-nhl-capture-${{ github.run_id }}-${{ github.run_attempt }}
 
-      - name: Export only public NHL shared observations and acknowledgments
+      - name: Prepare a public NHL export including an explicit empty checkpoint
+        id: shared-export
         if: always() && steps.shared-budget.outcome == 'success'
+        run: python -m tools.shared_capture export --sport nhl --directory shared-capture/nhl --output shared-export/nhl
+
+      - name: Export only public NHL shared observations and acknowledgments
+        if: always() && steps.shared-export.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
           name: shared-observations-nhl-${{ github.run_id }}
           overwrite: true
-          path: shared-capture/nhl/*.json
-          if-no-files-found: warn
+          path: shared-export/nhl/
+          if-no-files-found: error
           retention-days: 7
 
       - name: Bound pending NHL delivery files without discarding them

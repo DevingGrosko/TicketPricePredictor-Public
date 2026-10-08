@@ -25,6 +25,7 @@ SPORTS = ('nfl', 'nhl')
 DESTINATIONS = ('pythonanywhere', 'tidb')
 LIMIT = 20 * 1024**2
 FILE_LIMIT = 4 * 1024**2 + 8192
+EXPORT_MANIFEST = 'observations.manifest'
 FIELDS = {'schema_version', 'captured_at', 'event_date', 'source_url', 'source_id',
           'title', 'venue', 'section_count', 'sections', 'event_type', 'currency', 'schedule', 'map_geometry'}
 PRIVATE = re.compile(r'password|secret|token|authorization|cookie|headers|api.?key', re.I)
@@ -221,6 +222,74 @@ class MirrorQueue:
                 path.unlink()
 
 
+def _export_manifest(sport, count, digest):
+    return (f'shared-observations-v1\nsport={sport}\nrecords={count}\nsha256={digest}\n').encode()
+
+
+def _export_digest(digest, name, data):
+    digest.update(f'{name}\0{hashlib.sha256(data).hexdigest()}\n'.encode())
+
+
+def export_observations(sport, directory, output):
+    """Export validated root records, including an explicit empty checkpoint."""
+    mirror = MirrorQueue(directory, sport)
+    output = Path(output)
+    if (output.is_symlink() or output.resolve() == mirror.root.resolve()
+            or output.resolve().is_relative_to(mirror.root.resolve())):
+        raise ValueError('Shared export must be separate from durable capture state')
+    if output.exists() and (not output.is_dir() or any(output.iterdir())):
+        raise ValueError('Shared export requires a fresh empty directory')
+    rows, total, digest = [], 0, hashlib.sha256()
+    for path in sorted(mirror.root.glob('*.json')):
+        data = encoded(mirror.read(path))
+        total += len(data)
+        if total + 256 > LIMIT:
+            raise ValueError('Shared export exceeds its public byte budget')
+        rows.append((path.name, data))
+        _export_digest(digest, path.name, data)
+    manifest = _export_manifest(sport, len(rows), digest.hexdigest())
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=output.parent, prefix='.shared-export-') as temp:
+        staging = Path(temp) / 'records'; staging.mkdir()
+        for name, data in rows:
+            (staging / name).write_bytes(data)
+        (staging / EXPORT_MANIFEST).write_bytes(manifest)
+        if output.exists():
+            output.rmdir()  # Only the verified empty output directory is removed.
+        staging.replace(output)
+    return dict(sport=sport, records=len(rows), bytes=total + len(manifest))
+
+
+def validate_export(sport, directory):
+    """A missing artifact is different from a verified zero-record export."""
+    root = Path(directory)
+    if root.is_symlink() or not root.is_dir():
+        raise ValueError('Missing shared observation export')
+    manifest = root / EXPORT_MANIFEST
+    if manifest.is_symlink() or not manifest.is_file() or manifest.stat().st_size > 256:
+        raise ValueError('Missing or invalid shared observation manifest')
+    data = manifest.read_bytes()
+    match = re.fullmatch(rb'shared-observations-v1\nsport=(nfl|nhl)\nrecords=([0-9]+)\nsha256=([0-9a-f]{64})\n', data)
+    if not match or match[1].decode() != sport:
+        raise ValueError('Wrong shared observation export format or sport')
+    mirror = MirrorQueue(root, sport)
+    total, count, digest = len(data), 0, hashlib.sha256()
+    for path in sorted(root.iterdir()):
+        if path.name == EXPORT_MANIFEST:
+            continue
+        if path.suffix != '.json' or path.is_symlink() or not path.is_file():
+            raise ValueError('Shared export contains unexpected state')
+        total += path.stat().st_size
+        if total > LIMIT:
+            raise ValueError('Shared export exceeds its public byte budget')
+        mirror.read(path)
+        _export_digest(digest, path.name, path.read_bytes())
+        count += 1
+    if count != int(match[2]) or digest.hexdigest() != match[3].decode():
+        raise ValueError('Shared observation export is incomplete or changed')
+    return dict(sport=sport, records=count, bytes=total)
+
+
 def saved_observations(manifest_path, expected_sha256, sport):
     project = Path(__file__).resolve().parents[1]
     def read(relative, digest):
@@ -350,10 +419,17 @@ def run_legacy(sport, directory, pending_dir, health_output, *, timeout=45, runn
 
 def deliver_tidb(sport, directory, incoming, *, sender=None, legacy_free_state=None):
     mirror = MirrorQueue(directory, sport)
-    mirror.merge(incoming)
+    errors = []
+    try:
+        validate_export(sport, incoming)
+    except Exception as exc:
+        # A missing/bad current artifact is a real failure, while previously
+        # validated cached observations may still finish independent delivery.
+        errors.append('incoming-export-' + type(exc).__name__)
+    else:
+        mirror.merge(incoming)
     if sender is None:
         from tools.import_shared_snapshot import deliver_tidb as sender
-    errors = []
     for _path, value in mirror.pending('tidb'):
         try:
             response = sender(value['payload'])
@@ -378,12 +454,13 @@ def deliver_tidb(sport, directory, incoming, *, sender=None, legacy_free_state=N
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('collect', 'deliver'))
+    parser.add_argument('command', choices=('collect', 'deliver', 'export'))
     parser.add_argument('--sport', choices=SPORTS, required=True)
     parser.add_argument('--directory', required=True)
     parser.add_argument('--pending-dir')
     parser.add_argument('--health-output')
     parser.add_argument('--incoming')
+    parser.add_argument('--output')
     parser.add_argument('--timeout', type=int, default=45)
     parser.add_argument('--acknowledgments')
     parser.add_argument('--legacy-free-state')
@@ -391,6 +468,12 @@ def main():
     parser.add_argument('--manifest-sha256')
     args = parser.parse_args()
     try:
+        if args.command == 'export':
+            if not args.output:
+                parser.error('export requires output')
+            report = export_observations(args.sport, args.directory, args.output)
+            print('SHARED_EXPORT_REPORT ' + json.dumps(report), flush=True)
+            return 0
         if args.command == 'collect':
             if not args.pending_dir or not args.health_output:
                 parser.error('collect requires pending-dir and health-output')
