@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import AsyncMock, patch
 
-from tools.webkit_inventory_diagnostic import Responses, TARGETS, event_url_matches, run_targets, validated_public_capture
+from tools.webkit_inventory_diagnostic import FOUR_TARGETS, Responses, TARGETS, event_url_matches, run_targets, validated_public_capture
 
 
 def payload():
@@ -71,10 +71,57 @@ class CaptureTests(unittest.TestCase):
                 patch("tools.webkit_inventory_diagnostic.observe_target", side_effect=failure) as capture:
             result = asyncio.run(run_targets(None, directory))
         self.assertEqual(capture.call_count, 2)
+        self.assertEqual(result["target_count"], 2)
+        self.assertFalse(result["fixed_four_events"])
         self.assertEqual(result["status"], "completed")
         self.assertFalse(result["all_captured"])
         self.assertEqual(result["tooling_errors"], 0)
         self.assertEqual([r["category"] for r in result["observations"]], ["provider-inventory-not-found"] * 2)
+
+    def test_fixed_four_cohort_uses_observed_home_links_and_exact_aware_official_dates(self):
+        from tools.firefox_inventory_diagnostic import utc_stamp, validate_target
+        self.assertEqual([target["production_id"] for target in FOUR_TARGETS],
+                         ["7302493", "6489565", "7300510", "6493143"])
+        self.assertEqual([target["performer_url"].rsplit("/", 1)[1] for target in FOUR_TARGETS],
+                         ["104", "214", "129", "597"])
+        self.assertEqual([target["expected_event_utc"] for target in FOUR_TARGETS],
+                         ["2026-10-08T23:00:00Z", "2026-10-09T00:15:00Z",
+                          "2026-10-08T23:00:00Z", "2026-10-11T17:00:00Z"])
+        for target in FOUR_TARGETS:
+            validate_target(target["event_url"], target["performer_url"], target["production_id"])
+            self.assertIsNotNone(utc_stamp(target["expected_event_utc"]).tzinfo)
+
+    def test_four_event_mode_observes_each_fixed_target_once_and_reports_partial_without_retry(self):
+        seen = []
+        async def observation(_playwright, target, report, _path):
+            seen.append(target["production_id"])
+            report.update(phase="event", browser_closed=True)
+            if target["production_id"] == "6489565":
+                report["responses"] = [{"kind": "inventory", "phase": "event", "status": 404}]
+                raise asyncio.TimeoutError()
+            report["status"] = "captured"
+        with tempfile.TemporaryDirectory() as directory, patch("tools.webkit_inventory_diagnostic.version", return_value="1.63.0"), \
+                patch("tools.webkit_inventory_diagnostic.observe_target", side_effect=observation):
+            result = asyncio.run(run_targets(None, directory, four_events=True))
+        self.assertEqual(seen, ["7302493", "6489565", "7300510", "6493143"])
+        self.assertEqual(result["target_count"], 4)
+        self.assertTrue(result["fixed_four_events"])
+        self.assertFalse(result["all_captured"])
+        self.assertEqual(result["tooling_errors"], 0)
+        self.assertEqual(result["observations"][1]["category"], "provider-inventory-not-found")
+        self.assertEqual(result["observations"][2]["status"], "captured")
+
+    def test_four_event_mode_stops_all_remaining_targets_after_denial(self):
+        from tools.webkit_inventory_diagnostic import DiagnosticOutcome
+        async def denied(_playwright, _target, report, _path):
+            report["browser_closed"] = True
+            raise DiagnosticOutcome("access-denial-or-challenge")
+        with tempfile.TemporaryDirectory() as directory, patch("tools.webkit_inventory_diagnostic.version", return_value="1.63.0"), \
+                patch("tools.webkit_inventory_diagnostic.observe_target", side_effect=denied) as capture:
+            result = asyncio.run(run_targets(None, directory, four_events=True))
+        self.assertEqual(capture.call_count, 1)
+        self.assertEqual([row["status"] for row in result["observations"]], ["failed", "skipped", "skipped", "skipped"])
+        self.assertEqual([row["category"] for row in result["observations"][1:]], ["stopped-after-access-denial"] * 3)
 
     def test_validation_crash_fails_tooling_and_stops_second_navigation_without_raw_error(self):
         with tempfile.TemporaryDirectory() as directory, patch("tools.webkit_inventory_diagnostic.version", return_value="1.63.0"), \

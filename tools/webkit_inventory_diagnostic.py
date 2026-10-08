@@ -1,4 +1,4 @@
-"""Two bounded stock headed WebKit observations; no ingestion or request replay.
+"""Two or four fixed stock headed WebKit observations; no ingestion or request replay.
 
 Each target uses its own fresh browser process. Only the native response body
 from an exact matching, unfiltered GET200 inventory request is read or saved.
@@ -24,6 +24,21 @@ else:
     from firefox_link_canary import NHL, NFL
 
 TARGETS = (NHL, NFL)
+# Observed public team links and schedule-backed UTC dates, frozen for this
+# diagnostic. The existing two-event control remains the default.
+DALLAS = {
+    "sport": "nfl", "production_id": "6489565",
+    "event_url": "https://www.vividseats.com/dallas-cowboys-tickets-arlington-att-stadium-3-9-2026/production/6489565",
+    "performer_url": "https://www.vividseats.com/dallas-cowboys-tickets--sports-nfl-football/performer/214",
+    "expected_event_utc": "2026-10-09T00:15:00Z",
+}
+BUFFALO = {
+    "sport": "nhl", "production_id": "7300510",
+    "event_url": "https://www.vividseats.com/buffalo-sabres-tickets-keybank-center-10-8-2026/production/7300510",
+    "performer_url": "https://www.vividseats.com/buffalo-sabres-tickets--sports-nhl-hockey/performer/129",
+    "expected_event_utc": "2026-10-08T23:00:00Z",
+}
+FOUR_TARGETS = (NHL, DALLAS, BUFFALO, NFL)
 PATHS = {"/hermes/api/v1/listings", "/hermes/api/v2/listings"}
 QUERY_KEYS = {"productionId", "includeIpAddress", "currency", "localizeCurrency", "priceGroupId", "quantity", "recommended", "sf", "offset", "page", "sort", "scarcity"}
 DENIALS = {401, 403, 429}
@@ -211,18 +226,22 @@ async def observe_target(playwright, target, report, inventory_path):
                 report["tooling_error"] = True
 
 
-async def run_targets(playwright, directory):
+async def run_targets(playwright, directory, *, four_events=False):
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
     if (directory / "report.json").exists():
         raise ValueError("Preserve prior results and choose a new output directory")
+    targets = FOUR_TARGETS if four_events else TARGETS
     report = {"status": "running", "all_captured": False, "database_calls": 0, "upload_calls": 0,
+              "target_count": len(targets), "fixed_four_events": four_events,
               "engine": "playwright-webkit", "headless": False, "fresh_browser_per_target": True,
               "playwright_version": version("playwright"), "started_at": datetime.now(timezone.utc).isoformat(), "observations": []}
     stop = None
-    for index, target in enumerate(TARGETS):
+    for index, target in enumerate(targets):
         validate_target(target["event_url"], target["performer_url"], target["production_id"])
         row = {"sport": target["sport"], "production_id": target["production_id"], "status": "failed",
+               "expected_event_utc": target["expected_event_utc"],
+               "performer_path": urlsplit(target["performer_url"]).path,
                "responses": [], "started_at": datetime.now(timezone.utc).isoformat()}
         report["observations"].append(row)
         write_json(directory / "report.json", report)
@@ -254,17 +273,19 @@ async def run_targets(playwright, directory):
     return report
 
 
-async def execute(directory):
+async def execute(directory, *, four_events=False):
     from playwright.async_api import async_playwright
     async with async_playwright() as playwright:
-        return await run_targets(playwright, directory)
+        return await run_targets(playwright, directory, four_events=four_events)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--directory", type=Path, default=Path("webkit-control"))
+    parser.add_argument("--four-events", action="store_true", help="Observe the fixed Boston, Dallas, Buffalo and Saints cohort once each")
     args = parser.parse_args()
-    report = asyncio.run(asyncio.wait_for(execute(args.directory), timeout=150))
+    report = asyncio.run(asyncio.wait_for(execute(args.directory, four_events=args.four_events),
+                                        timeout=280 if args.four_events else 150))
     print(json.dumps({key: report[key] for key in ("status", "all_captured", "tooling_errors")}, sort_keys=True))
     return int(bool(report["tooling_errors"]))
 

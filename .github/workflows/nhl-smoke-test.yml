@@ -4,12 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Firefox controls or the fixed two-event stock WebKit comparison
+        description: Firefox controls or a fixed two/four-event stock WebKit comparison
         type: choice
         options:
           - single
           - linkcanary
           - webkit
+          - webkit_four
         default: single
       diagnostic_target:
         description: Single-mode target on a fresh runner
@@ -31,7 +32,7 @@ permissions:
 
 jobs:
   firefox-inventory-diagnostic:
-    if: inputs.mode != 'webkit'
+    if: inputs.mode != 'webkit' && inputs.mode != 'webkit_four'
     runs-on: ubuntu-latest
     timeout-minutes: 11
     steps:
@@ -90,7 +91,7 @@ jobs:
           retention-days: 14
 
   webkit-inventory-diagnostic:
-    if: inputs.mode == 'webkit'
+    if: inputs.mode == 'webkit' || inputs.mode == 'webkit_four'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -104,10 +105,15 @@ jobs:
           python -m playwright install --with-deps webkit
       - name: Check offline capture guards
         run: python -m unittest tests.test_webkit_inventory_diagnostic
-      - name: Observe the two fixed public events without ingestion
+      - name: Observe the fixed public events without ingestion
+        env:
+          FOUR_EVENTS: ${{ inputs.mode == 'webkit_four' }}
         run: |
-          timeout --signal=TERM --kill-after=10s 170s xvfb-run -a \
-            python tools/webkit_inventory_diagnostic.py --directory webkit-control
+          options=()
+          outer_timeout=170s
+          if [ "$FOUR_EVENTS" = "true" ]; then options+=(--four-events); outer_timeout=300s; fi
+          timeout --signal=TERM --kill-after=10s "$outer_timeout" xvfb-run -a \
+            python tools/webkit_inventory_diagnostic.py --directory webkit-control "${options[@]}"
       - name: Save honest diagnostic outcomes and sanitized public inventory
         if: always()
         uses: actions/upload-artifact@v7
