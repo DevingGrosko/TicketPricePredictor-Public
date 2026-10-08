@@ -1,5 +1,5 @@
 # Diagnostic-branch draft only. Do not replace the main smoke workflow.
-name: Import one verified NHL observation (manual draft)
+name: Import one verified NFL or NHL observation (manual draft)
 on:
   workflow_dispatch:
     inputs:
@@ -12,7 +12,7 @@ permissions:
   contents: read
 env:
   CAPTURE_SOURCE_REF: 48735f3dd9d70c193e370e8d34cbee9a347f3376
-  SNAPSHOT_SHA256: 0f8cb8d09958ada129fd5e70ec7541efe63a6e011ddde6a1f3f1c96f31b5a922
+  SNAPSHOT_SHA256: a3588d647abc7bbfe29bbfd8d0d175691b5ad92fe1e295a0c0f90db634a7e5b3
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -34,7 +34,7 @@ jobs:
       - name: Verify the immutable saved observation without database or browser access
         run: |
           cp bridge/tools/import_shared_snapshot.py source/tools/import_shared_snapshot.py
-          cp bridge/docs/firefox-capture-7302493-20261008-0330.json source/import-input.json
+          cp bridge/docs/firefox-capture-6493143-20261008-0330.json source/import-input.json
           cd source
           python -m tools.import_shared_snapshot verify --payload import-input.json --sha256 "$SNAPSHOT_SHA256" --receipt verify-receipt.json
       - uses: actions/upload-artifact@v7
@@ -66,7 +66,7 @@ jobs:
           COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
         run: |
           cp bridge/tools/import_shared_snapshot.py source/tools/import_shared_snapshot.py
-          cp bridge/docs/firefox-capture-7302493-20261008-0330.json source/import-input.json
+          cp bridge/docs/firefox-capture-6493143-20261008-0330.json source/import-input.json
           cd source
           python -m tools.import_shared_snapshot pythonanywhere --payload import-input.json --sha256 "$SNAPSHOT_SHA256" --receipt pythonanywhere-receipt.json
       - uses: actions/upload-artifact@v7
@@ -83,7 +83,7 @@ jobs:
     timeout-minutes: 8
     environment: tidb-staging
     concurrency:
-      group: free-refresh-staging-nhl-writer
+      group: free-refresh-staging-nfl-writer
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
@@ -108,7 +108,7 @@ jobs:
           TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
         run: |
           cp bridge/tools/import_shared_snapshot.py source/tools/import_shared_snapshot.py
-          cp bridge/docs/firefox-capture-7302493-20261008-0330.json source/import-input.json
+          cp bridge/docs/firefox-capture-6493143-20261008-0330.json source/import-input.json
           cd source
           python -m tools.import_shared_snapshot tidb --payload import-input.json --sha256 "$SNAPSHOT_SHA256" --receipt tidb-receipt.json
       - uses: actions/upload-artifact@v7
