@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 from collector import VividBrowser
 from nfl_collector import VividNFLBrowser
-from vivid_firefox import EVENT_METADATA_SCRIPT, FirefoxInventorySession, event_datetime, native_unfiltered_request, validate_full_inventory
+from vivid_firefox import EVENT_METADATA_SCRIPT, LINK_SCROLL_SCRIPT, NORMAL_CHALLENGE_SCRIPT, FirefoxInventorySession, configure_normal_navigation, event_datetime, native_unfiltered_request, validate_full_inventory
 from vivid_inventory import VividCaptureError
 
 URL = "https://www.vividseats.com/date-slug-is-not-metadata-3-5-2027/production/123"
@@ -31,6 +31,9 @@ class Network:
         return {"collector": f"collector{len(self.collectors)}"}
 
     def add_event_handler(self, kind, callback):
+        if kind == "before_request_sent":
+            self.before_request = callback
+            return 100 + len(self.callbacks)
         assert kind == "response_completed"
         self.callbacks.append(callback)
         self.current = callback
@@ -112,6 +115,81 @@ class Driver:
             raise RuntimeError("quit failed")
 
 
+class Link:
+    def __init__(self, driver): self.driver = driver
+    def get_attribute(self, name):
+        return {"href": self.driver.link_href, "target": self.driver.link_target}.get(name)
+    def is_displayed(self): return True
+    def is_enabled(self): return True
+    def click(self):
+        from selenium.common.exceptions import ElementNotInteractableException
+        driver = self.driver
+        driver.clicks += 1
+        if driver.request_before_failure:
+            driver.network.before_request(driver.event("123", "already-requested", when=2001))
+        if driver.click_failures:
+            driver.click_failures -= 1
+            raise ElementNotInteractableException("private detail")
+        if driver.no_window:
+            return
+        handle = "event" + str(driver.clicks)
+        driver.windows[handle] = driver.link_href
+        if driver.link_target != "_blank":
+            driver.windows[driver.current_window_handle] = driver.windows.pop(handle)
+        driver.sequence += 1
+        event = driver.event("123", f"linked{driver.sequence}", when=4001, price=str(30 + driver.sequence))
+        driver.network.before_request(event)
+        driver.network.current(event)
+
+
+class RouteDriver(Driver):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.windows, self._handle = {"context1": "about:blank"}, "context1"
+        self.switch_to = SimpleNamespace(window=self.switch_window)
+        self.clicks, self.locator_calls, self.scrolls = 0, 0, 0
+        self.click_failures, self.request_before_failure, self.no_window = 0, False, False
+        self.link_href, self.link_target = "https://www.vividseats.com/en/alternate-slug/production/123", "_blank"
+        self.closed_windows = []
+        self.performer_denial, self.challenge, self.performer_timeout = None, False, False
+    @property
+    def current_window_handle(self): return self._handle
+    @property
+    def window_handles(self): return list(self.windows)
+    @property
+    def current_url(self): return self.windows[self._handle]
+    @current_url.setter
+    def current_url(self, value): self.windows[self._handle] = value
+    def switch_window(self, handle): self._handle = handle
+    def get(self, url):
+        if "/performer/" not in url:
+            return super().get(url)
+        self.current_url = url
+        self.navigations.append(("performer", url))
+        # Target prefetch completes before click: count/ID alone cannot authorize it.
+        self.network.current(self.event("123", "performer-prefetch", when=1001, price="1"))
+        if self.performer_denial:
+            self.network.current({'navigation': 'performer-document',
+                'request': {'url': url, 'request': 'performer-document', 'timings': {'requestTime': 1001}},
+                'response': {'status': self.performer_denial}})
+        if self.performer_timeout:
+            from selenium.common.exceptions import TimeoutException
+            raise TimeoutException('bounded page load')
+    def find_elements(self, *_args):
+        self.locator_calls += 1
+        return [Link(self)]
+    def execute_script(self, script, *args):
+        if script == NORMAL_CHALLENGE_SCRIPT:
+            return self.challenge
+        if script == LINK_SCROLL_SCRIPT:
+            self.scrolls += 1
+            return None
+        return super().execute_script(script, *args)
+    def close(self):
+        self.closed_windows.append(self.current_window_handle)
+        del self.windows[self.current_window_handle]
+
+
 class FirefoxTests(unittest.TestCase):
     def browser(self, driver):
         browser = VividNFLBrowser.__new__(VividNFLBrowser)
@@ -128,10 +206,10 @@ class FirefoxTests(unittest.TestCase):
         browser._firefox_session = session
         return browser
 
-    def capture(self, browser, url=URL, **kwargs):
+    def capture(self, browser, url=URL, *, wall_times=None, **kwargs):
         clock = [0]
         def sleep(value): clock[0] += value
-        with patch("vivid_firefox.time.time", return_value=1), \
+        with patch("vivid_firefox.time.time", **({'side_effect': wall_times} if wall_times else {'return_value': 1})), \
              patch("vivid_firefox.time.monotonic", side_effect=lambda: clock[0]), \
              patch("vivid_firefox.time.sleep", side_effect=sleep), \
              patch("vivid_firefox.MAP_SETTLE_SECONDS", 0):
@@ -282,6 +360,101 @@ class FirefoxTests(unittest.TestCase):
             chrome = VividNFLBrowser()
         self.assertEqual(chrome.browser_engine, "chrome")
         firefox.assert_not_called()
+
+    def normal_browser(self, driver, expected=AT):
+        browser = self.browser(driver)
+        configure_normal_navigation(browser, {"123": "https://www.vividseats.com/en/team-tickets/performer/104"}, {"123": expected})
+        return browser
+
+    def test_normal_blank_link_retains_early_native_body_and_excludes_performer_prefetch(self):
+        driver = RouteDriver()
+        browser = self.normal_browser(driver)
+        raw, stamp = self.capture(browser, wall_times=[1, 2])
+        self.assertEqual(raw['tickets'][0]['p'], '31')
+        self.assertEqual(stamp, AT)
+        self.assertEqual(driver.navigations, [('performer', 'https://www.vividseats.com/en/team-tickets/performer/104')])
+        self.assertEqual(driver.current_url, driver.link_href)
+        self.assertEqual(driver.clicks, 1)
+        self.assertNotIn('contexts', driver.network.collectors[0])
+        self.assertEqual(browser.capture_diagnostics['preclick_responses_ignored'], 1)
+        self.assertTrue(browser.capture_diagnostics['event_opened_new_window'])
+        self.assertEqual(driver.network.reads[0]['request'], 'linked1')
+        self.assertEqual(driver.network.removed_handlers, [1, 101])
+
+    def test_pre_request_noninteractable_click_reselects_normally_but_no_retry_after_request(self):
+        driver = RouteDriver(); driver.click_failures = 1
+        browser = self.normal_browser(driver)
+        self.capture(browser, wall_times=[1, 2, 3])
+        self.assertEqual((driver.clicks, driver.locator_calls, driver.scrolls), (2, 2, 2))
+        self.assertEqual(browser.capture_diagnostics['last_link_error_type'], 'ElementNotInteractableException')
+        driver = RouteDriver(); driver.click_failures = 1; driver.request_before_failure = True
+        browser = self.normal_browser(driver)
+        with self.assertRaises(VividCaptureError) as caught:
+            self.capture(browser, wall_times=[1, 2])
+        self.assertEqual(caught.exception.category, 'event-link-navigation-error')
+        self.assertEqual(driver.clicks, 1)
+        self.assertEqual(driver.network.removed_collectors, ['collector1'])
+
+    def test_route_refresh_retains_event_tab_then_next_capture_closes_it(self):
+        driver = RouteDriver(); browser = self.normal_browser(driver)
+        self.capture(browser, wall_times=[1, 2])
+        self.capture(browser, reload_page=True)
+        self.assertEqual(driver.navigations[-1][0], 'refresh')
+        self.assertEqual(driver.closed_windows, [])
+        self.capture(browser, wall_times=[1, 2])
+        self.assertEqual(driver.closed_windows, ['event1'])
+        self.assertEqual(set(driver.windows), {'context1', 'event2'})
+        self.assertEqual(len(driver.network.removed_collectors), 3)
+        browser.close()
+        self.assertEqual(driver.quits, 1)
+
+    def test_missing_window_wrong_date_and_null_reload_url_fail_closed(self):
+        driver = RouteDriver(); driver.no_window = True; browser = self.normal_browser(driver)
+        with self.assertRaises(VividCaptureError) as caught:
+            self.capture(browser, wall_times=[1, 2])
+        self.assertEqual(caught.exception.category, 'event-link-navigation-timeout')
+        driver = RouteDriver(); browser = self.normal_browser(driver, AT.replace(hour=18))
+        with self.assertRaises(VividCaptureError) as caught:
+            self.capture(browser, wall_times=[1, 2])
+        self.assertEqual(caught.exception.category, 'event-metadata-time-mismatch')
+        driver = Driver(); driver.current_url = None; browser = self.browser(driver)
+        with self.assertRaises(VividCaptureError) as caught:
+            self.capture(browser, reload_page=True)
+        self.assertEqual(caught.exception.category, 'reload-event-identity-mismatch')
+        self.assertEqual(driver.navigations, [])
+        self.assertEqual(driver.network.removed_collectors, ['collector1'])
+
+    def test_route_configuration_and_null_link_href_are_validated(self):
+        driver = RouteDriver(); browser = self.normal_browser(driver)
+        for url in (None, 'https://other.example/team/performer/104', 'https://www.vividseats.com/team/performer/104?token=x'):
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                configure_normal_navigation(browser, {'123': url})
+        driver.link_href = None
+        with self.assertRaises(VividCaptureError) as caught:
+            self.capture(browser)
+        self.assertEqual(caught.exception.category, 'visible-event-link-not-found')
+        self.assertEqual(driver.clicks, 0)
+        with self.assertRaises(VividCaptureError) as caught:
+            self.capture(browser, URL.rsplit('/', 1)[0] + '/456')
+        self.assertEqual(caught.exception.category, 'event-route-not-configured')
+
+    def test_performer_denial_or_visible_challenge_stops_before_event_click(self):
+        for status in (401, 403, 429, None):
+            with self.subTest(status=status):
+                driver = RouteDriver(); driver.performer_denial = status; driver.challenge = status is None
+                browser = self.normal_browser(driver)
+                with self.assertRaises(VividCaptureError) as caught:
+                    self.capture(browser)
+                self.assertEqual(caught.exception.category, 'provider-rate-limited' if status == 429 else 'provider-access-denied')
+                self.assertEqual(driver.clicks, 0)
+                self.assertEqual(driver.network.reads, [])
+                self.assertEqual(driver.network.removed_collectors, ['collector1'])
+
+    def test_performer_page_load_timeout_still_uses_rendered_visible_link(self):
+        driver = RouteDriver(); driver.performer_timeout = True; browser = self.normal_browser(driver)
+        self.capture(browser, wall_times=[1, 2])
+        self.assertTrue(browser.capture_diagnostics['performer_navigation_timeout'])
+        self.assertEqual(driver.clicks, 1)
 
 
 if __name__ == "__main__":

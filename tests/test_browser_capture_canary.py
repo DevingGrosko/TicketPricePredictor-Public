@@ -23,7 +23,8 @@ class Browser:
         if url in self.failures:
             raise TimeoutError('private-error-text-must-not-enter-report')
         pid = url.rsplit('/', 1)[-1]
-        name = 'Dallas Cowboys at New York Giants' if pid == '1234567' else 'Utah Mammoth at Boston Bruins'
+        name = ('Dallas Cowboys at New York Giants' if pid == '1234567' else
+                'Minnesota Vikings at New Orleans Saints' if pid == '6493143' else 'Utah Mammoth at Boston Bruins')
         raw = {'global': [{'productionId': pid, 'productionName': name, 'mapTitle': 'Test arena', 'listingCount': '10'}],
                'tickets': [{'l': f'Section {100+i}', 'p': str(70+i), 'q': '2'} for i in range(10)]}
         return raw, datetime.now(timezone.utc) + timedelta(hours=24)
@@ -33,6 +34,64 @@ class Browser:
 
 
 class CanaryTests(unittest.TestCase):
+    def test_normal_navigation_uses_only_explicit_known_routes_and_keeps_capture_wrapper(self):
+        known = [{**EVENTS[0], 'url': 'https://www.vividseats.com/wrong-date-slug/production/6493143'}, EVENTS[1]]
+        sessions = []
+        def factory(**_kwargs):
+            browser = Browser(); sessions.append(browser); return browser
+        with tempfile.TemporaryDirectory() as directory, patch('vivid_firefox.configure_normal_navigation') as configure:
+            report = run_canary(events_from_json(json.dumps(known)), directory, factory=factory, normal_navigation=True)
+        self.assertEqual(report['status'], 'passed')
+        self.assertTrue(report['normal_navigation'])
+        self.assertEqual(configure.call_count, 2)
+        for call, browser in zip(configure.call_args_list, sessions):
+            self.assertIs(call.args[0], browser)
+            self.assertEqual(set(call.args[1]), {'6493143', '7302493'} if browser is sessions[0] else {'6493143'})
+            self.assertTrue(call.args[1]['6493143'].endswith('/performer/597'))
+            self.assertEqual(call.args[2]['6493143'], datetime(2026, 10, 11, 17, tzinfo=timezone.utc))
+        self.assertEqual(len(sessions[0].urls), 3)
+        with tempfile.TemporaryDirectory() as directory, self.assertRaises(ValueError):
+            run_canary(events_from_json(json.dumps(EVENTS)), directory, normal_navigation=True,
+                       factory=lambda **_kwargs: self.fail('Browser started for unknown route'))
+
+    def test_isolated_events_each_have_one_capture_and_one_closed_session(self):
+        values = [
+            {**EVENTS[0], 'home_team': 'New York Giants', 'event_date': '2026-10-11T17:00:00Z'},
+            {**EVENTS[1], 'home_team': 'Boston Bruins', 'event_date': '2026-10-08T23:00:00Z'},
+            {'sport': 'nfl', 'url': 'https://www.vividseats.com/game/production/6493143', 'home_team': 'New Orleans Saints', 'event_date': '2026-10-11T17:00:00+00:00'},
+            {'sport': 'nhl', 'url': 'https://www.vividseats.com/game/production/7301789', 'home_team': 'Pittsburgh Penguins', 'event_date': '2026-10-10T17:00:00+00:00'},
+        ]
+        events = events_from_json(json.dumps(values)); sessions = []
+        dates = {event['production_id']: datetime.fromisoformat(event['event_date']) for event in events}
+        class Scheduled(Browser):
+            def capture(self, url):
+                raw, _ = super().capture(url)
+                return raw, dates[url.rsplit('/', 1)[-1]]
+        def factory(**_kwargs):
+            browser = Scheduled(); sessions.append(browser); return browser
+        with tempfile.TemporaryDirectory() as directory, patch('vivid_firefox.configure_normal_navigation') as configure:
+            report = run_canary(events, directory, factory=factory, normal_navigation=True, isolated_events=True)
+        self.assertEqual(report['status'], 'passed')
+        self.assertTrue(report['isolated_events'])
+        self.assertEqual(len(report['observations']), 4)
+        self.assertEqual([browser.urls for browser in sessions], [[event['url']] for event in events])
+        self.assertTrue(all(browser.closed for browser in sessions))
+        for call, event in zip(configure.call_args_list, events):
+            self.assertEqual(set(call.args[1]), {event['production_id']})
+            self.assertEqual(call.args[2][event['production_id']], dates[event['production_id']])
+
+    def test_schedule_fields_require_valid_observed_team_and_aware_paired_date(self):
+        cases = [
+            {**EVENTS[0], 'home_team': 'New York Giants'},
+            {**EVENTS[0], 'event_date': '2026-10-11T17:00:00Z'},
+            {**EVENTS[0], 'home_team': 'Unknown Team', 'event_date': '2026-10-11T17:00:00Z'},
+            {**EVENTS[0], 'home_team': 'New York Giants', 'event_date': '2026-10-11T17:00:00'},
+            {**EVENTS[0], 'home_team': 'New York Giants', 'event_date': 123},
+        ]
+        for value in cases:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                events_from_json(json.dumps([value, EVENTS[1]]))
+
     def test_pacing_is_between_every_observation_including_restarted_session(self):
         trace = []
         class Paced(Browser):

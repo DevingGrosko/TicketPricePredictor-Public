@@ -19,7 +19,7 @@ import subprocess
 import threading
 import time
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urljoin, urlsplit
 
 from collector import as_utc, parse_iso_datetime, validated_vivid_url
 from nfl_metadata import choose_best_geometry, extract_map_geometry_from_json, geometry_is_usable, geometry_section_count
@@ -31,6 +31,36 @@ MAP_SETTLE_SECONDS = 2.5
 SAFE_HEADER_NAMES = {"accept", "brand-name", "if-none-match", "if-modified-since", "cache-control", "content-type"}
 SAFE_QUERY_NAMES = {"productionId", "quantity", "recommended", "sf", "currency", "priceGroupId", "localizeCurrency", "includeIpAddress"}
 FULL_INVENTORY_QUERY_NAMES = SAFE_QUERY_NAMES | {"offset", "page", "sort", "scarcity"}
+LINK_SCROLL_SCRIPT = "arguments[0].scrollIntoView({block:'center', inline:'nearest'});"
+NORMAL_CHALLENGE_SCRIPT = "return /(verify (you are|you're) human|access denied|unusual activity|captcha|too many requests)/i.test(document.body?.innerText || '');"
+
+
+def _event_url_matches(url, production_id):
+    if not isinstance(url, str):
+        return False
+    parsed = urlsplit(url)
+    return (parsed.scheme == "https" and parsed.netloc == "www.vividseats.com"
+            and not parsed.query and not parsed.fragment
+            and parsed.path.rstrip("/").endswith("/production/" + production_id))
+
+
+def validated_performer_url(url):
+    if not isinstance(url, str):
+        raise ValueError("Normal navigation requires an explicit public performer URL")
+    parsed = urlsplit(url)
+    if (parsed.scheme != "https" or parsed.netloc != "www.vividseats.com"
+            or parsed.query or parsed.fragment or parsed.username or parsed.password
+            or not re.fullmatch(r"/(?:[A-Za-z0-9_-]+/)*performer/[0-9]{1,12}/?", parsed.path)):
+        raise ValueError("Invalid public performer URL")
+    return url
+
+
+def configure_normal_navigation(browser, performer_urls, expected_event_dates=None):
+    """Configure only explicit public routes on an already-owned Firefox browser."""
+    session = getattr(browser, "_firefox_session", None)
+    if not isinstance(session, FirefoxInventorySession):
+        raise ValueError("Normal navigation requires the Firefox adapter")
+    session.configure_normal_navigation(performer_urls, expected_event_dates)
 
 
 def native_unfiltered_request(url: str, production_id: str) -> bool:
@@ -155,6 +185,8 @@ class FirefoxInventorySession:
             raise RuntimeError("Firefox capture requires installed Firefox and geckodriver.")
         self.owner, self.timeout = owner, timeout
         self._generation, self._lock = 0, threading.Lock()
+        self._normal_routes, self._expected_dates = {}, {}
+        self._route_windows, self._route_base = set(), None
         options = Options()
         options.binary_location, options.enable_bidi = binary, True
         if headless:
@@ -187,6 +219,122 @@ class FirefoxInventorySession:
                 pass
             raise
 
+    def configure_normal_navigation(self, performer_urls, expected_event_dates=None):
+        if not isinstance(performer_urls, dict) or not performer_urls:
+            raise ValueError("Normal navigation requires explicit production routes")
+        routes = {}
+        for pid, performer in performer_urls.items():
+            if not isinstance(pid, str) or not re.fullmatch(r"[0-9]{1,12}", pid):
+                raise ValueError("Invalid route production ID")
+            routes[pid] = validated_performer_url(performer)
+        dates = expected_event_dates or {}
+        if not isinstance(dates, dict) or set(dates) - set(routes):
+            raise ValueError("Expected event dates must match configured routes")
+        if any(not isinstance(stamp, datetime) or stamp.tzinfo is None for stamp in dates.values()):
+            raise ValueError("Expected event dates must have explicit UTC offsets")
+        self._normal_routes = routes
+        self._expected_dates = {pid: as_utc(stamp) for pid, stamp in dates.items()}
+        self._route_windows = getattr(self, "_route_windows", set())
+        self._route_base = getattr(self, "_route_base", None)
+
+    def _prepare_route_window(self):
+        driver = self.owner.driver
+        tracked = getattr(self, "_route_windows", set())
+        for handle in tuple(tracked):
+            if handle in driver.window_handles:
+                driver.switch_to.window(handle)
+                driver.close()
+            tracked.discard(handle)
+        base = getattr(self, "_route_base", None)
+        if base is not None and base in driver.window_handles:
+            driver.switch_to.window(base)
+        self._route_base = driver.current_window_handle
+        self._route_windows = tracked
+
+    def _request_started_callback(self, generation, production_id, gate, requested):
+        def before_request(event):
+            try:
+                data = event if isinstance(event, dict) else vars(event)
+                request = data.get("request") or {}
+                url = request.get("url")
+                when = (request.get("timings") or {}).get("requestTime")
+                with self._lock:
+                    current = generation == self._generation
+                if (not current or gate[0] is None or not isinstance(url, str)
+                        or not isinstance(when, (int, float)) or not math.isfinite(when) or when < gate[0]):
+                    return
+                if (_event_url_matches(url, production_id) or (inventory_request(url)
+                        and parse_qs(urlsplit(url).query).get("productionId") == [production_id])):
+                    requested.set()
+            except (AttributeError, TypeError, ValueError):
+                return
+        return before_request
+
+    def _navigate_normal(self, performer, production_id, deadline, diagnostics, gate, requested, navigation_guard):
+        from selenium.common.exceptions import ElementNotInteractableException, StaleElementReferenceException, TimeoutException
+        driver = self.owner.driver
+        try:
+            driver.get(performer)
+        except TimeoutException:
+            diagnostics["performer_navigation_timeout"] = True
+        diagnostics["navigation_mode"] = "performer"
+        def stop_if_denied():
+            status = navigation_guard.get("denial")
+            if status is not None:
+                diagnostics["performer_document_status"] = status
+                raise VividCaptureError(http_category(status), diagnostics)
+            if driver.execute_script(NORMAL_CHALLENGE_SCRIPT) is True:
+                diagnostics["challenge_visible"] = True
+                raise VividCaptureError("provider-access-denied", diagnostics)
+        attempts = 0
+        while time.monotonic() < deadline:
+            stop_if_denied()
+            candidates = driver.find_elements("css selector", f"a[href*='/production/{production_id}']")[:50]
+            for link in candidates:
+                before = set(driver.window_handles)
+                try:
+                    href = link.get_attribute("href")
+                    if not isinstance(href, str) or not _event_url_matches(urljoin(performer, href), production_id):
+                        continue
+                    target = link.get_attribute("target")
+                    if target not in (None, "", "_self", "_blank") or not link.is_displayed() or not link.is_enabled():
+                        continue
+                    driver.execute_script(LINK_SCROLL_SCRIPT, link)
+                    time.sleep(0.25)
+                    stop_if_denied()
+                    gate[0] = time.time() * 1000
+                    requested.clear()
+                    attempts += 1
+                    diagnostics["event_link_click_attempts"] = attempts
+                    link.click()
+                    diagnostics["visible_event_link_clicked"] = True
+                    window_deadline = min(deadline, time.monotonic() + 10)
+                    while time.monotonic() < window_deadline:
+                        new = [handle for handle in driver.window_handles if handle not in before]
+                        self._route_windows.update(new)
+                        if target == "_blank":
+                            for handle in new:
+                                driver.switch_to.window(handle)
+                                if _event_url_matches(driver.current_url, production_id):
+                                    diagnostics["event_opened_new_window"] = True
+                                    return
+                        elif _event_url_matches(driver.current_url, production_id):
+                            return
+                        time.sleep(0.15)
+                    raise VividCaptureError("event-link-navigation-timeout", diagnostics)
+                except (ElementNotInteractableException, StaleElementReferenceException) as exc:
+                    diagnostics["last_link_error_type"] = type(exc).__name__
+                    new = set(driver.window_handles) - before
+                    self._route_windows.update(new)
+                    if requested.is_set() or new or _event_url_matches(driver.current_url, production_id):
+                        raise VividCaptureError("event-link-navigation-error", diagnostics) from exc
+                    if attempts >= 3:
+                        raise VividCaptureError("event-link-not-interactable", diagnostics) from exc
+                    # Reselect on the next pass; do not reuse a stale element or force a click.
+                    break
+            time.sleep(0.15)
+        raise VividCaptureError("visible-event-link-not-found", diagnostics)
+
     def close(self):
         with self._lock:
             self._generation += 1
@@ -201,7 +349,7 @@ class FirefoxInventorySession:
                 except Exception:
                     pass
 
-    def _callback(self, generation, started_ms, events):
+    def _callback(self, generation, started_ms, events, performer=None, navigation_guard=None):
         def response(event):
             try:
                 data = event if isinstance(event, dict) else vars(event)
@@ -219,12 +367,17 @@ class FirefoxInventorySession:
                         or not isinstance(request_time, (int, float)) or not math.isfinite(request_time)
                         or request_time < started_ms):
                     return
+                if (performer and navigation_guard is not None and data.get("navigation")
+                        and urlsplit(url).netloc == "www.vividseats.com"
+                        and urlsplit(url).path == urlsplit(performer).path and status in (401, 403, 429)):
+                    navigation_guard["denial"] = status
                 mime = str(reply.get("mimeType") or "")
                 if not inventory_request(url) and not data.get("navigation") and not self.owner._looks_like_map_response(url, mime):
                     return
                 row = {"url": url, "request_id": request_id, "status": status, "mime": mime,
                        "method": request.get("method") if request.get("method") in {"GET", "POST"} else "other",
                        "navigation": bool(data.get("navigation")), "protocol": str(reply.get("protocol") or "").casefold(),
+                       "request_time": request_time,
                        "from_cache": reply.get("fromCache"), "request_header_names": _header_names(request.get("headers", [])),
                        "response_header_names": _header_names(reply.get("headers", []))}
                 events.put_nowait(row)
@@ -240,44 +393,67 @@ class FirefoxInventorySession:
         if not re.fullmatch(r"[0-9]{1,12}", production_id):
             raise ValueError("Vivid capture requires a numeric production ID")
         diagnostics = {"engine": "firefox", "runtime": dict(self.runtime), "production_id": production_id,
-                       "responses": [], "body_read_retries": 0, "inventory_view_actions": [], "acquisition_method": "original-response-bidi"}
+                       "responses": [], "body_read_retries": 0, "inventory_view_actions": [], "acquisition_method": "original-response-bidi",
+                       "navigation_mode": "performer" if getattr(self, "_normal_routes", {}) else "direct"}
         self.owner.capture_diagnostics = diagnostics
         events = queue.Queue(maxsize=256)
         started_ms = time.time() * 1000
         with self._lock:
             self._generation += 1
             generation = self._generation
-        callback_id, collector = None, None
+        performer = getattr(self, "_normal_routes", {}).get(production_id)
+        if getattr(self, "_normal_routes", {}) and performer is None:
+            raise VividCaptureError("event-route-not-configured", diagnostics)
+        gate, requested = [None], threading.Event()
+        navigation_guard = {}
+        callback_id, request_callback_id, collector = None, None, None
         captured, stamp, ready_at, map_opened, failure = None, None, None, False, None
         map_bodies, body_requests, map_attempts = [], {}, set()
         try:
             try:
+                options = {} if performer else {"contexts": [self.owner.driver.current_window_handle]}
                 collector = self.network.add_data_collector(data_types=["response"], max_encoded_data_size=MAX_INVENTORY_BYTES,
-                                                            collector_type="blob", contexts=[self.owner.driver.current_window_handle]).get("collector")
+                                                            collector_type="blob", **options).get("collector")
                 if not collector:
                     raise RuntimeError("Missing response collector")
-                callback_id = self.network.add_event_handler("response_completed", self._callback(generation, started_ms, events))
+                callback_id = self.network.add_event_handler("response_completed", self._callback(generation, started_ms, events, performer, navigation_guard))
+                if performer:
+                    request_callback_id = self.network.add_event_handler("before_request_sent", self._request_started_callback(generation, production_id, gate, requested))
             except Exception as exc:
                 diagnostics["bidi_error_type"] = type(exc).__name__
                 raise VividCaptureError("browser-bidi-unavailable", diagnostics) from exc
             try:
+                deadline = time.monotonic() + self.timeout
                 if reload_page:
+                    if not _event_url_matches(getattr(self.owner.driver, "current_url", None), production_id):
+                        raise VividCaptureError("reload-event-identity-mismatch", diagnostics)
+                    gate[0] = started_ms
                     self.owner.driver.refresh()
+                elif performer:
+                    self._prepare_route_window()
+                    self._navigate_normal(performer, production_id, deadline, diagnostics, gate, requested, navigation_guard)
                 else:
                     self.owner.driver.get(url)
             except TimeoutException:
                 diagnostics["navigation_timeout"] = True
-            deadline = time.monotonic() + self.timeout
+            if not performer:
+                deadline = time.monotonic() + self.timeout
             while time.monotonic() < deadline:
                 if stamp is None:
                     stamp = event_datetime(self.owner.driver, production_id)
+                    expected = getattr(self, "_expected_dates", {}).get(production_id)
+                    if stamp is not None and expected is not None and stamp != expected:
+                        raise VividCaptureError("event-metadata-time-mismatch", diagnostics)
                 while True:
                     try:
                         row = events.get_nowait()
                     except queue.Empty:
                         break
+                    if performer and (gate[0] is None or row["request_time"] < gate[0]):
+                        diagnostics["preclick_responses_ignored"] = diagnostics.get("preclick_responses_ignored", 0) + 1
+                        continue
                     if (row["navigation"] and urlsplit(row["url"]).hostname in {"www.vividseats.com", "vividseats.com"}
-                            and urlsplit(row["url"]).path == urlsplit(url).path):
+                            and _event_url_matches(row["url"], production_id)):
                         diagnostics["document_status"] = row["status"]
                         if row["status"] in (401, 403, 429):
                             raise VividCaptureError(http_category(row["status"]), diagnostics)
@@ -368,6 +544,11 @@ class FirefoxInventorySession:
                     self.network.remove_event_handler("response_completed", callback_id)
                 except Exception as exc:
                     diagnostics["bidi_unsubscribe_error_type"] = type(exc).__name__
+            if request_callback_id is not None:
+                try:
+                    self.network.remove_event_handler("before_request_sent", request_callback_id)
+                except Exception as exc:
+                    diagnostics["bidi_request_unsubscribe_error_type"] = type(exc).__name__
             if collector is not None:
                 try:
                     self.network.remove_data_collector(collector=collector)
