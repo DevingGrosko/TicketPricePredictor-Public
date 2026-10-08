@@ -113,6 +113,8 @@ class CaptureCutoverWorkflowTests(unittest.TestCase):
                 capture = step(collect, 'Attempt shared ' + sport.upper() + ' capture for the half-hour')
                 replay = step(collect, 'Deliver saved ' + sport.upper() + ' observations to both stores')
                 self.assertIn("!inputs.delivery_only", capture)
+                self.assertIn('timeout-minutes: 26', capture)
+                self.assertIn('timeout-minutes: 60', collect)
                 self.assertNotIn('--saved-manifest', capture)
                 self.assertLess(capture.index('echo "attempted=true"'), capture.index('xvfb-run'))
                 self.assertIn("github.event_name == 'workflow_dispatch' && inputs.delivery_only", replay)

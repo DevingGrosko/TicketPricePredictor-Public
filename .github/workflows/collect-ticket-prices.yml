@@ -225,6 +225,7 @@ jobs:
 
       - name: Attempt shared NFL capture for the half-hour
         id: shared-capture
+        timeout-minutes: 26
         if: steps.cadence.outputs.run == 'true' && env.SHARED_CAPTURE == 'true' && !inputs.delivery_only
         env:
           COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
@@ -414,6 +415,7 @@ jobs:
 
       - name: Attempt shared NHL capture for the half-hour
         id: shared-capture
+        timeout-minutes: 26
         if: steps.cadence.outputs.run == 'true' && env.SHARED_CAPTURE == 'true' && !inputs.delivery_only
         env:
           COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
