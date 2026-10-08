@@ -10,6 +10,12 @@ on:
       - "nfl_metadata.py"
       - "collector.py"
       - "vivid_inventory.py"
+      - "vivid_webkit.py"
+      - "vivid_performer_routes.py"
+      - "tests/test_vivid_webkit.py"
+      - "tests/test_saved_collector_payloads.py"
+      - "tests/test_smoke_workflow_gates.py"
+      - "docs/shared-observations/**"
       - "tests/test_vivid_inventory.py"
       - "Flask_App/nfl_blueprint.py"
       - "Flask_App/static/js/nfl-map.js"
@@ -40,21 +46,39 @@ jobs:
           python-version: "3.13"
           cache: pip
 
-      - name: Install collector dependencies
+      - name: Install offline collector test dependencies
+        if: github.event_name == 'pull_request'
+        run: python -m pip install -r requirements.txt -r requirements-test.txt
+
+      - name: Validate saved NFL observations and native adapter contracts offline
+        if: github.event_name == 'pull_request'
+        run: |
+          python -m unittest \
+            tests.test_saved_collector_payloads.SavedCollectorPayloadTests.test_nfl_original_observations \
+            tests.test_vivid_webkit tests.test_nfl_collector \
+            tests.test_nfl_schedule_collector tests.test_nfl_schedule_capture_resilience \
+            tests.test_nfl_schedule_source_resilience tests.test_nfl_geometry_matching \
+            tests.test_smoke_workflow_gates -v
+
+      - name: Install legacy Chrome diagnostic dependencies
+        if: github.event_name == 'workflow_dispatch'
         run: python -m pip install "selenium>=4.26.1,<5" "SQLAlchemy>=2,<3"
 
       - name: Show browser versions
+        if: github.event_name == 'workflow_dispatch'
         run: |
           google-chrome --version || chromium --version || true
           chromedriver --version || true
 
       - name: Validate the complete 30-day NFL schedule source
+        if: github.event_name == 'workflow_dispatch'
         run: |
           python nfl_schedule_collector.py schedule \
             --horizon-hours 720 \
             > nfl_schedule_result.json
 
-      - name: Capture one NFL event in ordinary headed Chrome without writing to production
+      - name: Capture one NFL event in legacy headed Chrome without writing to production
+        if: github.event_name == 'workflow_dispatch'
         env:
           REQUESTED_EVENT_URL: ${{ inputs.event_url }}
         run: |
@@ -64,6 +88,7 @@ jobs:
             --output nfl_smoke_result.json
 
       - name: Require usable real section geometry
+        if: github.event_name == 'workflow_dispatch'
         run: |
           python - <<'PY'
           import json
@@ -103,7 +128,7 @@ jobs:
           PY
 
       - name: Upload diagnostic results
-        if: always()
+        if: always() && github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v7
         with:
           name: nfl-smoke-result-${{ github.run_id }}
