@@ -603,6 +603,8 @@ def _capture_resolution(
         try:
             url = validated_vivid_url(candidate.url)
             browser = VividNFLBrowser(headless=headless, timeout=timeout)
+            from vivid_performer_routes import configure_schedule_navigation
+            configure_schedule_navigation(browser, 'nhl', resolution.game, url)
             raw_payload, provider_event_date = recovery.capture(browser, url)
             snapshot = NHLSnapshotParser.parse(raw_payload)
             if isinstance(snapshot, NHLEventSnapshot):
