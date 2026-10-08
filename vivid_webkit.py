@@ -89,10 +89,11 @@ def public_inventory(payload, production_id):
 
 
 def _nhl_venue_identity(value):
-    # These exact provider/official aliases were observed in the accepted NHL
-    # capture set. Do not weaken the identity check with substring matching.
+    # These exact provider/official aliases were observed in public NHL event
+    # metadata. Do not weaken the identity check with substring matching.
     value = canonical_venue_name(value).casefold()
-    return {"sap center": "sap center at san jose", "bell centre": "centre bell"}.get(value, value)
+    return {"sap center": "sap center at san jose", "bell centre": "centre bell",
+            "american airlines center - tx": "american airlines center"}.get(value, value)
 
 
 def validated_nhl_context(context, expected):

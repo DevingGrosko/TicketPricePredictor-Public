@@ -14,6 +14,7 @@ from vivid_webkit import verified_event_date
 
 
 FIXTURE = json.loads((Path(__file__).parent / 'fixtures' / 'nhl_official_provider_identity.json').read_text())
+DALLAS_FIXTURE = json.loads((Path(__file__).parent / 'fixtures' / 'nhl_dallas_public_metadata.json').read_text())
 
 
 def capture_fields(record):
@@ -95,14 +96,31 @@ class OfficialNHLIdentityTests(unittest.TestCase):
         metadata['utc_date'] = expected.isoformat()
         self.assertEqual(verified_event_date(metadata, body, pid, expected), expected)
 
-    def test_only_two_observed_exact_venue_aliases_are_equivalent(self):
+    def test_only_observed_exact_venue_aliases_are_equivalent(self):
         pid, expected, context, metadata, body = capture_fields(FIXTURE['games'][0])
-        for provider, official in [('SAP Center','SAP Center at San Jose'), ('Bell Centre','Centre Bell')]:
+        for provider, official in [('SAP Center','SAP Center at San Jose'), ('Bell Centre','Centre Bell'),
+                                  ('American Airlines Center - TX','American Airlines Center')]:
             with self.subTest(provider=provider):
                 metadata['venue'] = body['global'][0]['mapTitle'] = provider
                 context['venue'] = official
                 self.assertEqual(verified_event_date(metadata,body,pid,expected,official_game=context), expected)
                 metadata['venue'] = body['global'][0]['mapTitle'] = provider + ' Annex'
+                with self.assertRaises(VividCaptureError):
+                    verified_event_date(metadata,body,pid,expected,official_game=context)
+
+    def test_actual_dallas_page_names_bind_official_venue_with_unchanged_native_inner_guard(self):
+        for row in DALLAS_FIXTURE['games']:
+            with self.subTest(schedule_id=row['official']['schedule_id']):
+                pid, expected, context, metadata, body = capture_fields(row)
+                self.assertEqual(metadata['venue_id'],2116)
+                self.assertEqual(datetime.fromisoformat(metadata['utc_date']),expected)
+                self.assertEqual(verified_event_date(metadata,body,pid,expected,official_game=context),expected)
+                # A different native map title is still a page/body mismatch;
+                # the official venue alias must not bypass that inner guard.
+                body['global'][0]['mapTitle']='American Airlines Center'
+                with self.assertRaises(VividCaptureError):
+                    verified_event_date(metadata,body,pid,expected,official_game=context)
+                metadata['venue']=body['global'][0]['mapTitle']='American Airlines Arena - FL'
                 with self.assertRaises(VividCaptureError):
                     verified_event_date(metadata,body,pid,expected,official_game=context)
 

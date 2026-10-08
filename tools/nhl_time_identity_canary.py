@@ -13,6 +13,10 @@ TARGETS = (
     ('2026020259', '7302223', 'https://www.vividseats.com/winnipeg-jets-tickets-canada-life-centre-11-5-2026/production/7302223'),
     ('2026020260', '7299771', 'https://www.vividseats.com/edmonton-oilers-tickets-rogers-place-11-5-2026/production/7299771'),
 )
+DALLAS_TARGETS = (
+    ('2026020209', '7300563', 'https://www.vividseats.com/dallas-stars-tickets-american-airlines-center---tx-10-29-2026/production/7300563'),
+    ('2026020147', '7300529', 'https://www.vividseats.com/dallas-stars-tickets-american-airlines-center---tx-10-20-2026/production/7300529'),
+)
 DENIALS = {'provider-access-denied', 'provider-rate-limited', 'provider-authentication-required'}
 
 
@@ -24,7 +28,10 @@ def write_public(path, value):
     return hashlib.sha256(encoded).hexdigest()
 
 
-def run(directory, *, fetcher=None, factory=None, now=None, timeout=45):
+def run(directory, *, fetcher=None, factory=None, now=None, timeout=45, cohort='canada'):
+    if cohort not in ('canada', 'dallas'):
+        raise ValueError('Only the two fixed reviewed NHL cohorts are available')
+    targets = TARGETS if cohort == 'canada' else DALLAS_TARGETS
     import nhl_schedule_collector as production
     from nhl_collector import DiscoveredNHLGame, nhl_snapshot_to_payload
     from vivid_inventory import VividCaptureError
@@ -36,7 +43,7 @@ def run(directory, *, fetcher=None, factory=None, now=None, timeout=45):
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError('The official schedule retrieval time must be aware')
-    report = dict(status='running', database_calls=0, upload_calls=0,
+    report = dict(status='running', cohort=cohort, database_calls=0, upload_calls=0,
         started_at=now.astimezone(timezone.utc).isoformat(), observations=[], browser_sessions=[])
     report_path = directory / 'report.json'
     write_public(report_path, report)
@@ -44,8 +51,8 @@ def run(directory, *, fetcher=None, factory=None, now=None, timeout=45):
         # One invocation of the unchanged official fetch/parser. No feed/search
         # discovery or caller-supplied identity can become the trusted anchor.
         games, sources = (fetcher or production.fetch_schedule_games)(now)
-        selected = {str(game.schedule_id): game for game in games if str(game.schedule_id) in {t[0] for t in TARGETS}}
-        if set(selected) != {t[0] for t in TARGETS}:
+        selected = {str(game.schedule_id): game for game in games if str(game.schedule_id) in {t[0] for t in targets}}
+        if set(selected) != {t[0] for t in targets}:
             raise ValueError('Official source is missing a fixed target identity')
         report['official_schedule_sources'] = sources
         report['official_retrieved_at'] = now.astimezone(timezone.utc).isoformat()
@@ -55,7 +62,7 @@ def run(directory, *, fetcher=None, factory=None, now=None, timeout=45):
         return report
 
     native_factory = factory or production.VividNFLBrowser
-    for schedule_id, pid, url in TARGETS:
+    for schedule_id, pid, url in targets:
         game = selected[schedule_id]
         entry = dict(schedule_id=schedule_id, source_id=pid, url=url,
             official_event_date=game.event_date.isoformat(), away_team=game.away_team,
@@ -127,7 +134,7 @@ def run(directory, *, fetcher=None, factory=None, now=None, timeout=45):
         if any(category in DENIALS for category in categories):
             report['stopped_after_access_denial'] = True
             break
-    passed = (len(report['observations']) == len(TARGETS)
+    passed = (len(report['observations']) == len(targets)
         and all(row['status'] == 'captured' for row in report['observations'])
         and all(row['closed'] for row in report['browser_sessions']))
     report.update(status='passed' if passed else 'failed', finished_at=datetime.now(timezone.utc).isoformat())
@@ -138,8 +145,9 @@ def run(directory, *, fetcher=None, factory=None, now=None, timeout=45):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--directory', required=True)
+    parser.add_argument('--cohort', choices=('canada', 'dallas'), default='canada')
     args = parser.parse_args()
-    report = run(args.directory)
+    report = run(args.directory, cohort=args.cohort)
     print('NHL_TIME_IDENTITY_CANARY ' + json.dumps(report, sort_keys=True), flush=True)
     return 0 if report['status'] == 'passed' else 1
 
