@@ -1,0 +1,50 @@
+{
+  "provider_source": "Narrow public event metadata read on 2026-10-08; native inventory globals unavailable in the failed report.",
+  "official_source": "Expected production schedule identity supplied for offline regression; the live fixed Dallas canary fetches and binds the current official feed independently.",
+  "games": [
+    {
+      "official": {
+        "sport": "nhl",
+        "schedule_id": "2026020209",
+        "event_date": "2026-10-30T00:00:00+00:00",
+        "away_team": "Montreal Canadiens",
+        "home_team": "Dallas Stars",
+        "venue": "American Airlines Center",
+        "venue_timezone": "America/Chicago"
+      },
+      "provider": {
+        "id": 7300563,
+        "name": "Montreal Canadiens at Dallas Stars",
+        "utcDate": "2026-10-30T00:00:00Z",
+        "localDate": "2026-10-29T19:00:00-05:00[America/Chicago]",
+        "venue": {
+          "id": 2116,
+          "name": "American Airlines Center - TX",
+          "timezone": "America/Chicago"
+        }
+      }
+    },
+    {
+      "official": {
+        "sport": "nhl",
+        "schedule_id": "2026020147",
+        "event_date": "2026-10-21T00:00:00+00:00",
+        "away_team": "Boston Bruins",
+        "home_team": "Dallas Stars",
+        "venue": "American Airlines Center",
+        "venue_timezone": "America/Chicago"
+      },
+      "provider": {
+        "id": 7300529,
+        "name": "Boston Bruins at Dallas Stars",
+        "utcDate": "2026-10-21T00:00:00Z",
+        "localDate": "2026-10-20T19:00:00-05:00[America/Chicago]",
+        "venue": {
+          "id": 2116,
+          "name": "American Airlines Center - TX",
+          "timezone": "America/Chicago"
+        }
+      }
+    }
+  ]
+}

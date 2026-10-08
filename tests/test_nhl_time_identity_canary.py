@@ -9,8 +9,8 @@ from unittest.mock import Mock, patch
 import yaml
 
 from nhl_schedule_collector import ScheduledNHLGame
-from tests.test_nhl_official_identity import FIXTURE, capture_fields
-from tools.nhl_time_identity_canary import run, TARGETS
+from tests.test_nhl_official_identity import FIXTURE, DALLAS_FIXTURE, capture_fields
+from tools.nhl_time_identity_canary import run, TARGETS, DALLAS_TARGETS
 from tools.shared_capture import identity
 from vivid_inventory import VividCaptureError
 from vivid_webkit import WebKitInventorySession, verified_event_date
@@ -30,7 +30,7 @@ class FakeProductionBrowser:
         pid = url.rsplit('/',1)[-1]
         if self.deny:
             raise VividCaptureError('provider-access-denied', self.capture_diagnostics)
-        record = next(row for row in FIXTURE['games'] if str(row['provider']['id']) == pid)
+        record = next(row for row in FIXTURE['games']+DALLAS_FIXTURE['games'] if str(row['provider']['id']) == pid)
         _, expected, _, metadata, body = capture_fields(record)
         stamp = verified_event_date(metadata, body, pid, self._webkit_session.expected_dates[pid],
             official_game=self._webkit_session.official_games[pid], diagnostics=self.capture_diagnostics)
@@ -42,9 +42,9 @@ class FakeProductionBrowser:
         self.closed = True
 
 
-def official_games():
+def official_games(records=None):
     result = []
-    for row in FIXTURE['games']:
+    for row in records or FIXTURE['games']:
         context = row['official']
         result.append(ScheduledNHLGame(schedule_id=context['schedule_id'],
             event_date=datetime.fromisoformat(context['event_date']), away_team=context['away_team'],
@@ -110,6 +110,27 @@ class NHLTimeCanaryTests(unittest.TestCase):
                 run(directory,fetcher=Mock(),factory=Mock(),now=AT)
             self.assertEqual(path.read_text(),'original')
 
+    def test_dallas_option_fetches_only_its_two_fixed_official_identities_and_preserves_payloads(self):
+        created=[]
+        def factory(**_options):
+            browser=FakeProductionBrowser();created.append(browser);return browser
+        fetch=Mock(return_value=(official_games(DALLAS_FIXTURE['games']),['official-source']))
+        with TemporaryDirectory() as directory:
+            report=run(directory,fetcher=fetch,factory=factory,now=AT,cohort='dallas')
+            self.assertEqual(report['status'],'passed');self.assertEqual(report['cohort'],'dallas')
+            self.assertEqual([row['source_id'] for row in report['observations']],[t[1] for t in DALLAS_TARGETS])
+            self.assertEqual(len(created),2);self.assertTrue(all(browser.closed for browser in created))
+            fetch.assert_called_once_with(AT)
+            for row in report['observations']:
+                saved=json.loads(Path(directory,row['payload_file']).read_text())
+                self.assertEqual(saved['venue'],'American Airlines Center - TX')
+                self.assertEqual(saved['schedule']['canonical_venue'],'American Airlines Center')
+                self.assertEqual(saved['event_date'],row['official_event_date'])
+                self.assertEqual(identity('nhl',saved)[0],row['source_id'])
+                self.assertTrue(Path(directory,row['inventory_file']).exists())
+        with TemporaryDirectory() as directory,self.assertRaises(ValueError):
+            run(directory,fetcher=Mock(),factory=Mock(),now=AT,cohort='arbitrary')
+
     def test_workflow_manual_mode_has_no_secrets_stores_or_other_browser_jobs(self):
         root=Path(__file__).resolve().parents[1]
         workflow=yaml.load((root/'.github/workflows/nhl-smoke-test.yml').read_text(),Loader=yaml.BaseLoader)
@@ -119,8 +140,10 @@ class NHLTimeCanaryTests(unittest.TestCase):
         self.assertIn("inputs.mode != 'nhl_time_canary'",workflow['jobs']['capture-nhl']['if'])
         self.assertNotIn('nhl_time_canary',workflow['jobs']['firefox-canary']['if'])
         self.assertNotIn('secrets.',json.dumps(job))
-        capture=next(s for s in job['steps'] if s.get('name','').startswith('Validate three'))
-        self.assertEqual(capture['env'],{'TICKETSIGNAL_BROWSER_ENGINE':'webkit'})
+        capture=next(s for s in job['steps'] if s.get('name','').startswith('Validate the fixed NHL'))
+        self.assertEqual(capture['env']['TICKETSIGNAL_BROWSER_ENGINE'],'webkit')
+        self.assertIn('inputs.nhl_identity_cohort',capture['env']['NHL_IDENTITY_COHORT'])
+        self.assertEqual(workflow['on']['workflow_dispatch']['inputs']['nhl_identity_cohort']['options'],['canada','dallas'])
         self.assertIn('300s',capture['run']);self.assertIn('tools.nhl_time_identity_canary',capture['run'])
         offline=next(s for s in workflow['jobs']['capture-nhl']['steps'] if s.get('name','').startswith('Validate saved'))
         for module in ('tests.test_nhl_official_identity','tests.test_nhl_time_identity_canary'):
