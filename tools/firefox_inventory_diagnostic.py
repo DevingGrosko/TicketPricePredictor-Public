@@ -267,7 +267,7 @@ def visible_event_link(driver):
             if (parsed.scheme != "https" or parsed.netloc != urlsplit(PERFORMER).netloc
                     or parsed.query or parsed.fragment
                     or not parsed.path.rstrip("/").endswith("/production/" + PRODUCTION_ID)
-                    or link.get_attribute("target") not in (None, "", "_self")
+                    or link.get_attribute("target") not in (None, "", "_self", "_blank")
                     or not link.is_displayed() or not link.is_enabled()):
                 continue
             return link
@@ -286,10 +286,30 @@ def navigate_performer(driver, evidence, report, deadline):
         link = visible_event_link(driver)
         if link is not None:
             report["performer_time_origin"] = driver.execute_script("return performance.timeOrigin;")
+            new_window = link.get_attribute("target") == "_blank"
+            owned_before = set(driver.window_handles)
             evidence.event_click_started_ms = time.time() * 1000
             evidence.phase = "page"
             link.click()
             report["visible_event_link_clicked"] = True
+            if new_window:
+                report["event_link_target"] = "_blank"
+                window_deadline = min(deadline, time.monotonic() + 10)
+                observed_new = False
+                while time.monotonic() < window_deadline:
+                    windows = [handle for handle in driver.window_handles if handle not in owned_before]
+                    observed_new = observed_new or bool(windows)
+                    for handle in windows:
+                        driver.switch_to.window(handle)
+                        parsed = urlsplit(driver.current_url)
+                        if (parsed.scheme == "https" and parsed.netloc == urlsplit(PERFORMER).netloc
+                                and parsed.path.rstrip("/").endswith("/production/" + PRODUCTION_ID)):
+                            report["event_opened_new_window"] = True
+                            report["owned_new_window_count"] = len(windows)
+                            return True
+                    time.sleep(0.25)
+                report["category"] = "new-window-event-identity-not-confirmed" if observed_new else "new-event-window-not-found"
+                return False
             return True
         time.sleep(0.5)
     report["category"] = "visible-event-link-not-found"
@@ -332,9 +352,10 @@ def run(args, report):
         network.add_event_handler("response_completed", evidence.response)
         try:
             result = network.add_data_collector(data_types=["response"], max_encoded_data_size=MAX_BYTES,
-                                                collector_type="blob", contexts=[driver.current_window_handle])
+                                                collector_type="blob")
             collector = result.get("collector")
             report["bidi_body_collection"] = "available" if collector else "unavailable"
+            report["bidi_collector_scope"] = "owned-browser-session"
         except Exception as exc:
             report["bidi_body_collection"] = "unsupported-or-unavailable"
             report["bidi_collection_error_type"] = type(exc).__name__
@@ -452,7 +473,9 @@ def run(args, report):
                     origin_after = driver.execute_script("return performance.timeOrigin;")
                     same_document = (isinstance(origin_before, (int, float)) and isinstance(origin_after, (int, float))
                                      and origin_before == origin_after)
-                    report["navigation_transition"] = "client-side" if report["event_page_reached"] and same_document else "document" if report["event_page_reached"] else "unconfirmed"
+                    report["navigation_transition"] = ("new-window-document" if report["event_page_reached"] and report.get("event_opened_new_window")
+                        else "client-side" if report["event_page_reached"] and same_document
+                        else "document" if report["event_page_reached"] else "unconfirmed")
                 except Exception as exc:
                     report["navigation_probe_error_type"] = type(exc).__name__
             report.pop("performer_time_origin", None)

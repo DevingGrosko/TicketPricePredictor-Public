@@ -27,6 +27,7 @@ class FakeNetwork:
         self.callback = callback
 
     def add_data_collector(self, **kwargs):
+        self.collector_options = kwargs
         if not self.body_supported:
             raise NotImplementedError("PRIVATE-ERROR")
         return {"collector": "local-test-collector"}
@@ -47,6 +48,14 @@ class FakeDriver:
         self.inventory_url = URL + "&quantity=2" if filtered else URL
         self.links = []
         self.current_url = "about:blank"
+        self.window_handles = [self.current_window_handle]
+        self.window_urls = {self.current_window_handle: self.current_url}
+        self.switch_to = SimpleNamespace(window=self.switch_window)
+
+    def switch_window(self, handle):
+        assert handle in self.window_handles
+        self.current_window_handle = handle
+        self.current_url = self.window_urls[handle]
 
     def set_page_load_timeout(self, value): pass
     def set_script_timeout(self, value): pass
@@ -55,6 +64,7 @@ class FakeDriver:
 
     def get(self, url):
         self.current_url = url
+        self.window_urls[self.current_window_handle] = url
         self.navigations.append(url)
         self.network.callback({"request": {"url": self.inventory_url, "request": "transient-request", "method": "GET",
                                           "headers": [{"name": "Cookie", "value": "PRIVATE-COOKIE"},
@@ -78,17 +88,24 @@ class FakeDriver:
 
 
 class Link:
-    def __init__(self, href, *, visible=True, enabled=True, target=None, driver=None):
+    def __init__(self, href, *, visible=True, enabled=True, target=None, driver=None, open_window=True, window_url=None):
         self.href, self.visible, self.enabled, self.target, self.driver = href, visible, enabled, target, driver
         self.clicks = 0
+        self.open_window, self.window_url = open_window, window_url
     def get_attribute(self, name): return self.href if name == "href" else self.target
     def is_displayed(self): return self.visible
     def is_enabled(self): return self.enabled
     def click(self):
         self.clicks += 1
         if self.driver:
-            self.driver.current_url = diagnostic.EVENT
             self.driver.navigations.append("visible-event-link-click")
+            if self.target == "_blank":
+                if not self.open_window:
+                    return
+                self.driver.window_handles.append("new-event-window")
+                self.driver.window_urls["new-event-window"] = self.window_url or diagnostic.EVENT
+            else:
+                self.driver.current_url = diagnostic.EVENT
             self.driver.network.callback({"request": {"url": self.driver.inventory_url, "request": "event-request", "method": "GET"},
                                           "response": {"status": self.driver.network.status}})
 
@@ -182,13 +199,16 @@ class FirefoxDiagnosticTests(unittest.TestCase):
         driver = FakeDriver()
         wanted = Link(diagnostic.EVENT)
         driver.links = [Link(diagnostic.EVENT, visible=False), Link(diagnostic.EVENT, enabled=False),
-                        Link(diagnostic.EVENT, target="_blank"), Link(diagnostic.EVENT + "?quantity=2"),
+                        Link(diagnostic.EVENT, target="_parent"), Link(diagnostic.EVENT + "?quantity=2"),
                         Link(diagnostic.EVENT.replace("www.vividseats.com", "other.example")),
                         Link(diagnostic.EVENT.replace("7302493", "123")), wanted]
         self.assertIs(diagnostic.visible_event_link(driver), wanted)
         self.assertEqual(wanted.clicks, 0)
         driver.links = [Link(diagnostic.EVENT, visible=False)] * 50 + [wanted]
         self.assertIsNone(diagnostic.visible_event_link(driver))
+        blank = Link(diagnostic.EVENT, target="_blank")
+        driver.links = [blank]
+        self.assertIs(diagnostic.visible_event_link(driver), blank)
 
     def test_missing_performer_link_times_out_without_direct_navigation(self):
         driver = FakeDriver()
@@ -202,10 +222,10 @@ class FirefoxDiagnosticTests(unittest.TestCase):
 
     def test_performer_click_uses_original_body_and_never_fetches_or_changes_quantity(self):
         import selenium.webdriver, selenium.webdriver.firefox.service
-        for status in (200, 404):
-            with self.subTest(status=status), tempfile.TemporaryDirectory() as tmp:
+        for status, target in ((200, None), (404, None), (200, "_blank"), (404, "_blank")):
+            with self.subTest(status=status, target=target), tempfile.TemporaryDirectory() as tmp:
                 driver = FakeDriver(status=status, modal=True)
-                link = Link(diagnostic.EVENT, driver=driver)
+                link = Link(diagnostic.EVENT, driver=driver, target=target)
                 driver.links = [link]
                 args = SimpleNamespace(output=Path(tmp) / "result.json", inventory_output=Path(tmp) / "inventory.json", timeout=75, navigation="performer")
                 report, clock = {}, [0]
@@ -222,11 +242,30 @@ class FirefoxDiagnosticTests(unittest.TestCase):
                 self.assertEqual(link.clicks, 1)
                 self.assertEqual(driver.fetches, 0)
                 controls.assert_not_called()
-                self.assertEqual(report["navigation_transition"], "client-side")
+                self.assertEqual(report["navigation_transition"], "new-window-document" if target else "client-side")
                 self.assertEqual(report["event_document_response_count"], 0)
+                self.assertNotIn("contexts", driver.network.collector_options)
+                if target:
+                    self.assertTrue(report["event_opened_new_window"])
+                    self.assertEqual(driver.current_window_handle, "new-event-window")
                 if status == 200:
                     self.assertEqual(len(driver.network.body_calls), 1)
                     self.assertEqual(driver.network.body_calls[0]["request"], "event-request")
+
+    def test_blank_window_expiry_and_wrong_event_cannot_fallback_or_capture(self):
+        for opened, url, category in ((False, None, "new-event-window-not-found"),
+                                     (True, diagnostic.EVENT.replace("7302493", "123"), "new-window-event-identity-not-confirmed")):
+            with self.subTest(opened=opened):
+                driver, evidence, report = FakeDriver(), diagnostic.Evidence(), {}
+                driver.network.callback = evidence.response
+                link = Link(diagnostic.EVENT, driver=driver, target="_blank", open_window=opened, window_url=url)
+                driver.links = [link]
+                with patch.object(diagnostic.time, "monotonic", side_effect=range(30)), patch.object(diagnostic.time, "sleep"):
+                    self.assertFalse(diagnostic.navigate_performer(driver, evidence, report, 20))
+                self.assertEqual(link.clicks, 1)
+                self.assertEqual(driver.navigations, [diagnostic.PERFORMER, "visible-event-link-click"])
+                self.assertEqual(report["category"], category)
+                self.assertEqual(driver.fetches, 0)
 
 
 if __name__ == "__main__":
