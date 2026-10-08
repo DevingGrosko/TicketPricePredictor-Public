@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import json
+import math
 from pathlib import Path
 import re
 import time
@@ -81,6 +82,26 @@ def safe_diagnostics(value):
         result['engine'] = value['engine']
     if type(value.get('document_status')) is int:
         result['document_status'] = value['document_status']
+    phases = {'performer-navigation', 'performer-link-scan', 'event-link-click',
+              'event-popup', 'event-domcontentloaded', 'event-reload', 'inventory-wait',
+              'inventory-body', 'event-identity', 'complete'}
+    for key in ('phase', 'timeout_phase'):
+        if isinstance(value.get(key), str) and value[key] in phases:
+            result[key] = value[key]
+    def safe_elapsed(number):
+        return type(number) in (int, float) and math.isfinite(number) and 0 <= number <= 600000
+    if safe_elapsed(value.get('capture_elapsed_ms')):
+        result['capture_elapsed_ms'] = value['capture_elapsed_ms']
+    if isinstance(value.get('phase_times_ms'), dict):
+        result['phase_times_ms'] = {key: number for key, number in value['phase_times_ms'].items()
+                                   if key in phases and safe_elapsed(number)}
+    if type(value.get('performer_document_status')) is int:
+        result['performer_document_status'] = value['performer_document_status']
+    if type(value.get('performer_domcontentloaded')) is bool:
+        result['performer_domcontentloaded'] = value['performer_domcontentloaded']
+    for key in ('performer_ready_state', 'performer_ready_state_at_click', 'event_ready_state'):
+        if value.get(key) in ('loading', 'interactive', 'complete'):
+            result[key] = value[key]
     if value.get('acquisition_method') in ('original-response-bidi', 'original-response-playwright'):
         result['acquisition_method'] = value['acquisition_method']
     if value.get('navigation_mode') in ('performer', 'direct'):
