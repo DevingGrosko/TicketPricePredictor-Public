@@ -1,0 +1,816 @@
+{
+  "captured_at": "2026-10-08T05:48:23.919028+00:00",
+  "currency": "USD",
+  "event_date": "2026-11-06T00:00:00+00:00",
+  "event_type": "nhl",
+  "schedule": {
+    "away_team": "Vancouver Canucks",
+    "canonical_venue": "Canada Life Centre",
+    "country": "Canada",
+    "game_type": 2,
+    "home_team": "Winnipeg Jets",
+    "neutral_site": false,
+    "provider_venue": "Canada Life Centre",
+    "schedule_id": "2026020259",
+    "season": 20262027,
+    "venue_timezone": "America/Winnipeg"
+  },
+  "schema_version": 1,
+  "section_count": 79,
+  "sections": [
+    {
+      "alternate_price": "119.00",
+      "displayed_price": "102.00",
+      "listing_count": 19,
+      "price": 102,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "8",
+      "section": "Section 103"
+    },
+    {
+      "alternate_price": "135.00",
+      "displayed_price": "113.00",
+      "listing_count": 19,
+      "price": 113,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "16",
+      "section": "Section 104"
+    },
+    {
+      "alternate_price": "196.00",
+      "displayed_price": "165.00",
+      "listing_count": 8,
+      "price": 165,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "4",
+      "section": "Section 105"
+    },
+    {
+      "alternate_price": "196.00",
+      "displayed_price": "165.00",
+      "listing_count": 13,
+      "price": 165,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "4",
+      "section": "Section 106"
+    },
+    {
+      "alternate_price": "136.00",
+      "displayed_price": "114.00",
+      "listing_count": 20,
+      "price": 114,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "8",
+      "section": "Section 107"
+    },
+    {
+      "alternate_price": "108.00",
+      "displayed_price": "93.00",
+      "listing_count": 21,
+      "price": 93,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "15",
+      "section": "Section 109"
+    },
+    {
+      "alternate_price": "108.00",
+      "displayed_price": "93.00",
+      "listing_count": 16,
+      "price": 93,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "12",
+      "section": "Section 111"
+    },
+    {
+      "alternate_price": "103.00",
+      "displayed_price": "89.00",
+      "listing_count": 17,
+      "price": 89,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "12",
+      "section": "Section 112"
+    },
+    {
+      "alternate_price": "102.00",
+      "displayed_price": "88.00",
+      "listing_count": 9,
+      "price": 88,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "15",
+      "section": "Section 113"
+    },
+    {
+      "alternate_price": "106.00",
+      "displayed_price": "91.00",
+      "listing_count": 6,
+      "price": 91,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "14",
+      "section": "Section 115"
+    },
+    {
+      "alternate_price": "107.00",
+      "displayed_price": "92.00",
+      "listing_count": 8,
+      "price": 92,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "14",
+      "section": "Section 116"
+    },
+    {
+      "alternate_price": "135.00",
+      "displayed_price": "113.00",
+      "listing_count": 15,
+      "price": 113,
+      "price_source": "p",
+      "quantity": "5",
+      "row": "12",
+      "section": "Section 117"
+    },
+    {
+      "alternate_price": "217.00",
+      "displayed_price": "184.00",
+      "listing_count": 10,
+      "price": 184,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "11",
+      "section": "Section 118"
+    },
+    {
+      "alternate_price": "202.00",
+      "displayed_price": "170.00",
+      "listing_count": 11,
+      "price": 170,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "7",
+      "section": "Section 119"
+    },
+    {
+      "alternate_price": "129.00",
+      "displayed_price": "108.00",
+      "listing_count": 12,
+      "price": 108,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "15",
+      "section": "Section 120"
+    },
+    {
+      "alternate_price": "118.00",
+      "displayed_price": "101.00",
+      "listing_count": 12,
+      "price": 101,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "11",
+      "section": "Section 121"
+    },
+    {
+      "alternate_price": "275.00",
+      "displayed_price": "233.00",
+      "listing_count": 1,
+      "price": 233,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "5",
+      "section": "Section 123"
+    },
+    {
+      "alternate_price": "283.00",
+      "displayed_price": "240.00",
+      "listing_count": 9,
+      "price": 240,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "13",
+      "section": "Section 124"
+    },
+    {
+      "alternate_price": "578.00",
+      "displayed_price": "492.00",
+      "listing_count": 1,
+      "price": 492,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "16",
+      "section": "Section 125"
+    },
+    {
+      "alternate_price": "324.00",
+      "displayed_price": "275.00",
+      "listing_count": 1,
+      "price": 275,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "8",
+      "section": "Section 126"
+    },
+    {
+      "alternate_price": "283.00",
+      "displayed_price": "240.00",
+      "listing_count": 10,
+      "price": 240,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "15",
+      "section": "Section 127"
+    },
+    {
+      "alternate_price": "98.00",
+      "displayed_price": "84.00",
+      "listing_count": 7,
+      "price": 84,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "7",
+      "section": "Section 202"
+    },
+    {
+      "alternate_price": "101.00",
+      "displayed_price": "87.00",
+      "listing_count": 7,
+      "price": 87,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "7",
+      "section": "Section 203"
+    },
+    {
+      "alternate_price": "171.00",
+      "displayed_price": "144.00",
+      "listing_count": 6,
+      "price": 144,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "6",
+      "section": "Section 204"
+    },
+    {
+      "alternate_price": "147.00",
+      "displayed_price": "124.00",
+      "listing_count": 8,
+      "price": 124,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "4",
+      "section": "Section 205"
+    },
+    {
+      "alternate_price": "145.00",
+      "displayed_price": "122.00",
+      "listing_count": 5,
+      "price": 122,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "5",
+      "section": "Section 206"
+    },
+    {
+      "alternate_price": "124.00",
+      "displayed_price": "107.00",
+      "listing_count": 5,
+      "price": 107,
+      "price_source": "p",
+      "quantity": "7",
+      "row": "3",
+      "section": "Section 207"
+    },
+    {
+      "alternate_price": "201.00",
+      "displayed_price": "170.00",
+      "listing_count": 5,
+      "price": 170,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "7",
+      "section": "Section 208"
+    },
+    {
+      "alternate_price": "100.00",
+      "displayed_price": "85.00",
+      "listing_count": 6,
+      "price": 85,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "6",
+      "section": "Section 209"
+    },
+    {
+      "alternate_price": "101.00",
+      "displayed_price": "87.00",
+      "listing_count": 6,
+      "price": 87,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "6",
+      "section": "Section 210"
+    },
+    {
+      "alternate_price": "96.00",
+      "displayed_price": "82.00",
+      "listing_count": 5,
+      "price": 82,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "6",
+      "section": "Section 211"
+    },
+    {
+      "alternate_price": "100.00",
+      "displayed_price": "85.00",
+      "listing_count": 6,
+      "price": 85,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "4",
+      "section": "Section 212"
+    },
+    {
+      "alternate_price": "101.00",
+      "displayed_price": "87.00",
+      "listing_count": 3,
+      "price": 87,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "5",
+      "section": "Section 213"
+    },
+    {
+      "alternate_price": "104.00",
+      "displayed_price": "90.00",
+      "listing_count": 5,
+      "price": 90,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "2",
+      "section": "Section 214"
+    },
+    {
+      "alternate_price": "192.00",
+      "displayed_price": "162.00",
+      "listing_count": 4,
+      "price": 162,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "6",
+      "section": "Section 215"
+    },
+    {
+      "alternate_price": "101.00",
+      "displayed_price": "87.00",
+      "listing_count": 7,
+      "price": 87,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "4",
+      "section": "Section 216"
+    },
+    {
+      "alternate_price": "121.00",
+      "displayed_price": "105.00",
+      "listing_count": 2,
+      "price": 105,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "3",
+      "section": "Section 217"
+    },
+    {
+      "alternate_price": "136.00",
+      "displayed_price": "114.00",
+      "listing_count": 5,
+      "price": 114,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "4",
+      "section": "Section 218"
+    },
+    {
+      "alternate_price": "134.00",
+      "displayed_price": "112.00",
+      "listing_count": 3,
+      "price": 112,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "5",
+      "section": "Section 219"
+    },
+    {
+      "alternate_price": "185.00",
+      "displayed_price": "156.00",
+      "listing_count": 5,
+      "price": 156,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "6",
+      "section": "Section 220"
+    },
+    {
+      "alternate_price": "106.00",
+      "displayed_price": "91.00",
+      "listing_count": 7,
+      "price": 91,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "3",
+      "section": "Section 221"
+    },
+    {
+      "alternate_price": "101.00",
+      "displayed_price": "87.00",
+      "listing_count": 9,
+      "price": 87,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "7",
+      "section": "Section 222"
+    },
+    {
+      "alternate_price": "283.00",
+      "displayed_price": "240.00",
+      "listing_count": 9,
+      "price": 240,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "5",
+      "section": "Section 224"
+    },
+    {
+      "alternate_price": "283.00",
+      "displayed_price": "240.00",
+      "listing_count": 8,
+      "price": 240,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "6",
+      "section": "Section 227"
+    },
+    {
+      "alternate_price": "48.00",
+      "displayed_price": "40.00",
+      "listing_count": 7,
+      "price": 40,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "8",
+      "section": "Section 301"
+    },
+    {
+      "alternate_price": "42.00",
+      "displayed_price": "35.00",
+      "listing_count": 10,
+      "price": 35,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "8",
+      "section": "Section 302"
+    },
+    {
+      "alternate_price": "48.00",
+      "displayed_price": "40.00",
+      "listing_count": 6,
+      "price": 40,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "6",
+      "section": "Section 303"
+    },
+    {
+      "alternate_price": "55.00",
+      "displayed_price": "46.00",
+      "listing_count": 8,
+      "price": 46,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "9",
+      "section": "Section 304"
+    },
+    {
+      "alternate_price": "55.00",
+      "displayed_price": "46.00",
+      "listing_count": 9,
+      "price": 46,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "12",
+      "section": "Section 305"
+    },
+    {
+      "alternate_price": "55.00",
+      "displayed_price": "46.00",
+      "listing_count": 13,
+      "price": 46,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "12",
+      "section": "Section 306"
+    },
+    {
+      "alternate_price": "55.00",
+      "displayed_price": "46.00",
+      "listing_count": 9,
+      "price": 46,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "9",
+      "section": "Section 307"
+    },
+    {
+      "alternate_price": "46.00",
+      "displayed_price": "39.00",
+      "listing_count": 12,
+      "price": 39,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "12",
+      "section": "Section 308"
+    },
+    {
+      "alternate_price": "45.00",
+      "displayed_price": "38.00",
+      "listing_count": 8,
+      "price": 38,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "9",
+      "section": "Section 309"
+    },
+    {
+      "alternate_price": "44.00",
+      "displayed_price": "37.00",
+      "listing_count": 19,
+      "price": 37,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "9",
+      "section": "Section 310"
+    },
+    {
+      "alternate_price": "43.00",
+      "displayed_price": "36.00",
+      "listing_count": 6,
+      "price": 36,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "12",
+      "section": "Section 311"
+    },
+    {
+      "alternate_price": "41.00",
+      "displayed_price": "33.15",
+      "listing_count": 7,
+      "price": 33,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "12",
+      "section": "Section 312"
+    },
+    {
+      "alternate_price": "40.00",
+      "displayed_price": "33.15",
+      "listing_count": 10,
+      "price": 33,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "12",
+      "section": "Section 313"
+    },
+    {
+      "alternate_price": "41.00",
+      "displayed_price": "33.15",
+      "listing_count": 6,
+      "price": 33,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "12",
+      "section": "Section 314"
+    },
+    {
+      "alternate_price": "41.00",
+      "displayed_price": "34.12",
+      "listing_count": 11,
+      "price": 34,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "12",
+      "section": "Section 315"
+    },
+    {
+      "alternate_price": "44.00",
+      "displayed_price": "37.00",
+      "listing_count": 16,
+      "price": 37,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "11",
+      "section": "Section 316"
+    },
+    {
+      "alternate_price": "44.00",
+      "displayed_price": "37.00",
+      "listing_count": 13,
+      "price": 37,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "12",
+      "section": "Section 317"
+    },
+    {
+      "alternate_price": "46.00",
+      "displayed_price": "39.00",
+      "listing_count": 19,
+      "price": 39,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "12",
+      "section": "Section 318"
+    },
+    {
+      "alternate_price": "55.00",
+      "displayed_price": "46.00",
+      "listing_count": 7,
+      "price": 46,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "9",
+      "section": "Section 319"
+    },
+    {
+      "alternate_price": "54.00",
+      "displayed_price": "45.00",
+      "listing_count": 7,
+      "price": 45,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "12",
+      "section": "Section 320"
+    },
+    {
+      "alternate_price": "54.00",
+      "displayed_price": "45.00",
+      "listing_count": 11,
+      "price": 45,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "11",
+      "section": "Section 321"
+    },
+    {
+      "alternate_price": "51.00",
+      "displayed_price": "43.00",
+      "listing_count": 12,
+      "price": 43,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "11",
+      "section": "Section 322"
+    },
+    {
+      "alternate_price": "46.00",
+      "displayed_price": "39.00",
+      "listing_count": 7,
+      "price": 39,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "9",
+      "section": "Section 323"
+    },
+    {
+      "alternate_price": "44.00",
+      "displayed_price": "37.00",
+      "listing_count": 8,
+      "price": 37,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "12",
+      "section": "Section 324"
+    },
+    {
+      "alternate_price": "43.00",
+      "displayed_price": "36.00",
+      "listing_count": 9,
+      "price": 36,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "12",
+      "section": "Section 325"
+    },
+    {
+      "alternate_price": "39.00",
+      "displayed_price": "32.18",
+      "listing_count": 5,
+      "price": 32,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "12",
+      "section": "Section 326"
+    },
+    {
+      "alternate_price": "44.00",
+      "displayed_price": "37.00",
+      "listing_count": 5,
+      "price": 37,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "6",
+      "section": "Section 327"
+    },
+    {
+      "alternate_price": "44.00",
+      "displayed_price": "37.00",
+      "listing_count": 5,
+      "price": 37,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "5",
+      "section": "Section 328"
+    },
+    {
+      "alternate_price": "44.00",
+      "displayed_price": "37.00",
+      "listing_count": 8,
+      "price": 37,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "12",
+      "section": "Section 329"
+    },
+    {
+      "alternate_price": "43.00",
+      "displayed_price": "36.00",
+      "listing_count": 6,
+      "price": 36,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "10",
+      "section": "Section 330"
+    },
+    {
+      "alternate_price": "437.00",
+      "displayed_price": "371.00",
+      "listing_count": 1,
+      "price": 371,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "A",
+      "section": "Section L313"
+    },
+    {
+      "alternate_price": "455.00",
+      "displayed_price": "387.00",
+      "listing_count": 1,
+      "price": 387,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "A",
+      "section": "Section L316"
+    },
+    {
+      "alternate_price": "636.00",
+      "displayed_price": "541.00",
+      "listing_count": 1,
+      "price": 541,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "A",
+      "section": "Section L322"
+    },
+    {
+      "alternate_price": "455.00",
+      "displayed_price": "387.00",
+      "listing_count": 1,
+      "price": 387,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "A",
+      "section": "Section L323"
+    },
+    {
+      "alternate_price": "410.00",
+      "displayed_price": "348.00",
+      "listing_count": 1,
+      "price": 348,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "A",
+      "section": "Section L324"
+    }
+  ],
+  "source_id": "7302223",
+  "source_url": "https://www.vividseats.com/winnipeg-jets-tickets-canada-life-centre-11-5-2026/production/7302223",
+  "title": "Vancouver Canucks at Winnipeg Jets",
+  "venue": "Canada Life Centre"
+}

@@ -1,0 +1,686 @@
+{
+  "captured_at": "2026-10-08T05:48:12.337452+00:00",
+  "currency": "USD",
+  "event_date": "2026-11-07T01:00:00+00:00",
+  "event_type": "nhl",
+  "schedule": {
+    "away_team": "Anaheim Ducks",
+    "canonical_venue": "Scotiabank Saddledome",
+    "country": "Canada",
+    "game_type": 2,
+    "home_team": "Calgary Flames",
+    "neutral_site": false,
+    "provider_venue": "Scotiabank Saddledome",
+    "schedule_id": "2026020264",
+    "season": 20262027,
+    "venue_timezone": "America/Edmonton"
+  },
+  "schema_version": 1,
+  "section_count": 66,
+  "sections": [
+    {
+      "alternate_price": "156.00",
+      "displayed_price": "132.00",
+      "listing_count": 7,
+      "price": 132,
+      "price_source": "p",
+      "quantity": "5",
+      "row": "4",
+      "section": "Lower Level 101"
+    },
+    {
+      "alternate_price": "152.00",
+      "displayed_price": "127.00",
+      "listing_count": 7,
+      "price": 127,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "5",
+      "section": "Lower Level 102"
+    },
+    {
+      "alternate_price": "117.00",
+      "displayed_price": "101.00",
+      "listing_count": 12,
+      "price": 101,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "16",
+      "section": "Lower Level 103"
+    },
+    {
+      "alternate_price": "139.00",
+      "displayed_price": "117.00",
+      "listing_count": 9,
+      "price": 117,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "9",
+      "section": "Lower Level 104"
+    },
+    {
+      "alternate_price": "155.00",
+      "displayed_price": "131.00",
+      "listing_count": 6,
+      "price": 131,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "24",
+      "section": "Lower Level 105"
+    },
+    {
+      "alternate_price": "130.00",
+      "displayed_price": "109.00",
+      "listing_count": 9,
+      "price": 109,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "7",
+      "section": "Lower Level 106"
+    },
+    {
+      "alternate_price": "149.00",
+      "displayed_price": "125.00",
+      "listing_count": 6,
+      "price": 125,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "5",
+      "section": "Lower Level 107"
+    },
+    {
+      "alternate_price": "185.00",
+      "displayed_price": "156.00",
+      "listing_count": 12,
+      "price": 156,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "10",
+      "section": "Lower Level 108"
+    },
+    {
+      "alternate_price": "187.00",
+      "displayed_price": "157.00",
+      "listing_count": 11,
+      "price": 157,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "9",
+      "section": "Lower Level 109"
+    },
+    {
+      "alternate_price": "163.00",
+      "displayed_price": "137.00",
+      "listing_count": 12,
+      "price": 137,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "6",
+      "section": "Lower Level 110"
+    },
+    {
+      "alternate_price": "165.00",
+      "displayed_price": "139.00",
+      "listing_count": 4,
+      "price": 139,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "3",
+      "section": "Lower Level 111"
+    },
+    {
+      "alternate_price": "148.00",
+      "displayed_price": "124.00",
+      "listing_count": 12,
+      "price": 124,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "5",
+      "section": "Lower Level 112"
+    },
+    {
+      "alternate_price": "152.00",
+      "displayed_price": "128.00",
+      "listing_count": 6,
+      "price": 128,
+      "price_source": "p",
+      "quantity": "5",
+      "row": "9",
+      "section": "Lower Level 113"
+    },
+    {
+      "alternate_price": "148.00",
+      "displayed_price": "124.00",
+      "listing_count": 5,
+      "price": 124,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "5",
+      "section": "Lower Level 114"
+    },
+    {
+      "alternate_price": "213.00",
+      "displayed_price": "180.00",
+      "listing_count": 4,
+      "price": 180,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "4",
+      "section": "Lower Level 115"
+    },
+    {
+      "alternate_price": "296.00",
+      "displayed_price": "251.00",
+      "listing_count": 3,
+      "price": 251,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "6",
+      "section": "Lower Level 116"
+    },
+    {
+      "alternate_price": "242.00",
+      "displayed_price": "205.00",
+      "listing_count": 3,
+      "price": 205,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "2",
+      "section": "Lower Level 118"
+    },
+    {
+      "alternate_price": "287.00",
+      "displayed_price": "244.00",
+      "listing_count": 4,
+      "price": 244,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "13",
+      "section": "Lower Level 119"
+    },
+    {
+      "alternate_price": "234.00",
+      "displayed_price": "198.00",
+      "listing_count": 5,
+      "price": 198,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "2",
+      "section": "Lower Level 120"
+    },
+    {
+      "alternate_price": "255.00",
+      "displayed_price": "216.00",
+      "listing_count": 8,
+      "price": 216,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "1",
+      "section": "Lower Level 122"
+    },
+    {
+      "alternate_price": "78.00",
+      "displayed_price": "66.00",
+      "listing_count": 11,
+      "price": 66,
+      "price_source": "p",
+      "quantity": "10",
+      "row": "17",
+      "section": "Middle Level 201"
+    },
+    {
+      "alternate_price": "62.00",
+      "displayed_price": "52.00",
+      "listing_count": 5,
+      "price": 52,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "23",
+      "section": "Middle Level 202"
+    },
+    {
+      "alternate_price": "59.00",
+      "displayed_price": "50.00",
+      "listing_count": 16,
+      "price": 50,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "20",
+      "section": "Middle Level 203"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "51.00",
+      "listing_count": 9,
+      "price": 51,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "23",
+      "section": "Middle Level 204"
+    },
+    {
+      "alternate_price": "49.00",
+      "displayed_price": "41.00",
+      "listing_count": 13,
+      "price": 41,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "18",
+      "section": "Middle Level 205"
+    },
+    {
+      "alternate_price": "66.00",
+      "displayed_price": "56.00",
+      "listing_count": 5,
+      "price": 56,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "19",
+      "section": "Middle Level 206"
+    },
+    {
+      "alternate_price": "52.00",
+      "displayed_price": "44.00",
+      "listing_count": 10,
+      "price": 44,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "19",
+      "section": "Middle Level 207"
+    },
+    {
+      "alternate_price": "94.00",
+      "displayed_price": "81.00",
+      "listing_count": 7,
+      "price": 81,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "24",
+      "section": "Middle Level 208"
+    },
+    {
+      "alternate_price": "146.00",
+      "displayed_price": "122.00",
+      "listing_count": 5,
+      "price": 122,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "3",
+      "section": "Middle Level 209"
+    },
+    {
+      "alternate_price": "74.00",
+      "displayed_price": "63.00",
+      "listing_count": 10,
+      "price": 63,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "20",
+      "section": "Middle Level 210"
+    },
+    {
+      "alternate_price": "85.00",
+      "displayed_price": "72.00",
+      "listing_count": 18,
+      "price": 72,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "14",
+      "section": "Middle Level 211"
+    },
+    {
+      "alternate_price": "90.00",
+      "displayed_price": "77.00",
+      "listing_count": 16,
+      "price": 77,
+      "price_source": "p",
+      "quantity": "8",
+      "row": "23",
+      "section": "Middle Level 212"
+    },
+    {
+      "alternate_price": "80.00",
+      "displayed_price": "68.00",
+      "listing_count": 18,
+      "price": 68,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "24",
+      "section": "Middle Level 213"
+    },
+    {
+      "alternate_price": "75.00",
+      "displayed_price": "64.00",
+      "listing_count": 14,
+      "price": 64,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "23",
+      "section": "Middle Level 214"
+    },
+    {
+      "alternate_price": "111.00",
+      "displayed_price": "95.00",
+      "listing_count": 5,
+      "price": 95,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "10",
+      "section": "Middle Level 215"
+    },
+    {
+      "alternate_price": "79.00",
+      "displayed_price": "67.00",
+      "listing_count": 13,
+      "price": 67,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "22",
+      "section": "Middle Level 216"
+    },
+    {
+      "alternate_price": "72.00",
+      "displayed_price": "61.00",
+      "listing_count": 9,
+      "price": 61,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "23",
+      "section": "Middle Level 217"
+    },
+    {
+      "alternate_price": "65.00",
+      "displayed_price": "55.00",
+      "listing_count": 11,
+      "price": 55,
+      "price_source": "p",
+      "quantity": "5",
+      "row": "18",
+      "section": "Middle Level 218"
+    },
+    {
+      "alternate_price": "59.00",
+      "displayed_price": "50.00",
+      "listing_count": 25,
+      "price": 50,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "22",
+      "section": "Middle Level 219"
+    },
+    {
+      "alternate_price": "60.00",
+      "displayed_price": "51.00",
+      "listing_count": 7,
+      "price": 51,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "18",
+      "section": "Middle Level 220"
+    },
+    {
+      "alternate_price": "94.00",
+      "displayed_price": "81.00",
+      "listing_count": 8,
+      "price": 81,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "20",
+      "section": "Middle Level 221"
+    },
+    {
+      "alternate_price": "80.00",
+      "displayed_price": "68.00",
+      "listing_count": 16,
+      "price": 68,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "9",
+      "section": "Middle Level 222"
+    },
+    {
+      "alternate_price": "101.00",
+      "displayed_price": "87.00",
+      "listing_count": 15,
+      "price": 87,
+      "price_source": "p",
+      "quantity": "5",
+      "row": "16",
+      "section": "Middle Level 223"
+    },
+    {
+      "alternate_price": "82.00",
+      "displayed_price": "70.00",
+      "listing_count": 18,
+      "price": 70,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "23",
+      "section": "Middle Level 224"
+    },
+    {
+      "alternate_price": "79.00",
+      "displayed_price": "67.00",
+      "listing_count": 14,
+      "price": 67,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "20",
+      "section": "Middle Level 225"
+    },
+    {
+      "alternate_price": "89.00",
+      "displayed_price": "76.00",
+      "listing_count": 13,
+      "price": 76,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "20",
+      "section": "Middle Level 226"
+    },
+    {
+      "alternate_price": "96.00",
+      "displayed_price": "82.00",
+      "listing_count": 13,
+      "price": 82,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "12",
+      "section": "Middle Level 227"
+    },
+    {
+      "alternate_price": "79.00",
+      "displayed_price": "67.00",
+      "listing_count": 14,
+      "price": 67,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "13",
+      "section": "Middle Level 228"
+    },
+    {
+      "alternate_price": "59.00",
+      "displayed_price": "50.00",
+      "listing_count": 3,
+      "price": 50,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "3",
+      "section": "Press Level 1"
+    },
+    {
+      "alternate_price": "38.00",
+      "displayed_price": "31.00",
+      "listing_count": 2,
+      "price": 31,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "2",
+      "section": "Press Level 10"
+    },
+    {
+      "alternate_price": "27.00",
+      "displayed_price": "21.45",
+      "listing_count": 8,
+      "price": 21,
+      "price_source": "p",
+      "quantity": "5",
+      "row": "9",
+      "section": "Press Level 11"
+    },
+    {
+      "alternate_price": "27.00",
+      "displayed_price": "21.45",
+      "listing_count": 5,
+      "price": 21,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "9",
+      "section": "Press Level 12"
+    },
+    {
+      "alternate_price": "27.00",
+      "displayed_price": "22.00",
+      "listing_count": 14,
+      "price": 22,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "10",
+      "section": "Press Level 13"
+    },
+    {
+      "alternate_price": "30.00",
+      "displayed_price": "24.00",
+      "listing_count": 10,
+      "price": 24,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "13",
+      "section": "Press Level 14"
+    },
+    {
+      "alternate_price": "29.00",
+      "displayed_price": "24.00",
+      "listing_count": 16,
+      "price": 24,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "12",
+      "section": "Press Level 15"
+    },
+    {
+      "alternate_price": "32.00",
+      "displayed_price": "26.00",
+      "listing_count": 6,
+      "price": 26,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "9",
+      "section": "Press Level 16"
+    },
+    {
+      "alternate_price": "27.00",
+      "displayed_price": "22.00",
+      "listing_count": 13,
+      "price": 22,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "10",
+      "section": "Press Level 17"
+    },
+    {
+      "alternate_price": "43.00",
+      "displayed_price": "36.00",
+      "listing_count": 5,
+      "price": 36,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "2",
+      "section": "Press Level 18"
+    },
+    {
+      "alternate_price": "30.00",
+      "displayed_price": "24.00",
+      "listing_count": 8,
+      "price": 24,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "9",
+      "section": "Press Level 2"
+    },
+    {
+      "alternate_price": "26.00",
+      "displayed_price": "20.48",
+      "listing_count": 13,
+      "price": 20,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "12",
+      "section": "Press Level 3"
+    },
+    {
+      "alternate_price": "35.00",
+      "displayed_price": "29.00",
+      "listing_count": 6,
+      "price": 29,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "10",
+      "section": "Press Level 4"
+    },
+    {
+      "alternate_price": "27.00",
+      "displayed_price": "22.00",
+      "listing_count": 7,
+      "price": 22,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "13",
+      "section": "Press Level 5"
+    },
+    {
+      "alternate_price": "31.00",
+      "displayed_price": "26.00",
+      "listing_count": 10,
+      "price": 26,
+      "price_source": "p",
+      "quantity": "5",
+      "row": "13",
+      "section": "Press Level 6"
+    },
+    {
+      "alternate_price": "25.00",
+      "displayed_price": "20.48",
+      "listing_count": 12,
+      "price": 20,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "9",
+      "section": "Press Level 7"
+    },
+    {
+      "alternate_price": "28.00",
+      "displayed_price": "22.00",
+      "listing_count": 15,
+      "price": 22,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "10",
+      "section": "Press Level 8"
+    },
+    {
+      "alternate_price": "52.00",
+      "displayed_price": "43.00",
+      "listing_count": 3,
+      "price": 43,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "2",
+      "section": "Press Level 9"
+    }
+  ],
+  "source_id": "7299775",
+  "source_url": "https://www.vividseats.com/calgary-flames-tickets-scotiabank-saddledome-11-6-2026/production/7299775",
+  "title": "Anaheim Ducks at Calgary Flames",
+  "venue": "Scotiabank Saddledome"
+}

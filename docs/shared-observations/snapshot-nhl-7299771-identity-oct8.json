@@ -1,0 +1,716 @@
+{
+  "captured_at": "2026-10-08T05:48:32.414163+00:00",
+  "currency": "USD",
+  "event_date": "2026-11-06T01:00:00+00:00",
+  "event_type": "nhl",
+  "schedule": {
+    "away_team": "Anaheim Ducks",
+    "canonical_venue": "Rogers Place",
+    "country": "Canada",
+    "game_type": 2,
+    "home_team": "Edmonton Oilers",
+    "neutral_site": false,
+    "provider_venue": "Rogers Place",
+    "schedule_id": "2026020260",
+    "season": 20262027,
+    "venue_timezone": "America/Edmonton"
+  },
+  "schema_version": 1,
+  "section_count": 69,
+  "sections": [
+    {
+      "alternate_price": "537.00",
+      "displayed_price": "457.00",
+      "listing_count": 1,
+      "price": 457,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "3A",
+      "section": "Loge 10"
+    },
+    {
+      "alternate_price": "477.00",
+      "displayed_price": "405.00",
+      "listing_count": 1,
+      "price": 405,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "1A",
+      "section": "Loge 21"
+    },
+    {
+      "alternate_price": "688.00",
+      "displayed_price": "586.00",
+      "listing_count": 1,
+      "price": 586,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "2B",
+      "section": "Loge 28"
+    },
+    {
+      "alternate_price": "497.00",
+      "displayed_price": "423.00",
+      "listing_count": 1,
+      "price": 423,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "2A",
+      "section": "Loge 29"
+    },
+    {
+      "alternate_price": "524.00",
+      "displayed_price": "446.00",
+      "listing_count": 1,
+      "price": 446,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "3A",
+      "section": "Loge 3"
+    },
+    {
+      "alternate_price": "634.00",
+      "displayed_price": "540.00",
+      "listing_count": 1,
+      "price": 540,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "2A",
+      "section": "Loge 30"
+    },
+    {
+      "alternate_price": "547.00",
+      "displayed_price": "465.00",
+      "listing_count": 1,
+      "price": 465,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "1B",
+      "section": "Loge 9"
+    },
+    {
+      "alternate_price": "186.00",
+      "displayed_price": "157.00",
+      "listing_count": 18,
+      "price": 157,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "2",
+      "section": "Lower Bowl 101"
+    },
+    {
+      "alternate_price": "239.00",
+      "displayed_price": "202.00",
+      "listing_count": 10,
+      "price": 202,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "5",
+      "section": "Lower Bowl 102"
+    },
+    {
+      "alternate_price": "239.00",
+      "displayed_price": "202.00",
+      "listing_count": 17,
+      "price": 202,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "5",
+      "section": "Lower Bowl 103"
+    },
+    {
+      "alternate_price": "205.00",
+      "displayed_price": "173.00",
+      "listing_count": 16,
+      "price": 173,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "2",
+      "section": "Lower Bowl 104"
+    },
+    {
+      "alternate_price": "153.00",
+      "displayed_price": "129.00",
+      "listing_count": 15,
+      "price": 129,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "6",
+      "section": "Lower Bowl 105"
+    },
+    {
+      "alternate_price": "164.00",
+      "displayed_price": "138.00",
+      "listing_count": 22,
+      "price": 138,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "7",
+      "section": "Lower Bowl 107"
+    },
+    {
+      "alternate_price": "172.00",
+      "displayed_price": "145.00",
+      "listing_count": 23,
+      "price": 145,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "5",
+      "section": "Lower Bowl 109"
+    },
+    {
+      "alternate_price": "153.00",
+      "displayed_price": "128.00",
+      "listing_count": 27,
+      "price": 128,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "14",
+      "section": "Lower Bowl 110"
+    },
+    {
+      "alternate_price": "152.00",
+      "displayed_price": "128.00",
+      "listing_count": 26,
+      "price": 128,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "10",
+      "section": "Lower Bowl 112"
+    },
+    {
+      "alternate_price": "161.00",
+      "displayed_price": "135.00",
+      "listing_count": 24,
+      "price": 135,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "12",
+      "section": "Lower Bowl 113"
+    },
+    {
+      "alternate_price": "162.00",
+      "displayed_price": "136.00",
+      "listing_count": 19,
+      "price": 136,
+      "price_source": "p",
+      "quantity": "5",
+      "row": "12",
+      "section": "Lower Bowl 115"
+    },
+    {
+      "alternate_price": "153.00",
+      "displayed_price": "129.00",
+      "listing_count": 11,
+      "price": 129,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "3",
+      "section": "Lower Bowl 117"
+    },
+    {
+      "alternate_price": "331.00",
+      "displayed_price": "280.00",
+      "listing_count": 11,
+      "price": 280,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "1",
+      "section": "Lower Bowl 118"
+    },
+    {
+      "alternate_price": "249.00",
+      "displayed_price": "211.00",
+      "listing_count": 13,
+      "price": 211,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "2",
+      "section": "Lower Bowl 119"
+    },
+    {
+      "alternate_price": "258.00",
+      "displayed_price": "219.00",
+      "listing_count": 14,
+      "price": 219,
+      "price_source": "p",
+      "quantity": "14",
+      "row": "3",
+      "section": "Lower Bowl 120"
+    },
+    {
+      "alternate_price": "208.00",
+      "displayed_price": "176.00",
+      "listing_count": 20,
+      "price": 176,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "6",
+      "section": "Lower Bowl 121"
+    },
+    {
+      "alternate_price": "157.00",
+      "displayed_price": "133.00",
+      "listing_count": 23,
+      "price": 133,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "7",
+      "section": "Lower Bowl 122"
+    },
+    {
+      "alternate_price": "121.00",
+      "displayed_price": "105.00",
+      "listing_count": 21,
+      "price": 105,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "21",
+      "section": "Lower Bowl 124"
+    },
+    {
+      "alternate_price": "131.00",
+      "displayed_price": "110.00",
+      "listing_count": 23,
+      "price": 110,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "7",
+      "section": "Lower Bowl 126"
+    },
+    {
+      "alternate_price": "125.00",
+      "displayed_price": "108.00",
+      "listing_count": 26,
+      "price": 108,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "6",
+      "section": "Lower Bowl 127"
+    },
+    {
+      "alternate_price": "111.00",
+      "displayed_price": "95.00",
+      "listing_count": 30,
+      "price": 95,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "27",
+      "section": "Lower Bowl 129"
+    },
+    {
+      "alternate_price": "139.00",
+      "displayed_price": "117.00",
+      "listing_count": 25,
+      "price": 117,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "6",
+      "section": "Lower Bowl 130"
+    },
+    {
+      "alternate_price": "138.00",
+      "displayed_price": "116.00",
+      "listing_count": 17,
+      "price": 116,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "8",
+      "section": "Lower Bowl 132"
+    },
+    {
+      "alternate_price": "145.00",
+      "displayed_price": "122.00",
+      "listing_count": 23,
+      "price": 122,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "9",
+      "section": "Lower Bowl 134"
+    },
+    {
+      "alternate_price": "525.00",
+      "displayed_price": "447.00",
+      "listing_count": 1,
+      "price": 447,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "5",
+      "section": "SN-A"
+    },
+    {
+      "alternate_price": "444.00",
+      "displayed_price": "377.00",
+      "listing_count": 1,
+      "price": 377,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "1",
+      "section": "SN-AA"
+    },
+    {
+      "alternate_price": "389.00",
+      "displayed_price": "331.00",
+      "listing_count": 1,
+      "price": 331,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "DRL",
+      "section": "SN-D"
+    },
+    {
+      "alternate_price": "389.00",
+      "displayed_price": "331.00",
+      "listing_count": 1,
+      "price": 331,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "1",
+      "section": "SN-DD"
+    },
+    {
+      "alternate_price": "389.00",
+      "displayed_price": "331.00",
+      "listing_count": 2,
+      "price": 331,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "3",
+      "section": "SN-E"
+    },
+    {
+      "alternate_price": "279.00",
+      "displayed_price": "236.00",
+      "listing_count": 1,
+      "price": 236,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "3",
+      "section": "SN-EE"
+    },
+    {
+      "alternate_price": "378.00",
+      "displayed_price": "321.00",
+      "listing_count": 2,
+      "price": 321,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "4",
+      "section": "SNAA"
+    },
+    {
+      "alternate_price": "72.00",
+      "displayed_price": "61.00",
+      "listing_count": 16,
+      "price": 61,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "4",
+      "section": "Upper Bowl 201"
+    },
+    {
+      "alternate_price": "138.00",
+      "displayed_price": "116.00",
+      "listing_count": 11,
+      "price": 116,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "1",
+      "section": "Upper Bowl 202"
+    },
+    {
+      "alternate_price": "79.00",
+      "displayed_price": "67.00",
+      "listing_count": 10,
+      "price": 67,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "4",
+      "section": "Upper Bowl 203"
+    },
+    {
+      "alternate_price": "54.00",
+      "displayed_price": "46.00",
+      "listing_count": 13,
+      "price": 46,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "11",
+      "section": "Upper Bowl 204"
+    },
+    {
+      "alternate_price": "74.00",
+      "displayed_price": "63.00",
+      "listing_count": 20,
+      "price": 63,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "8",
+      "section": "Upper Bowl 205"
+    },
+    {
+      "alternate_price": "48.00",
+      "displayed_price": "40.00",
+      "listing_count": 15,
+      "price": 40,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "10",
+      "section": "Upper Bowl 206"
+    },
+    {
+      "alternate_price": "46.00",
+      "displayed_price": "39.00",
+      "listing_count": 15,
+      "price": 39,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "11",
+      "section": "Upper Bowl 207"
+    },
+    {
+      "alternate_price": "50.00",
+      "displayed_price": "42.00",
+      "listing_count": 16,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "9",
+      "section": "Upper Bowl 208"
+    },
+    {
+      "alternate_price": "46.00",
+      "displayed_price": "38.02",
+      "listing_count": 18,
+      "price": 38,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "5",
+      "section": "Upper Bowl 209"
+    },
+    {
+      "alternate_price": "62.00",
+      "displayed_price": "52.00",
+      "listing_count": 14,
+      "price": 52,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "8",
+      "section": "Upper Bowl 210"
+    },
+    {
+      "alternate_price": "64.00",
+      "displayed_price": "54.00",
+      "listing_count": 13,
+      "price": 54,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "8",
+      "section": "Upper Bowl 211"
+    },
+    {
+      "alternate_price": "49.00",
+      "displayed_price": "41.00",
+      "listing_count": 26,
+      "price": 41,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "7",
+      "section": "Upper Bowl 212"
+    },
+    {
+      "alternate_price": "68.00",
+      "displayed_price": "57.00",
+      "listing_count": 18,
+      "price": 57,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "9",
+      "section": "Upper Bowl 213"
+    },
+    {
+      "alternate_price": "53.00",
+      "displayed_price": "44.00",
+      "listing_count": 18,
+      "price": 44,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "12",
+      "section": "Upper Bowl 214"
+    },
+    {
+      "alternate_price": "45.00",
+      "displayed_price": "38.02",
+      "listing_count": 14,
+      "price": 38,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "12",
+      "section": "Upper Bowl 215"
+    },
+    {
+      "alternate_price": "45.00",
+      "displayed_price": "37.05",
+      "listing_count": 15,
+      "price": 37,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "11",
+      "section": "Upper Bowl 216"
+    },
+    {
+      "alternate_price": "68.00",
+      "displayed_price": "58.00",
+      "listing_count": 14,
+      "price": 58,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "12",
+      "section": "Upper Bowl 217"
+    },
+    {
+      "alternate_price": "66.00",
+      "displayed_price": "56.00",
+      "listing_count": 17,
+      "price": 56,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "11",
+      "section": "Upper Bowl 218"
+    },
+    {
+      "alternate_price": "71.00",
+      "displayed_price": "61.00",
+      "listing_count": 15,
+      "price": 61,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "7",
+      "section": "Upper Bowl 219"
+    },
+    {
+      "alternate_price": "161.00",
+      "displayed_price": "136.00",
+      "listing_count": 12,
+      "price": 136,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "3",
+      "section": "Upper Bowl 220"
+    },
+    {
+      "alternate_price": "67.00",
+      "displayed_price": "57.00",
+      "listing_count": 12,
+      "price": 57,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "6",
+      "section": "Upper Bowl 221"
+    },
+    {
+      "alternate_price": "54.00",
+      "displayed_price": "46.00",
+      "listing_count": 12,
+      "price": 46,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "11",
+      "section": "Upper Bowl 222"
+    },
+    {
+      "alternate_price": "56.00",
+      "displayed_price": "47.00",
+      "listing_count": 22,
+      "price": 47,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "4",
+      "section": "Upper Bowl 223"
+    },
+    {
+      "alternate_price": "47.00",
+      "displayed_price": "39.00",
+      "listing_count": 19,
+      "price": 39,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "8",
+      "section": "Upper Bowl 224"
+    },
+    {
+      "alternate_price": "51.00",
+      "displayed_price": "42.00",
+      "listing_count": 11,
+      "price": 42,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "4",
+      "section": "Upper Bowl 225"
+    },
+    {
+      "alternate_price": "121.00",
+      "displayed_price": "105.00",
+      "listing_count": 3,
+      "price": 105,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "7",
+      "section": "Upper Bowl 226"
+    },
+    {
+      "alternate_price": "75.00",
+      "displayed_price": "64.00",
+      "listing_count": 4,
+      "price": 64,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "1",
+      "section": "Upper Bowl 230"
+    },
+    {
+      "alternate_price": "65.00",
+      "displayed_price": "55.00",
+      "listing_count": 13,
+      "price": 55,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "6",
+      "section": "Upper Bowl 231"
+    },
+    {
+      "alternate_price": "49.00",
+      "displayed_price": "41.00",
+      "listing_count": 14,
+      "price": 41,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "9",
+      "section": "Upper Bowl 232"
+    },
+    {
+      "alternate_price": "56.00",
+      "displayed_price": "47.00",
+      "listing_count": 6,
+      "price": 47,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "4",
+      "section": "Upper Bowl 233"
+    },
+    {
+      "alternate_price": "54.00",
+      "displayed_price": "46.00",
+      "listing_count": 15,
+      "price": 46,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "10",
+      "section": "Upper Bowl 234"
+    }
+  ],
+  "source_id": "7299771",
+  "source_url": "https://www.vividseats.com/edmonton-oilers-tickets-rogers-place-11-5-2026/production/7299771",
+  "title": "Anaheim Ducks at Edmonton Oilers",
+  "venue": "Rogers Place"
+}
