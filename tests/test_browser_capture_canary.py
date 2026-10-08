@@ -34,6 +34,34 @@ class Browser:
 
 
 class CanaryTests(unittest.TestCase):
+    def test_timeout_evidence_keeps_only_fixed_phases_and_finite_timings(self):
+        diagnostics = {
+            'phase': 'event-domcontentloaded', 'timeout_phase': 'event-domcontentloaded',
+            'capture_elapsed_ms': 20453.25,
+            'phase_times_ms': {'performer-navigation': 154.2, 'event-popup': 230,
+                               'event-link-click': True, 'inventory-wait': float('inf'),
+                               'event-identity': -1, 'complete': 600001,
+                               'https://private.example/?token=private': 10},
+            'performer_document_status': 200, 'performer_domcontentloaded': True,
+            'performer_ready_state': 'interactive', 'performer_ready_state_at_click': 'interactive',
+            'event_ready_state': 'loading', 'exception_text': 'private', 'cookies': 'private',
+        }
+        clean = safe_diagnostics(diagnostics)
+        self.assertEqual(clean['timeout_phase'], 'event-domcontentloaded')
+        self.assertEqual(clean['capture_elapsed_ms'], 20453.25)
+        self.assertEqual(clean['phase_times_ms'], {'performer-navigation': 154.2, 'event-popup': 230})
+        self.assertEqual(clean['performer_document_status'], 200)
+        self.assertTrue(clean['performer_domcontentloaded'])
+        self.assertEqual(clean['performer_ready_state_at_click'], 'interactive')
+        self.assertEqual(clean['event_ready_state'], 'loading')
+        self.assertNotIn('private', json.dumps(clean, allow_nan=False))
+        for invalid in (True, -1, float('nan'), float('inf'), '12', 600001):
+            with self.subTest(invalid=invalid):
+                self.assertNotIn('capture_elapsed_ms', safe_diagnostics({'capture_elapsed_ms': invalid}))
+        self.assertEqual(safe_diagnostics({'phase': 'private', 'timeout_phase': 'private',
+                                          'performer_ready_state': 'private',
+                                          'performer_domcontentloaded': 1}), {'responses': []})
+
     def test_normal_navigation_uses_only_explicit_known_routes_and_keeps_capture_wrapper(self):
         known = [{**EVENTS[0], 'url': 'https://www.vividseats.com/wrong-date-slug/production/6493143'}, EVENTS[1]]
         sessions = []

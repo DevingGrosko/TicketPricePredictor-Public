@@ -34,7 +34,8 @@ PUBLIC_PAGE_SCRIPT = """() => {
   event = {id:e.id,page_id:p.id,query_id:n.query?.id,utc_date:e.utcDate,
            title:e.name,venue:e.venue?.name,venue_id:e.venue?.id};
  } catch (_) {}
- return {event, challenge_visible:/(verify (you are|you're) human|access denied|unusual activity|captcha|too many requests)/i.test(text)};
+ return {event, ready_state:document.readyState,
+         challenge_visible:/(verify (you are|you're) human|access denied|unusual activity|captcha|too many requests)/i.test(text)};
 }"""
 
 
@@ -289,8 +290,29 @@ class WebKitInventorySession:
         generation = self.generation
         candidates, finished = deque(maxlen=32), set()
         gate, denied, failure = [None], [None], [None]
-        deadline = time.monotonic() + self.timeout
+        capture_started = time.monotonic()
+        deadline = capture_started + self.timeout
         retain_for_recovery = False
+        performer_page = [None]
+        phase_started = [capture_started]
+        diagnostics["phase_times_ms"] = {}
+
+        def phase(name):
+            now = time.monotonic()
+            previous = diagnostics.get("phase")
+            if previous == name:
+                return
+            if previous is not None:
+                times = diagnostics["phase_times_ms"]
+                times[previous] = round(times.get(previous, 0) + (now - phase_started[0]) * 1000, 2)
+            diagnostics["phase"] = name
+            phase_started[0] = now
+
+        def bounded_timeout(maximum):
+            remaining = (deadline - time.monotonic()) * 1000
+            if remaining <= 0:
+                raise self.timeout_error("The existing capture deadline has expired")
+            return min(maximum, remaining)
 
         def observe(response):
             if generation != self.generation:
@@ -302,6 +324,14 @@ class WebKitInventorySession:
             if status in DENIALS:
                 denied[0] = status
                 remember_denial(http_category(status))
+            if request.resource_type == "document" and gate[0] is None and performer_page[0] is not None:
+                try:
+                    if request.frame is performer_page[0].main_frame:
+                        diagnostics["performer_document_status"] = status
+                except Exception:
+                    # Passive diagnostics must not prevent denial handling if
+                    # a navigation response's frame has already detached.
+                    pass
             query = parse_qs(parsed.query, keep_blank_values=True)
             target = parsed.path in INVENTORY_PATHS and request.method == "GET" and query.get("productionId") == [pid]
             started = request.timing.get("startTime")
@@ -335,6 +365,9 @@ class WebKitInventorySession:
         def check(page):
             stop_after_denial(diagnostics)
             state = page.evaluate(PUBLIC_PAGE_SCRIPT)
+            ready = state.get("ready_state")
+            if ready in ("loading", "interactive", "complete"):
+                diagnostics["performer_ready_state" if page is performer_page[0] else "event_ready_state"] = ready
             if denied[0] is not None:
                 raise VividCaptureError(http_category(denied[0]), diagnostics)
             if state.get("challenge_visible"):
@@ -346,33 +379,48 @@ class WebKitInventorySession:
         context.on("requestfinished", complete)
         try:
             if reload_page:
+                phase("event-reload")
                 gate[0] = time.time() * 1000
-                self.event_page.reload(wait_until="domcontentloaded")
+                self.event_page.reload(wait_until="domcontentloaded", timeout=bounded_timeout(20000))
                 diagnostics["reload_same_browser"] = True
             else:
                 page = context.new_page()
-                page.goto(self.routes[pid], wait_until="load")
+                performer_page[0] = page
+                phase("performer-navigation")
+                # Full load can wait for ancillary resources after the exact
+                # visible event link is usable. Keep its ordinary native click.
+                page.goto(self.routes[pid], wait_until="domcontentloaded", timeout=bounded_timeout(20000))
+                diagnostics["performer_domcontentloaded"] = True
                 popup = None
                 while popup is None and time.monotonic() < deadline:
+                    phase("performer-link-scan")
                     check(page)
                     links = page.locator(f"a[href*='/production/{pid}']")
                     for index in range(min(links.count(), 50)):
                         link = links.nth(index)
-                        href = link.evaluate("node => node.href")
-                        if (event_url_matches(href, pid) and link.get_attribute("target") == "_blank"
-                                and link.is_visible() and link.is_enabled()):
+                        href = link.evaluate("node => node.href", timeout=bounded_timeout(10000))
+                        if (event_url_matches(href, pid) and link.get_attribute("target", timeout=bounded_timeout(10000)) == "_blank"
+                                and link.is_visible() and link.is_enabled(timeout=bounded_timeout(10000))):
                             check(page)
+                            if diagnostics.get("performer_ready_state") is not None:
+                                diagnostics["performer_ready_state_at_click"] = diagnostics["performer_ready_state"]
                             gate[0] = time.time() * 1000
-                            with page.expect_popup(timeout=min(10000, max(1, (deadline-time.monotonic()) * 1000))) as opened:
-                                link.click()
+                            with page.expect_popup(timeout=bounded_timeout(10000)) as opened:
+                                phase("event-link-click")
+                                link.click(timeout=bounded_timeout(10000))
+                                diagnostics["visible_event_link_clicked"] = True
+                                phase("event-popup")
                             popup = opened.value
-                            popup.wait_for_load_state("domcontentloaded")
+                            diagnostics["event_opened_native_popup"] = True
+                            phase("event-domcontentloaded")
+                            popup.wait_for_load_state("domcontentloaded", timeout=bounded_timeout(20000))
                             if not event_url_matches(popup.url, pid):
                                 raise VividCaptureError("event-navigation-identity-mismatch", diagnostics)
                             break
                     if popup is None:
-                        page.wait_for_timeout(100)
+                        page.wait_for_timeout(bounded_timeout(100))
                 if popup is None:
+                    diagnostics["timeout_phase"] = diagnostics.get("phase")
                     raise VividCaptureError("event-link-not-found", diagnostics)
                 self.event_page = popup
                 diagnostics.update(visible_event_link_clicked=True, event_opened_native_popup=True,
@@ -380,6 +428,7 @@ class WebKitInventorySession:
             page = self.event_page
             payload = None
             while time.monotonic() < deadline:
+                phase("inventory-wait")
                 state = check(page)
                 for response in list(candidates):
                     if response.request.frame.page is not page:
@@ -388,6 +437,7 @@ class WebKitInventorySession:
                     if response.request not in finished:
                         continue
                     candidates.remove(response)
+                    phase("inventory-body")
                     body = response.body()
                     if not isinstance(body, bytes) or len(body) > MAX_INVENTORY_BYTES:
                         raise VividCaptureError("unexpected-inventory-payload", diagnostics)
@@ -408,29 +458,44 @@ class WebKitInventorySession:
                         "coverage_ratio": geometry.get("coverage_ratio") if geometry else 0,
                     }
                 if payload is not None and state.get("event") is not None:
+                    phase("event-identity")
                     try:
                         stamp = verified_event_date(state["event"], payload, pid, self.expected_dates[pid],
                             official_game=self.official_games.get(pid), diagnostics=diagnostics)
                     except VividCaptureError as exc:
                         raise VividCaptureError(exc.category, diagnostics) from exc
+                    phase("complete")
                     return payload, stamp
                 if (payload is None and failure[0] is not None and not candidates
                         and time.monotonic() - failure[0][1] >= 5):
                     status = failure[0][0]
                     retain_for_recovery = status == 404
                     raise VividCaptureError(http_category(status), diagnostics, retryable=status >= 500)
-                page.wait_for_timeout(100)
+                phase("inventory-wait")
+                page.wait_for_timeout(bounded_timeout(100))
             if payload is not None:
+                phase("event-identity")
+                diagnostics["timeout_phase"] = diagnostics["phase"]
                 raise VividCaptureError("event-metadata-timeout", diagnostics)
             if failure[0] is not None and not candidates:
                 status = failure[0][0]
                 retain_for_recovery = status == 404
                 raise VividCaptureError(http_category(status), diagnostics, retryable=status >= 500)
             category = "filtered-inventory-only" if diagnostics.get("filtered_responses_rejected") else "provider-inventory-timeout"
+            if category == "provider-inventory-timeout":
+                diagnostics["timeout_phase"] = diagnostics.get("phase")
             raise VividCaptureError(category, diagnostics, retryable=category == "provider-inventory-timeout")
         except self.timeout_error as exc:
+            diagnostics["timeout_phase"] = diagnostics.get("phase")
+            stop_after_denial(diagnostics)
             raise VividCaptureError("provider-inventory-timeout", diagnostics, retryable=True) from exc
         finally:
+            ended = time.monotonic()
+            current = diagnostics.get("phase")
+            if current is not None:
+                times = diagnostics["phase_times_ms"]
+                times[current] = round(times.get(current, 0) + (ended - phase_started[0]) * 1000, 2)
+            diagnostics["capture_elapsed_ms"] = round((ended - capture_started) * 1000, 2)
             self.generation += 1
             context.remove_listener("response", observe)
             context.remove_listener("requestfinished", complete)
