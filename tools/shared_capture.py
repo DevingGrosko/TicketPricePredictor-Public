@@ -88,6 +88,7 @@ class MirrorQueue:
         def reserved(record, size):
             return size + 1024 * sum(ack is None for ack in record['acknowledged'].values())
         used = sum(reserved(self.read(p), p.stat().st_size) for p in self.root.glob('*.json') if p != path)
+        used += sum(p.stat().st_size for p in self.root.rglob('*') if p.is_file() and p.parent != self.root)
         if used + reserved(value, len(data)) > self.byte_limit:
             raise ValueError('Shared queue budget exhausted; pending observations remain intact')
         with tempfile.NamedTemporaryFile(dir=self.root, prefix='.shared-', delete=False) as out:
@@ -251,7 +252,7 @@ def saved_observations(manifest_path, expected_sha256, sport):
 
 
 def run_legacy(sport, directory, pending_dir, health_output, *, timeout=45, runner=None,
-               acknowledgments=None, saved=None):
+               acknowledgments=None, saved=None, legacy_free_state=None):
     import collector
     import nfl_schedule_collector as nfl
     import nhl_schedule_collector as nhl
@@ -271,13 +272,17 @@ def run_legacy(sport, directory, pending_dir, health_output, *, timeout=45, runn
     pending_dir = Path(pending_dir); pending_dir.mkdir(parents=True, exist_ok=True)
     queue_original, post_original = collector.queue_snapshot, collector.post_snapshot_with_retry
     # Mirror ALL existing payloads before replay can unlink an acknowledged PA file.
+    existing_payloads = set()
     for path in sorted({*pending_dir.glob('*.json'), *pending_dir.glob('*.rejected')}):
         if path.is_symlink() or path.stat().st_size > 4 * 1024**2:
             raise ValueError('Invalid existing pending snapshot')
-        mirror.enqueue(json.loads(path.read_bytes()))
+        observation = json.loads(path.read_bytes())
+        mirror.enqueue(observation)
+        existing_payloads.add(hashlib.sha256(encoded(observation)).hexdigest())
     # A prior runner may have cached the mirror but missed saving the PA queue.
     for _path, value in mirror.pending('pythonanywhere'):
-        queue_original(value['payload'], pending_dir)
+        if value['payload_sha256'] not in existing_payloads:
+            queue_original(value['payload'], pending_dir)
     endpoint = f'https://bunnyjeff.pythonanywhere.com/api/{sport}/snapshot'
     def queue(payload, pending):
         path = queue_original(payload, pending)
@@ -329,7 +334,12 @@ def run_legacy(sport, directory, pending_dir, health_output, *, timeout=45, runn
             Path(health_output).write_text(json.dumps(report, indent=2) + '\n')
             code = int(report['status'] != 'healthy')
         else:
-            code = (runner or module.run_schedule_collector)(endpoint, token, False, timeout, Path(health_output), pending_dir)
+            if runner is not None:
+                code = runner(endpoint, token, False, timeout, Path(health_output), pending_dir)
+            else:
+                from tools.shared_capture_policy import run_owner
+                code = run_owner(sport, module, mirror, endpoint, token, timeout,
+                                 Path(health_output), pending_dir, legacy=legacy_free_state)
     health = json.loads(Path(health_output).read_text()) if Path(health_output).exists() else {'status': 'report-unavailable'}
     report = dict(sport=sport, reused_current_observations=sorted(set(reused)),
         pending_pythonanywhere=len(mirror.pending('pythonanywhere')), pending_tidb=len(mirror.pending('tidb')),
@@ -338,7 +348,7 @@ def run_legacy(sport, directory, pending_dir, health_output, *, timeout=45, runn
     return code or int(health['status'] != 'healthy' or report['pending_pythonanywhere'] > 0)
 
 
-def deliver_tidb(sport, directory, incoming, *, sender=None):
+def deliver_tidb(sport, directory, incoming, *, sender=None, legacy_free_state=None):
     mirror = MirrorQueue(directory, sport)
     mirror.merge(incoming)
     if sender is None:
@@ -355,9 +365,15 @@ def deliver_tidb(sport, directory, incoming, *, sender=None):
             mirror.acknowledge(value['payload'], 'tidb', response)
         except Exception as exc:
             errors.append(type(exc).__name__)
-    report = dict(sport=sport, pending_tidb=len(mirror.pending('tidb')), error_types=errors)
+    legacy = {}
+    if legacy_free_state is not None:
+        from tools.shared_capture_policy import replay_free_pending
+        legacy = replay_free_pending(sport, legacy_free_state, sender=sender)
+        errors.extend(legacy['errors'])
+    report = dict(sport=sport, pending_tidb=len(mirror.pending('tidb')), error_types=errors,
+                  legacy_replay=legacy)
     print('SHARED_TIDB_REPORT ' + json.dumps(report), flush=True)
-    return int(bool(errors or report['pending_tidb']))
+    return int(bool(errors or report['pending_tidb'] or legacy.get('pending')))
 
 
 def main():
@@ -370,6 +386,7 @@ def main():
     parser.add_argument('--incoming')
     parser.add_argument('--timeout', type=int, default=45)
     parser.add_argument('--acknowledgments')
+    parser.add_argument('--legacy-free-state')
     parser.add_argument('--saved-manifest')
     parser.add_argument('--manifest-sha256')
     args = parser.parse_args()
@@ -381,10 +398,10 @@ def main():
                 parser.error('Saved replay requires both public manifest and its SHA-256')
             saved = saved_observations(args.saved_manifest, args.manifest_sha256, args.sport) if args.saved_manifest else None
             return run_legacy(args.sport, args.directory, args.pending_dir, args.health_output, timeout=args.timeout,
-                              acknowledgments=args.acknowledgments, saved=saved)
+                              acknowledgments=args.acknowledgments, saved=saved, legacy_free_state=args.legacy_free_state)
         if not args.incoming:
             parser.error('deliver requires incoming')
-        return deliver_tidb(args.sport, args.directory, args.incoming)
+        return deliver_tidb(args.sport, args.directory, args.incoming, legacy_free_state=args.legacy_free_state)
     except Exception as exc:
         print('SHARED_CAPTURE_FAILED ' + type(exc).__name__, flush=True)
         return 1
