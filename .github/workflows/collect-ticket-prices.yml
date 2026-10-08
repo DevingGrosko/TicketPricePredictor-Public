@@ -3,19 +3,9 @@ name: Collect ticket prices
 run-name: Collect ticket prices (${{ inputs.dispatch_source || github.event_name }})
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      # Run the current collectors immediately after this workflow changes.
-      # Ordinary code pushes do not start a ticket collection cycle. A
-      # workflow-only commit also provides a clean new run ID when replaying
-      # snapshots that were queued during a deployment or verifying a resolver fix.
-      - ".github/workflows/collect-ticket-prices.yml"
   schedule:
-    # Best-effort baseball recovery trigger. PythonAnywhere dispatches the
-    # reliable :08/:38 cadence. The :53 fallback maps to the same half-hour
-    # baseball slot as :38 and is intentionally skipped by the league jobs.
+    # PythonAnywhere requests :08/:38; the free backup requests :07/:37.
+    # This older recovery clock is also subject to the same per-sport slot gate.
     - cron: "53 */6 * * *"
   workflow_dispatch:
     inputs:
@@ -24,11 +14,11 @@ on:
         required: false
         default: manual
       browser_engine:
-        description: Browser for this manual collection; recurring dispatches keep Chrome
+        description: Capture engine; recurring and omitted dispatch inputs use stock WebKit
         type: choice
         required: false
         options: [chrome, firefox, webkit]
-        default: chrome
+        default: webkit
       browser_navigation:
         description: Firefox navigation mode; WebKit always uses ordinary team links
         type: choice
@@ -41,7 +31,12 @@ on:
         required: false
         default: false
       shared_capture:
-        description: Manual pilot captures once for both stores; recurring defaults stay unchanged
+        description: Capture each observation once and deliver it to both stores
+        type: boolean
+        required: false
+        default: true
+      manual_repair:
+        description: Explicit manual repair may attempt a slot already attempted by the owner
         type: boolean
         required: false
         default: false
@@ -109,31 +104,45 @@ jobs:
           retention-days: 14
 
   collect-nfl:
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/main' && github.event.repository.private == false
     env:
-      TICKETSIGNAL_BROWSER_ENGINE: ${{ inputs.browser_engine || 'chrome' }}
+      TICKETSIGNAL_BROWSER_ENGINE: ${{ inputs.browser_engine || 'webkit' }}
       TICKETSIGNAL_FIREFOX_NAVIGATION: ${{ inputs.browser_engine == 'firefox' && inputs.browser_navigation || 'direct' }}
+      SHARED_CAPTURE: ${{ github.event_name != 'workflow_dispatch' || inputs.shared_capture }}
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      mirror: ${{ steps.shared-capture.outputs.attempted || steps.saved-delivery.outputs.attempted }}
     concurrency:
       group: nfl-ticket-price-collector
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
+      # The gate is standard-library only and runs inside the existing writer lock.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
       - name: Select the half-hour NFL slot
         id: cadence
         env:
-          DISPATCH_SOURCE: ${{ inputs.dispatch_source }}
+          GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
+          MANUAL_REPAIR: ${{ inputs.manual_repair }}
+          DELIVERY_ONLY: ${{ inputs.delivery_only }}
         run: |
-          if [[ "$EVENT_NAME" == "schedule" ]]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping NFL on the best-effort GitHub baseball recovery schedule."
-          else
+          if [[ "$EVENT_NAME" == 'workflow_dispatch' && "$DELIVERY_ONLY" == 'true' ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "NFL evaluates every dispatched 30-minute cycle."
+            echo "Explicit saved delivery makes no new browser capture."
+          else
+            repair=()
+            if [[ "$EVENT_NAME" == 'workflow_dispatch' && "$MANUAL_REPAIR" == 'true' ]]; then
+              repair=(--manual-repair)
+            fi
+            python -m tools.single_capture_owner slot-gate --sport nfl "${repair[@]}"
           fi
-
-      - if: steps.cadence.outputs.run == 'true'
-        uses: actions/checkout@v7
 
       - if: steps.cadence.outputs.run == 'true'
         uses: actions/setup-python@v6
@@ -154,18 +163,18 @@ jobs:
         if: steps.cadence.outputs.run == 'true'
         run: python -m pip install "selenium>=4.26.1,<5" "SQLAlchemy>=2,<3"
 
-      - name: Pin the opt-in Firefox runtime
-        if: steps.cadence.outputs.run == 'true' && inputs.browser_engine == 'firefox'
+      - name: Pin the optional Firefox runtime
+        if: steps.cadence.outputs.run == 'true' && env.TICKETSIGNAL_BROWSER_ENGINE == 'firefox' && !inputs.delivery_only
         run: python -m pip install -r requirements-collector.txt
 
-      - name: Install the opt-in stock WebKit runtime
-        if: steps.cadence.outputs.run == 'true' && inputs.browser_engine == 'webkit' && !inputs.delivery_only
+      - name: Install stock WebKit for the shared capture owner
+        if: steps.cadence.outputs.run == 'true' && env.TICKETSIGNAL_BROWSER_ENGINE == 'webkit' && !inputs.delivery_only
         run: |
           python -m pip install -r requirements-webkit-collector.txt
           python -m playwright install --with-deps webkit
 
-      - name: Verify stock Firefox and geckodriver for this manual trial
-        if: steps.cadence.outputs.run == 'true' && inputs.browser_engine == 'firefox'
+      - name: Verify stock Firefox and geckodriver for a requested Firefox capture
+        if: steps.cadence.outputs.run == 'true' && env.TICKETSIGNAL_BROWSER_ENGINE == 'firefox' && !inputs.delivery_only
         run: |
           command -v firefox
           command -v geckodriver
@@ -173,21 +182,30 @@ jobs:
           geckodriver --version
 
       - name: Validate explicit performer navigation uses a supported engine
-        if: inputs.browser_navigation == 'performer'
+        if: steps.cadence.outputs.run == 'true' && inputs.browser_navigation == 'performer'
         env:
-          BROWSER_ENGINE: ${{ inputs.browser_engine }}
+          BROWSER_ENGINE: ${{ env.TICKETSIGNAL_BROWSER_ENGINE }}
         run: python -c 'import os; assert os.environ["BROWSER_ENGINE"] in {"firefox", "webkit"}'
 
-      - name: Restore the optional immutable NFL shared queue
-        if: steps.cadence.outputs.run == 'true' && (inputs.shared_capture || inputs.delivery_only)
+      - name: Restore immutable NFL shared observations
+        if: steps.cadence.outputs.run == 'true' && (env.SHARED_CAPTURE == 'true' || inputs.delivery_only)
         uses: actions/cache/restore@v5
         with:
           path: shared-capture/nfl
           key: shared-capture-v1-nfl-capture-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: shared-capture-v1-nfl-capture-
 
+      - name: Restore old free NFL pending state for the same owner
+        if: steps.cadence.outputs.run == 'true' && (env.SHARED_CAPTURE == 'true' || inputs.delivery_only)
+        uses: actions/cache/restore@v5
+        with:
+          # Read-only here; only the serialized TiDB mirror checkpoints this state.
+          path: free-capture/nfl
+          key: ticketsignal-free-v1-state-nfl-shared-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ticketsignal-free-v1-state-nfl-
+
       - name: Restore independent NFL delivery acknowledgments
-        if: steps.cadence.outputs.run == 'true' && (inputs.shared_capture || inputs.delivery_only)
+        if: steps.cadence.outputs.run == 'true' && (env.SHARED_CAPTURE == 'true' || inputs.delivery_only)
         uses: actions/cache/restore@v5
         with:
           path: shared-acknowledgments/nfl
@@ -195,7 +213,7 @@ jobs:
           restore-keys: shared-capture-v1-nfl-tidb-
 
       - name: Collect due NFL games across the adaptive 30-day window
-        if: steps.cadence.outputs.run == 'true' && !(inputs.shared_capture || inputs.delivery_only)
+        if: steps.cadence.outputs.run == 'true' && env.SHARED_CAPTURE != 'true' && !inputs.delivery_only
         env:
           COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
         run: |
@@ -205,42 +223,46 @@ jobs:
             --health-output nfl_remote_health.json \
             --pending-dir nfl_pending
 
-      - name: Pilot one NFL capture owner or replay the verified saved observations
-        if: steps.cadence.outputs.run == 'true' && (inputs.shared_capture || inputs.delivery_only)
+      - name: Attempt shared NFL capture for the half-hour
+        id: shared-capture
+        if: steps.cadence.outputs.run == 'true' && env.SHARED_CAPTURE == 'true' && !inputs.delivery_only
         env:
           COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
-          DELIVERY_ONLY: ${{ inputs.delivery_only }}
         run: |
-          if [[ "$DELIVERY_ONLY" == 'true' ]]; then
-            python -m tools.shared_capture collect \
-              --sport nfl --directory shared-capture/nfl --acknowledgments shared-acknowledgments/nfl \
-              --pending-dir nfl_pending --health-output nfl_remote_health.json \
-              --saved-manifest docs/shared-observations/manifest-0400.json --manifest-sha256 "$SHARED_SAVED_MANIFEST_SHA256"
-          else
-            xvfb-run --auto-servernum python -m tools.shared_capture collect \
-              --sport nfl --directory shared-capture/nfl --acknowledgments shared-acknowledgments/nfl \
-              --pending-dir nfl_pending --health-output nfl_remote_health.json --timeout 45
-          fi
+          # Record the attempt even when the collector exits with a provider failure.
+          echo "attempted=true" >> "$GITHUB_OUTPUT"
+          xvfb-run --auto-servernum python -m tools.shared_capture collect \
+            --sport nfl --directory shared-capture/nfl --acknowledgments shared-acknowledgments/nfl \
+            --pending-dir nfl_pending --health-output nfl_remote_health.json \
+            --legacy-free-state free-capture/nfl --timeout 45
 
-      - name: Bound the optional NFL shared queue
+      - name: Deliver saved NFL observations to both stores
+        id: saved-delivery
+        if: steps.cadence.outputs.run == 'true' && github.event_name == 'workflow_dispatch' && inputs.delivery_only
+        env:
+          COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
+        run: |
+          echo "attempted=true" >> "$GITHUB_OUTPUT"
+          python -m tools.shared_capture collect \
+            --sport nfl --directory shared-capture/nfl --acknowledgments shared-acknowledgments/nfl \
+            --pending-dir nfl_pending --health-output nfl_remote_health.json \
+            --legacy-free-state free-capture/nfl \
+            --saved-manifest docs/shared-observations/manifest-0400.json --manifest-sha256 "$SHARED_SAVED_MANIFEST_SHA256"
+
+      - name: Bound the NFL shared queue without discarding observations
         id: shared-budget
-        if: always() && steps.cadence.outputs.run == 'true' && (inputs.shared_capture || inputs.delivery_only)
-        run: |
-          python - <<'PYBUDGET'
-          from pathlib import Path
-          path=Path('shared-capture/nfl')
-          assert sum(p.stat().st_size for p in path.rglob('*') if p.is_file()) <= 20*1024**2
-          PYBUDGET
+        if: always() && steps.cadence.outputs.run == 'true' && (env.SHARED_CAPTURE == 'true' || inputs.delivery_only)
+        run: python -m tools.shared_capture_storage queue-budget --directory shared-capture/nfl
 
-      - name: Checkpoint the optional NFL shared queue even after a failed capture
-        if: always() && (inputs.shared_capture || inputs.delivery_only) && steps.shared-budget.outcome == 'success'
+      - name: Checkpoint the NFL shared queue even after a failed capture
+        if: always() && steps.shared-budget.outcome == 'success'
         uses: actions/cache/save@v5
         with:
           path: shared-capture/nfl
           key: shared-capture-v1-nfl-capture-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Export only public NFL shared observations and acknowledgments
-        if: always() && (inputs.shared_capture || inputs.delivery_only) && steps.shared-budget.outcome == 'success'
+        if: always() && steps.shared-budget.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
           name: shared-observations-nfl-${{ github.run_id }}
@@ -249,8 +271,13 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Save pending NFL snapshot queue
+      - name: Bound pending NFL delivery files without discarding them
+        id: pending-budget
         if: always() && steps.cadence.outputs.run == 'true'
+        run: python -m tools.shared_capture_storage queue-budget --directory nfl_pending
+
+      - name: Save pending NFL snapshot queue
+        if: always() && steps.cadence.outputs.run == 'true' && steps.pending-budget.outcome == 'success'
         uses: actions/cache/save@v5
         with:
           path: nfl_pending
@@ -266,31 +293,45 @@ jobs:
           retention-days: 14
 
   collect-nhl:
+    if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/main' && github.event.repository.private == false
     env:
-      TICKETSIGNAL_BROWSER_ENGINE: ${{ inputs.browser_engine || 'chrome' }}
+      TICKETSIGNAL_BROWSER_ENGINE: ${{ inputs.browser_engine || 'webkit' }}
       TICKETSIGNAL_FIREFOX_NAVIGATION: ${{ inputs.browser_engine == 'firefox' && inputs.browser_navigation || 'direct' }}
+      SHARED_CAPTURE: ${{ github.event_name != 'workflow_dispatch' || inputs.shared_capture }}
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      mirror: ${{ steps.shared-capture.outputs.attempted || steps.saved-delivery.outputs.attempted }}
     concurrency:
       group: nhl-ticket-price-collector
       cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
+      # The gate is standard-library only and runs inside the existing writer lock.
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
       - name: Select the half-hour NHL slot
         id: cadence
         env:
-          DISPATCH_SOURCE: ${{ inputs.dispatch_source }}
+          GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
+          MANUAL_REPAIR: ${{ inputs.manual_repair }}
+          DELIVERY_ONLY: ${{ inputs.delivery_only }}
         run: |
-          if [[ "$EVENT_NAME" == "schedule" ]]; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "Skipping NHL on the best-effort GitHub baseball recovery schedule."
-          else
+          if [[ "$EVENT_NAME" == 'workflow_dispatch' && "$DELIVERY_ONLY" == 'true' ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
-            echo "NHL evaluates every dispatched 30-minute cycle."
+            echo "Explicit saved delivery makes no new browser capture."
+          else
+            repair=()
+            if [[ "$EVENT_NAME" == 'workflow_dispatch' && "$MANUAL_REPAIR" == 'true' ]]; then
+              repair=(--manual-repair)
+            fi
+            python -m tools.single_capture_owner slot-gate --sport nhl "${repair[@]}"
           fi
-
-      - if: steps.cadence.outputs.run == 'true'
-        uses: actions/checkout@v7
 
       - if: steps.cadence.outputs.run == 'true'
         uses: actions/setup-python@v6
@@ -311,18 +352,18 @@ jobs:
         if: steps.cadence.outputs.run == 'true'
         run: python -m pip install "selenium>=4.26.1,<5" "SQLAlchemy>=2,<3"
 
-      - name: Pin the opt-in Firefox runtime
-        if: steps.cadence.outputs.run == 'true' && inputs.browser_engine == 'firefox'
+      - name: Pin the optional Firefox runtime
+        if: steps.cadence.outputs.run == 'true' && env.TICKETSIGNAL_BROWSER_ENGINE == 'firefox' && !inputs.delivery_only
         run: python -m pip install -r requirements-collector.txt
 
-      - name: Install the opt-in stock WebKit runtime
-        if: steps.cadence.outputs.run == 'true' && inputs.browser_engine == 'webkit' && !inputs.delivery_only
+      - name: Install stock WebKit for the shared capture owner
+        if: steps.cadence.outputs.run == 'true' && env.TICKETSIGNAL_BROWSER_ENGINE == 'webkit' && !inputs.delivery_only
         run: |
           python -m pip install -r requirements-webkit-collector.txt
           python -m playwright install --with-deps webkit
 
-      - name: Verify stock Firefox and geckodriver for this manual trial
-        if: steps.cadence.outputs.run == 'true' && inputs.browser_engine == 'firefox'
+      - name: Verify stock Firefox and geckodriver for a requested Firefox capture
+        if: steps.cadence.outputs.run == 'true' && env.TICKETSIGNAL_BROWSER_ENGINE == 'firefox' && !inputs.delivery_only
         run: |
           command -v firefox
           command -v geckodriver
@@ -330,29 +371,38 @@ jobs:
           geckodriver --version
 
       - name: Validate explicit performer navigation uses a supported engine
-        if: inputs.browser_navigation == 'performer'
+        if: steps.cadence.outputs.run == 'true' && inputs.browser_navigation == 'performer'
         env:
-          BROWSER_ENGINE: ${{ inputs.browser_engine }}
+          BROWSER_ENGINE: ${{ env.TICKETSIGNAL_BROWSER_ENGINE }}
         run: python -c 'import os; assert os.environ["BROWSER_ENGINE"] in {"firefox", "webkit"}'
 
-      - name: Restore the optional immutable NHL shared queue
-        if: steps.cadence.outputs.run == 'true' && (inputs.shared_capture || inputs.delivery_only)
+      - name: Restore immutable NHL shared observations
+        if: steps.cadence.outputs.run == 'true' && (env.SHARED_CAPTURE == 'true' || inputs.delivery_only)
         uses: actions/cache/restore@v5
         with:
           path: shared-capture/nhl
           key: shared-capture-v1-nhl-capture-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: shared-capture-v1-nhl-capture-
 
+      - name: Restore old free NHL pending state for the same owner
+        if: steps.cadence.outputs.run == 'true' && (env.SHARED_CAPTURE == 'true' || inputs.delivery_only)
+        uses: actions/cache/restore@v5
+        with:
+          # Read-only here; only the serialized TiDB mirror checkpoints this state.
+          path: free-capture/nhl
+          key: ticketsignal-free-v1-state-nhl-shared-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ticketsignal-free-v1-state-nhl-
+
       - name: Restore independent NHL delivery acknowledgments
-        if: steps.cadence.outputs.run == 'true' && (inputs.shared_capture || inputs.delivery_only)
+        if: steps.cadence.outputs.run == 'true' && (env.SHARED_CAPTURE == 'true' || inputs.delivery_only)
         uses: actions/cache/restore@v5
         with:
           path: shared-acknowledgments/nhl
           key: shared-capture-v1-nhl-tidb-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: shared-capture-v1-nhl-tidb-
 
-      - name: Collect due NHL games across the adaptive seven-day window
-        if: steps.cadence.outputs.run == 'true' && !(inputs.shared_capture || inputs.delivery_only)
+      - name: Collect due NHL games across the adaptive 30-day window
+        if: steps.cadence.outputs.run == 'true' && env.SHARED_CAPTURE != 'true' && !inputs.delivery_only
         env:
           COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
         run: |
@@ -362,42 +412,46 @@ jobs:
             --health-output nhl_remote_health.json \
             --pending-dir nhl_pending
 
-      - name: Pilot one NHL capture owner or replay the verified saved observations
-        if: steps.cadence.outputs.run == 'true' && (inputs.shared_capture || inputs.delivery_only)
+      - name: Attempt shared NHL capture for the half-hour
+        id: shared-capture
+        if: steps.cadence.outputs.run == 'true' && env.SHARED_CAPTURE == 'true' && !inputs.delivery_only
         env:
           COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
-          DELIVERY_ONLY: ${{ inputs.delivery_only }}
         run: |
-          if [[ "$DELIVERY_ONLY" == 'true' ]]; then
-            python -m tools.shared_capture collect \
-              --sport nhl --directory shared-capture/nhl --acknowledgments shared-acknowledgments/nhl \
-              --pending-dir nhl_pending --health-output nhl_remote_health.json \
-              --saved-manifest docs/shared-observations/manifest-0400.json --manifest-sha256 "$SHARED_SAVED_MANIFEST_SHA256"
-          else
-            xvfb-run --auto-servernum python -m tools.shared_capture collect \
-              --sport nhl --directory shared-capture/nhl --acknowledgments shared-acknowledgments/nhl \
-              --pending-dir nhl_pending --health-output nhl_remote_health.json --timeout 45
-          fi
+          # Record the attempt even when the collector exits with a provider failure.
+          echo "attempted=true" >> "$GITHUB_OUTPUT"
+          xvfb-run --auto-servernum python -m tools.shared_capture collect \
+            --sport nhl --directory shared-capture/nhl --acknowledgments shared-acknowledgments/nhl \
+            --pending-dir nhl_pending --health-output nhl_remote_health.json \
+            --legacy-free-state free-capture/nhl --timeout 45
 
-      - name: Bound the optional NHL shared queue
+      - name: Deliver saved NHL observations to both stores
+        id: saved-delivery
+        if: steps.cadence.outputs.run == 'true' && github.event_name == 'workflow_dispatch' && inputs.delivery_only
+        env:
+          COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
+        run: |
+          echo "attempted=true" >> "$GITHUB_OUTPUT"
+          python -m tools.shared_capture collect \
+            --sport nhl --directory shared-capture/nhl --acknowledgments shared-acknowledgments/nhl \
+            --pending-dir nhl_pending --health-output nhl_remote_health.json \
+            --legacy-free-state free-capture/nhl \
+            --saved-manifest docs/shared-observations/manifest-0400.json --manifest-sha256 "$SHARED_SAVED_MANIFEST_SHA256"
+
+      - name: Bound the NHL shared queue without discarding observations
         id: shared-budget
-        if: always() && steps.cadence.outputs.run == 'true' && (inputs.shared_capture || inputs.delivery_only)
-        run: |
-          python - <<'PYBUDGET'
-          from pathlib import Path
-          path=Path('shared-capture/nhl')
-          assert sum(p.stat().st_size for p in path.rglob('*') if p.is_file()) <= 20*1024**2
-          PYBUDGET
+        if: always() && steps.cadence.outputs.run == 'true' && (env.SHARED_CAPTURE == 'true' || inputs.delivery_only)
+        run: python -m tools.shared_capture_storage queue-budget --directory shared-capture/nhl
 
-      - name: Checkpoint the optional NHL shared queue even after a failed capture
-        if: always() && (inputs.shared_capture || inputs.delivery_only) && steps.shared-budget.outcome == 'success'
+      - name: Checkpoint the NHL shared queue even after a failed capture
+        if: always() && steps.shared-budget.outcome == 'success'
         uses: actions/cache/save@v5
         with:
           path: shared-capture/nhl
           key: shared-capture-v1-nhl-capture-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Export only public NHL shared observations and acknowledgments
-        if: always() && (inputs.shared_capture || inputs.delivery_only) && steps.shared-budget.outcome == 'success'
+        if: always() && steps.shared-budget.outcome == 'success'
         uses: actions/upload-artifact@v7
         with:
           name: shared-observations-nhl-${{ github.run_id }}
@@ -406,8 +460,13 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      - name: Save pending NHL snapshot queue
+      - name: Bound pending NHL delivery files without discarding them
+        id: pending-budget
         if: always() && steps.cadence.outputs.run == 'true'
+        run: python -m tools.shared_capture_storage queue-budget --directory nhl_pending
+
+      - name: Save pending NHL snapshot queue
+        if: always() && steps.cadence.outputs.run == 'true' && steps.pending-budget.outcome == 'success'
         uses: actions/cache/save@v5
         with:
           path: nhl_pending
@@ -423,28 +482,47 @@ jobs:
           retention-days: 14
 
   mirror-nfl:
-    if: always() && github.event_name == 'workflow_dispatch' && (inputs.shared_capture || inputs.delivery_only)
+    name: mirror-nfl-staging
+    if: always() && needs.collect-nfl.outputs.mirror == 'true'
     needs: collect-nfl
     uses: ./.github/workflows/shared-snapshot-mirror.yml
     with:
       sport: nfl
-      source_ref: 48735f3dd9d70c193e370e8d34cbee9a347f3376
+      source_ref: e68c46746b50c5c1b529318940085492bcbe3ceb
     secrets:
       TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
       TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
       TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
 
   mirror-nhl:
-    if: always() && github.event_name == 'workflow_dispatch' && (inputs.shared_capture || inputs.delivery_only)
+    name: mirror-nhl-staging
+    if: always() && needs.collect-nhl.outputs.mirror == 'true'
     needs: collect-nhl
     uses: ./.github/workflows/shared-snapshot-mirror.yml
     with:
       sport: nhl
-      source_ref: 48735f3dd9d70c193e370e8d34cbee9a347f3376
+      source_ref: e68c46746b50c5c1b529318940085492bcbe3ceb
     secrets:
       TIDB_STAGING_HOST: ${{ secrets.TIDB_STAGING_HOST }}
       TIDB_STAGING_USERNAME: ${{ secrets.TIDB_STAGING_USERNAME }}
       TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
+
+  preserve-shared-cache-budget:
+    if: always() && github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/main' && github.event.repository.private == false
+    needs: [collect-nfl, collect-nhl, mirror-nfl, mirror-nhl]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Retain two completed shared generations and preserve active owners
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -m tools.shared_capture_storage prune-caches
 
   maintain-materialized-analytics:
     if: always()

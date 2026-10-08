@@ -5,7 +5,7 @@ on:
     - cron: '17,47 * * * *'
   workflow_dispatch:
   workflow_run:
-    workflows: [Free TicketSignal collection]
+    workflows: [Collect ticket prices]
     types: [completed]
     branches: [main]
   push:
@@ -17,7 +17,7 @@ concurrency:
   group: ticketsignal-free-publication
   cancel-in-progress: false
 env:
-  FREE_SOURCE_REF: 34c0bae5639b1b34f4b56b152f52d79e229516fd
+  FREE_SOURCE_REF: e68c46746b50c5c1b529318940085492bcbe3ceb
 jobs:
   ready:
     if: github.repository == 'DevingGrosko/TicketPricePredictor-Public' && github.ref == 'refs/heads/main' && github.event.repository.private == false && (github.event_name != 'workflow_run' || github.event.workflow_run.head_repository.full_name == github.repository)
@@ -34,12 +34,18 @@ jobs:
         with:
           ref: ${{ env.FREE_SOURCE_REF }}
           persist-credentials: false
-      - name: Ignore completion of a skipped duplicate collection timer
+      - name: Publish after a canonical capture or real delivery attempt
         id: decision
         env:
           GH_TOKEN: ${{ github.token }}
-          COLLECTION_RUN_ID: ${{ github.event.workflow_run.id }}
-        run: python -m tools.free_live_watchdog --publication-gate
+          OWNER_RUN_ID: ${{ github.event.workflow_run.id }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [[ "$EVENT_NAME" == 'workflow_run' ]]; then
+            python -m tools.single_capture_owner publication-gate --owner-run-id "$OWNER_RUN_ID"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Verify Pages and clean only completed free-pipeline caches
         if: steps.decision.outputs.run == 'true'
         env:

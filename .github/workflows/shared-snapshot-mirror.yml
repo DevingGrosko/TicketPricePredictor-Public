@@ -1,4 +1,4 @@
-# Called only by the explicit legacy-owner manual pilot. No timer or browser.
+# Canonical owner delivery: consume immutable observations with no browser or timer.
 name: Deliver the same saved observation to TiDB
 on:
   workflow_call:
@@ -23,6 +23,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     environment: tidb-staging
+    permissions:
+      contents: read
+      actions: read
     concurrency:
       group: free-refresh-staging-${{ inputs.sport }}-writer
       cancel-in-progress: false
@@ -46,6 +49,12 @@ jobs:
           path: shared-acknowledgments/${{ inputs.sport }}
           key: shared-capture-v1-${{ inputs.sport }}-tidb-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: shared-capture-v1-${{ inputs.sport }}-tidb-
+      - name: Restore old free pending snapshots without another capture
+        uses: actions/cache/restore@v5
+        with:
+          path: free-capture/${{ inputs.sport }}
+          key: ticketsignal-free-v1-state-${{ inputs.sport }}-shared-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: ticketsignal-free-v1-state-${{ inputs.sport }}-
       - name: Download this sport's current public observations
         id: download
         continue-on-error: true
@@ -63,28 +72,39 @@ jobs:
           TIDB_STAGING_PASSWORD: ${{ secrets.TIDB_STAGING_PASSWORD }}
         run: |
           cp bridge/tools/shared_capture.py source/tools/shared_capture.py
+          cp bridge/tools/shared_capture_policy.py source/tools/shared_capture_policy.py
           cp bridge/tools/import_shared_snapshot.py source/tools/import_shared_snapshot.py
           cp bridge/Flask_App/observation_receipt.py source/Flask_App/observation_receipt.py
           cd source
-          python -m tools.shared_capture deliver --sport "$SPORT" --directory "../shared-acknowledgments/$SPORT" --incoming ../incoming
+          python -m tools.shared_capture deliver --sport "$SPORT" --directory "../shared-acknowledgments/$SPORT" --incoming ../incoming --legacy-free-state "../free-capture/$SPORT"
       - name: Bound saved public delivery state
         id: budget
         if: always()
         env:
           SPORT: ${{ inputs.sport }}
         run: |
-          python - <<'PY'
-          import os
-          from pathlib import Path
-          path=Path('shared-acknowledgments')/os.environ['SPORT']
-          assert sum(p.stat().st_size for p in path.rglob('*') if p.is_file()) <= 20*1024**2
-          PY
+          cd bridge
+          python -m tools.shared_capture_storage queue-budget --directory "../shared-acknowledgments/$SPORT"
       - name: Preserve independent delivery acknowledgments and failures
         if: always() && steps.budget.outcome == 'success'
         uses: actions/cache/save@v5
         with:
           path: shared-acknowledgments/${{ inputs.sport }}
           key: shared-capture-v1-${{ inputs.sport }}-tidb-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Bound preserved old free pending state
+        id: legacy-budget
+        if: always()
+        env:
+          SPORT: ${{ inputs.sport }}
+        run: |
+          cd bridge
+          python -m tools.shared_capture_storage queue-budget --directory "../free-capture/$SPORT"
+      - name: Checkpoint old free delivery replay under the same TiDB writer lock
+        if: always() && steps.legacy-budget.outcome == 'success'
+        uses: actions/cache/save@v5
+        with:
+          path: free-capture/${{ inputs.sport }}
+          key: ticketsignal-free-v1-state-${{ inputs.sport }}-shared-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Report missing current capture artifact as a real failure
         if: always() && steps.download.outcome != 'success'
         run: exit 1

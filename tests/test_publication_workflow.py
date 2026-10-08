@@ -10,9 +10,9 @@ class PublicationWorkflowTests(unittest.TestCase):
 
     def test_reviewed_source_keeps_recurring_triggers_and_pipeline_scope(self):
         text = self.text()
-        self.assertIn('  FREE_SOURCE_REF: 34c0bae5639b1b34f4b56b152f52d79e229516fd\n', text)
+        self.assertIn('  FREE_SOURCE_REF: e68c46746b50c5c1b529318940085492bcbe3ceb\n', text)
         self.assertIn("    - cron: '17,47 * * * *'", text)
-        self.assertIn('    workflows: [Free TicketSignal collection]', text)
+        self.assertIn('    workflows: [Collect ticket prices]', text)
         self.assertIn('  group: ticketsignal-free-publication\n  cancel-in-progress: false', text)
         self.assertIn('run: python -m tools.free_live_storage preflight', text)
         self.assertIn("    if: needs.ready.outputs.run == 'true'", text)

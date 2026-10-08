@@ -160,21 +160,21 @@ class CanaryTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 events_from_json(json.dumps(value))
 
-    def test_workflow_keeps_firefox_manual_only_and_existing_recurring_schedule(self):
+    def test_workflow_keeps_explicit_firefox_override_and_existing_recurring_schedule(self):
         root = Path(__file__).resolve().parents[1]
         smoke = (root / '.github/workflows/nhl-smoke-test.yml').read_text()
         collect = (root / '.github/workflows/collect-ticket-prices.yml').read_text()
         self.assertIn("if: github.event_name == 'workflow_dispatch' && (inputs.mode == 'firefox_canary' || inputs.mode == 'webkit_canary')", smoke)
         self.assertIn('default: smoke', smoke)
-        self.assertIn('default: chrome', collect)
-        self.assertEqual(collect.count("TICKETSIGNAL_BROWSER_ENGINE: ${{ inputs.browser_engine || 'chrome' }}"), 2)
+        self.assertIn('default: webkit', collect)
+        self.assertEqual(collect.count("TICKETSIGNAL_BROWSER_ENGINE: ${{ inputs.browser_engine || 'webkit' }}"), 2)
         self.assertIn('cron: "53 */6 * * *"', collect)
         self.assertIn('group: nfl-ticket-price-collector', collect)
         self.assertIn('group: nhl-ticket-price-collector', collect)
         self.assertIn('if: ${{ false }}', collect)  # MLB stays paused.
         self.assertIn('selenium==4.26.1', (root / 'requirements.txt').read_text())
         self.assertIn('selenium==4.50.0', (root / 'requirements-collector.txt').read_text())
-        self.assertEqual(collect.count('Verify stock Firefox and geckodriver for this manual trial'), 2)
+        self.assertEqual(collect.count('Verify stock Firefox and geckodriver for a requested Firefox capture'), 2)
         self.assertIn('canary_pace_seconds:', smoke)
         self.assertIn("CANARY_PACE_SECONDS: ${{ inputs.canary_pace_seconds || '0' }}", smoke)
         self.assertIn('print(360 + 5 * pace)', smoke)

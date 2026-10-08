@@ -308,12 +308,13 @@ class SharedCaptureTests(unittest.TestCase):
             run_legacy('nfl',self.mirror,self.pending,self.health,runner=interrupted)
         self.assertEqual((collector.queue_snapshot,nfl.queue_snapshot,nhl.queue_snapshot),originals)
 
-    def test_workflow_pilot_is_opt_in_and_credentials_are_separate_per_sport_job(self):
+    def test_workflow_shared_owner_defaults_and_credentials_are_separate_per_sport_job(self):
         import yaml
         root=Path(__file__).resolve().parents[1]
         legacy=yaml.load((root/'.github/workflows/collect-ticket-prices.yml').read_text(),Loader=yaml.BaseLoader)
         mirror=yaml.load((root/'.github/workflows/shared-snapshot-mirror.yml').read_text(),Loader=yaml.BaseLoader)
-        self.assertEqual(legacy['on']['workflow_dispatch']['inputs']['shared_capture']['default'],'false')
+        self.assertEqual(legacy['on']['workflow_dispatch']['inputs']['shared_capture']['default'],'true')
+        self.assertEqual(legacy['on']['workflow_dispatch']['inputs']['manual_repair']['default'],'false')
         self.assertEqual(legacy['on']['workflow_dispatch']['inputs']['delivery_only']['default'],'false')
         self.assertEqual(legacy['on']['workflow_dispatch']['inputs']['browser_navigation']['default'],'direct')
         self.assertEqual(legacy['jobs']['collect-baseball']['if'],'${{ false }}')
@@ -323,7 +324,8 @@ class SharedCaptureTests(unittest.TestCase):
         for sport in ('nfl','nhl'):
             job=legacy['jobs']['mirror-'+sport]
             self.assertEqual(job['needs'],'collect-'+sport)
-            self.assertIn('workflow_dispatch',job['if']);self.assertIn('inputs.shared_capture',job['if'])
+            self.assertEqual(job['if'],"always() && needs.collect-"+sport+".outputs.mirror == 'true'")
+            self.assertEqual(job['name'],'mirror-'+sport+'-staging')
             self.assertNotIn('COLLECTOR_INGEST_TOKEN',job['secrets'])
             steps=legacy['jobs']['collect-'+sport]['steps']
             caches=[step for step in steps if step.get('uses','').startswith('actions/cache/restore')]
@@ -332,7 +334,7 @@ class SharedCaptureTests(unittest.TestCase):
             self.assertIn('shared-capture-v1-'+sport+'-tidb-',prefixes)
             consumer_restore=next(step for step in caches if '-tidb-' in step['with']['restore-keys'])
             self.assertEqual(consumer_restore['with']['path'],'shared-acknowledgments/'+sport)
-            own_save=next(step for step in steps if step.get('name','').startswith('Checkpoint the optional'))
+            own_save=next(step for step in steps if step.get('name','').startswith('Checkpoint the '+sport.upper()))
             self.assertIn('github.run_attempt',own_save['with']['key'])
         job=mirror['jobs']['mirror']
         self.assertEqual(job['environment'],'tidb-staging')
