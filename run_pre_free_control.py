@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -11,6 +12,7 @@ import re
 import sys
 import time
 from urllib.parse import parse_qs, urlsplit
+from unittest.mock import patch
 
 SOURCE_COMMIT = "029f1cdb93ed6fd70f56f6ab6e0f32f173a6e22e"
 SOURCE_HASHES = {
@@ -75,7 +77,7 @@ class PassiveLogs:
         return entries
 
 
-def run(source, output, *, headless, timeout):
+def run(source, output, *, headless, timeout, chrome_binary=None):
     if not 10 <= timeout <= 60:
         raise ValueError("timeout-must-be-between-10-and-60-seconds")
     if output.exists():
@@ -91,7 +93,18 @@ def run(source, output, *, headless, timeout):
     try:
         browser_class, parser = import_historical(source)
         report["source_integrity_verified"] = True
-        browser = browser_class(headless=headless, timeout=timeout)
+        if chrome_binary is not None:
+            if not chrome_binary.is_absolute() or not chrome_binary.is_file():
+                raise ValueError("explicit-chrome-binary-is-unavailable")
+            from selenium import webdriver
+            original_options = webdriver.ChromeOptions
+
+            def selected_browser_options():
+                options = original_options()
+                options.binary_location = str(chrome_binary)
+                return options
+        with patch('selenium.webdriver.ChromeOptions', selected_browser_options) if chrome_binary else nullcontext():
+            browser = browser_class(headless=headless, timeout=timeout)
         import selenium
         capabilities = browser.driver.capabilities
         runtime = {"selenium": selenium.__version__, "platform": sys.platform}
@@ -132,5 +145,7 @@ if __name__ == "__main__":
     cli.add_argument("--output", type=Path, required=True)
     cli.add_argument("--headless", action="store_true")
     cli.add_argument("--timeout", type=int, default=45)
+    cli.add_argument("--chrome-binary", type=Path)
     args = cli.parse_args()
-    raise SystemExit(run(args.source_directory.resolve(), args.output, headless=args.headless, timeout=args.timeout))
+    raise SystemExit(run(args.source_directory.resolve(), args.output, headless=args.headless,
+                         timeout=args.timeout, chrome_binary=args.chrome_binary))
