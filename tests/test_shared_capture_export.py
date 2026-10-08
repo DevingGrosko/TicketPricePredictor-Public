@@ -150,7 +150,7 @@ class SharedCaptureExportTests(unittest.TestCase):
                 upload = next(row for row in steps if row.get('name', '').startswith('Export only public'))
                 self.assertEqual(upload['with']['path'], 'shared-export/'+sport+'/')
                 self.assertEqual(upload['with']['if-no-files-found'], 'error')
-                self.assertEqual(upload['if'], "always() && steps.shared-export.outcome == 'success'")
+                self.assertEqual(upload['if'], "always() && steps.shared-upload-budget.outcome == 'success'")
         steps = consumer['jobs']['mirror']['steps']
         download = next(row for row in steps if row.get('id') == 'download')
         self.assertEqual(download['with']['path'], 'incoming')

@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: '17,47 * * * *'
   workflow_dispatch:
+    inputs:
+      owner_run_id:
+        description: Canonical owner requesting publication after capture and mirror completion
+        type: string
+        required: false
+        default: ''
   workflow_run:
     workflows: [Collect ticket prices]
     types: [completed]
@@ -38,10 +44,10 @@ jobs:
         id: decision
         env:
           GH_TOKEN: ${{ github.token }}
-          OWNER_RUN_ID: ${{ github.event.workflow_run.id }}
+          OWNER_RUN_ID: ${{ github.event.workflow_run.id || inputs.owner_run_id }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
-          if [[ "$EVENT_NAME" == 'workflow_run' ]]; then
+          if [[ "$EVENT_NAME" == 'workflow_run' || -n "$OWNER_RUN_ID" ]]; then
             python -m tools.single_capture_owner publication-gate --owner-run-id "$OWNER_RUN_ID"
           else
             echo "run=true" >> "$GITHUB_OUTPUT"
@@ -52,7 +58,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: python -m tools.free_live_storage preflight
       - name: Recover a missed collection tick without blocking publication
-        if: steps.decision.outputs.run == 'true' && github.event_name != 'workflow_run'
+        if: steps.decision.outputs.run == 'true' && github.event_name != 'workflow_run' && !inputs.owner_run_id
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
