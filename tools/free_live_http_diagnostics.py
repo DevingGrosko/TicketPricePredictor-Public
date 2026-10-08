@@ -193,6 +193,27 @@ def http_diagnostics():
 
     def capture(browser, url, *, reload_page=False):
         driver = browser.driver
+        capabilities = getattr(driver, 'capabilities', {})
+        if isinstance(capabilities, dict) and str(capabilities.get('browserName', '')).casefold() == 'firefox':
+            # Firefox's adapter already records native BiDi response evidence.
+            # Chrome's performance-log/CDP proxy is incompatible with Firefox.
+            try:
+                return original(browser, url, **({'reload_page': True} if reload_page else {}))
+            finally:
+                diagnostics = getattr(browser, 'capture_diagnostics', {})
+                diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
+                report = {'browser_engine': 'firefox', 'responses': [
+                    {'path': row['path'], 'status': row['status']}
+                    for row in diagnostics.get('responses') or []
+                    if isinstance(row, dict) and row.get('path') in (
+                        '/hermes/api/v1/listings', '/hermes/api/v2/listings')
+                    and type(row.get('status')) is int][:10]}
+                pid = urlsplit(url).path.rstrip('/').split('/')[-1]
+                if re.fullmatch(r'\d{1,12}', pid):
+                    report['production_id'] = pid
+                if type(diagnostics.get('document_status')) is int:
+                    report['document_status'] = diagnostics['document_status']
+                print('FREE_HTTP_EVIDENCE ' + json.dumps(report), flush=True)
         traced = TracedDriver(driver)
         browser.driver = traced
         try:

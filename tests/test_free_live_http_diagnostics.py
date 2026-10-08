@@ -1,6 +1,7 @@
 import base64
 import json
 import sys
+from io import StringIO
 from types import ModuleType, SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -114,6 +115,50 @@ class HttpDiagnosticsTests(unittest.TestCase):
             self.assertIs(raised.exception,original_error)
             self.assertIs(recovery.capture,capture)
             self.assertIs(browser.driver,driver)
+
+    def test_firefox_native_diagnostics_bypass_chrome_proxy_without_leaking_fields(self):
+        import tools
+        recovery = ModuleType('tools.free_live_provider_recovery')
+        driver = SimpleNamespace(capabilities={'browserName': 'firefox'})
+        browser = SimpleNamespace(driver=driver, capture_diagnostics={})
+        native = {'document_status': 200, 'responses': [
+            {'path': '/hermes/api/v1/listings', 'status': 200, 'Authorization': 'secret'}],
+            'private': 'secret'}
+        calls = []
+        def capture(browser, url, **kwargs):
+            self.assertIs(browser.driver, driver)
+            browser.capture_diagnostics = native
+            calls.append(kwargs)
+            return 'native-body'
+        recovery.capture = capture
+        output = StringIO()
+        with patch.dict(sys.modules, {'tools.free_live_provider_recovery': recovery}), \
+             patch.object(tools, 'free_live_provider_recovery', recovery, create=True), \
+             patch('sys.stdout', output):
+            with http_diagnostics():
+                self.assertEqual(recovery.capture(browser, 'https://www.vividseats.com/production/123',
+                                 reload_page=True), 'native-body')
+        self.assertEqual(calls, [{'reload_page': True}])
+        self.assertIs(browser.capture_diagnostics, native)
+        self.assertIs(browser.driver, driver)
+        self.assertNotIn('secret', output.getvalue())
+
+    def test_firefox_diagnostic_wrapper_preserves_original_failure(self):
+        import tools
+        recovery = ModuleType('tools.free_live_provider_recovery')
+        driver = SimpleNamespace(capabilities={'browserName': 'firefox'})
+        browser = SimpleNamespace(driver=driver, capture_diagnostics=None)
+        original = ValueError('original failure')
+        def capture(browser, url):
+            raise original
+        recovery.capture = capture
+        with patch.dict(sys.modules, {'tools.free_live_provider_recovery': recovery}), \
+             patch.object(tools, 'free_live_provider_recovery', recovery, create=True), \
+             patch('sys.stdout', StringIO()):
+            with http_diagnostics():
+                with self.assertRaises(ValueError) as raised:
+                    recovery.capture(browser, 'https://www.vividseats.com/production/123')
+        self.assertIs(raised.exception, original)
 
 
 if __name__ == '__main__':
