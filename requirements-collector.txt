@@ -1,0 +1,3 @@
+# Opt-in GitHub Firefox collection. PythonAnywhere/web requirements stay separate.
+selenium==4.50.0
+SQLAlchemy>=2,<3

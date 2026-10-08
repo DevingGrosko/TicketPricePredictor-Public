@@ -23,6 +23,12 @@ on:
         description: Service that requested this collection cycle
         required: false
         default: manual
+      browser_engine:
+        description: Browser for this manual collection; recurring dispatches keep Chrome
+        type: choice
+        required: false
+        options: [chrome, firefox]
+        default: chrome
 
 permissions:
   contents: read
@@ -84,6 +90,8 @@ jobs:
           retention-days: 14
 
   collect-nfl:
+    env:
+      TICKETSIGNAL_BROWSER_ENGINE: ${{ inputs.browser_engine || 'chrome' }}
     concurrency:
       group: nfl-ticket-price-collector
       cancel-in-progress: false
@@ -126,6 +134,18 @@ jobs:
         if: steps.cadence.outputs.run == 'true'
         run: python -m pip install "selenium>=4.26.1,<5" "SQLAlchemy>=2,<3"
 
+      - name: Pin the opt-in Firefox runtime
+        if: steps.cadence.outputs.run == 'true' && inputs.browser_engine == 'firefox'
+        run: python -m pip install -r requirements-collector.txt
+
+      - name: Verify stock Firefox and geckodriver for this manual trial
+        if: steps.cadence.outputs.run == 'true' && inputs.browser_engine == 'firefox'
+        run: |
+          command -v firefox
+          command -v geckodriver
+          firefox --version
+          geckodriver --version
+
       - name: Collect due NFL games across the adaptive 30-day window
         if: steps.cadence.outputs.run == 'true'
         env:
@@ -154,6 +174,8 @@ jobs:
           retention-days: 14
 
   collect-nhl:
+    env:
+      TICKETSIGNAL_BROWSER_ENGINE: ${{ inputs.browser_engine || 'chrome' }}
     concurrency:
       group: nhl-ticket-price-collector
       cancel-in-progress: false
@@ -195,6 +217,18 @@ jobs:
       - name: Install NHL collector dependencies
         if: steps.cadence.outputs.run == 'true'
         run: python -m pip install "selenium>=4.26.1,<5" "SQLAlchemy>=2,<3"
+
+      - name: Pin the opt-in Firefox runtime
+        if: steps.cadence.outputs.run == 'true' && inputs.browser_engine == 'firefox'
+        run: python -m pip install -r requirements-collector.txt
+
+      - name: Verify stock Firefox and geckodriver for this manual trial
+        if: steps.cadence.outputs.run == 'true' && inputs.browser_engine == 'firefox'
+        run: |
+          command -v firefox
+          command -v geckodriver
+          firefox --version
+          geckodriver --version
 
       - name: Collect due NHL games across the adaptive seven-day window
         if: steps.cadence.outputs.run == 'true'
