@@ -9,6 +9,16 @@
       "file": "docs/shared-observations/snapshot-nfl-6493143-0400.json",
       "sha256": "1ae4c04e90b67caf9b1e55bc172bc5dbc961b530fce7de139aefc26d7e4307fc",
       "sport": "nfl"
+    },
+    {
+      "file": "docs/shared-observations/snapshot-nfl-6489565-0400.json",
+      "sha256": "03e750bbe7738658138d96eba1bb671528b73c01d54babb533723e8643ea1916",
+      "sport": "nfl"
+    },
+    {
+      "file": "docs/shared-observations/snapshot-nhl-7300510-0400.json",
+      "sha256": "c2f82c35e9ced4274a6f6e85752e6be8cb05e51fe03d0bc22e76837d3df66a9b",
+      "sport": "nhl"
     }
   ],
   "version": 1

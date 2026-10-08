@@ -256,12 +256,12 @@ class SharedCaptureTests(unittest.TestCase):
 
     def test_fixed_real_saved_pilot_replays_both_sports_with_zero_browser_or_schedule_calls(self):
         manifest='docs/shared-observations/manifest-0400.json'
-        digest='4558d24b58cb8745375403760aab4738f9a7058bf5fb672682e2fbfe97400098'
-        for sport,module,sections in (('nfl',nfl,211),('nhl',nhl,60)):
+        digest='6b894990f80fb18f766427767944d0096f74e44bd0683e3630eda9e76999e287'
+        for sport,module,sections in (('nfl',nfl,[211,200]),('nhl',nhl,[60,77])):
             with self.subTest(sport=sport):
                 saved=saved_observations(manifest,digest,sport)
-                self.assertEqual(len(saved),1)
-                self.assertEqual(saved[0]['section_count'],sections)
+                self.assertEqual(len(saved),2)
+                self.assertEqual([row['section_count'] for row in saved],sections)
                 posted=[]
                 def post(endpoint,token,value,**kwargs):
                     posted.append(value);return acknowledgment(value)
@@ -275,7 +275,7 @@ class SharedCaptureTests(unittest.TestCase):
                     self.assertEqual(deliver_tidb(sport,self.root/(sport+'-tidb'),directory,
                                                  sender=lambda value:acknowledgment(value,'tidb')),0)
                 report=json.loads(health.read_text())
-                self.assertEqual((report['mode'],report['captured'],report['replayed']),('delivery-only',0,1))
+                self.assertEqual((report['mode'],report['captured'],report['replayed']),('delivery-only',0,2))
                 self.assertIsNone(report['coverage_percent']);self.assertIsNone(report['scheduled_due'])
                 self.assertEqual(posted,saved)
 
