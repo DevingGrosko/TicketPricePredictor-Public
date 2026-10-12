@@ -116,6 +116,87 @@ class SharedCapturePolicyTests(unittest.TestCase):
         self.assertEqual(rows[-1]['source_id'],'6500001')
         self.assertEqual(calls,['resolve:current-1','capture:current-1','resolve:current-2','capture:current-2'])
 
+    def test_manual_diagnostic_stop_preserves_success_and_defers_remaining_for_normal_restart(self):
+        games=[self.game('nfl','current-'+str(i)) for i in range(3)]
+        state,calls,captures=self.controlled(nfl,games,failure='current-1')
+        with state:
+            code=run_owner('nfl',nfl,self.mirror,'endpoint','token',45,self.health,self.pending,
+                now=lambda:NOW,blocker_diagnostics=True,stop_after_first_failure=True)
+        report=json.loads(self.health.read_text())
+        self.assertEqual(code,1);self.assertTrue(report['diagnostic_stopped'])
+        self.assertFalse(report['deadline_reached']);self.assertEqual(report['status'],'degraded')
+        self.assertEqual(report['deferred_games'],['current-2'])
+        self.assertEqual(report['unfinished_games'],['current-1','current-2'])
+        self.assertEqual(len(captures),1);self.assertNotIn('resolve:current-2',calls)
+        original_path=self.mirror.records()[0][0];original=original_path.read_bytes()
+        checkpoint=json.loads((self.mirror.root/'recovery/state.json').read_text())
+        self.assertEqual(set(checkpoint['pending']),{'current-1','current-2'})
+        state,calls,captures=self.controlled(nfl,games)
+        with state:
+            self.assertEqual(run_owner('nfl',nfl,self.mirror,'endpoint','token',45,self.health,
+                self.pending,now=lambda:NOW),0)
+        self.assertEqual(len(captures),2);self.assertNotIn('capture:current-0',calls)
+        self.assertEqual(original_path.read_bytes(),original)
+        self.assertFalse(json.loads(self.health.read_text())['diagnostic_stopped'])
+
+    def test_manual_diagnostic_stop_also_defers_after_unresolved_without_starting_browsers(self):
+        games=[self.game('nfl','current-'+str(i)) for i in range(2)]
+        state,calls,captures=self.controlled(nfl,games)
+        with state,patch.object(nfl,'resolve_schedule_games',return_value=([],[])) as resolve:
+            self.assertEqual(run_owner('nfl',nfl,self.mirror,'endpoint','token',45,self.health,self.pending,
+                now=lambda:NOW,blocker_diagnostics=True,stop_after_first_failure=True),1)
+        report=json.loads(self.health.read_text())
+        self.assertEqual(resolve.call_count,1);self.assertEqual(captures,[])
+        self.assertTrue(report['diagnostic_stopped']);self.assertEqual(report['deferred_games'],['current-1'])
+        self.assertEqual(report['unfinished_games'],['current-0','current-1'])
+
+    def test_diagnostic_options_reject_implicit_stop_before_any_work(self):
+        with patch.object(nfl,'fetch_schedule_games') as fetch:
+            with self.assertRaisesRegex(ValueError,'explicit blocker'):
+                run_owner('nfl',nfl,self.mirror,'endpoint','token',45,self.health,self.pending,
+                    stop_after_first_failure=True)
+        fetch.assert_not_called();self.assertFalse(self.health.exists())
+
+    def test_progress_includes_only_bounded_public_blocker_metadata(self):
+        output=StringIO()
+        with redirect_stdout(output):
+            capture_progress('nfl','401872994','failed',{},1,diagnostics={
+                'blocker_diagnostic_status':'metadata-only','blocker_element':{
+                    'hit':{'tag':'IFRAME','id':'consent-overlay','src':'https://private?token=secret',
+                        'classes':['overlay','https://private']},'hit_is_iframe':True,
+                    'known_consent_present':True,'html':'secret','text':'private'},
+                'blocker_screenshot_file':'/private/secret.png'})
+        row=json.loads(output.getvalue().split(' ',1)[1])
+        self.assertEqual(row['diagnostics'],{'blocker_diagnostic_status':'metadata-only',
+            'blocker_element':{'hit':{'tag':'IFRAME','id':'consent-overlay','classes':['overlay']},
+                'hit_is_iframe':True,'known_consent_present':True}})
+        self.assertNotIn('private',output.getvalue());self.assertNotIn('secret',output.getvalue())
+
+    def test_production_retries_share_one_screenshot_allowance(self):
+        from vivid_inventory import VividCaptureError
+        games=[self.game('nfl','current-1')];configured=[];starts=[]
+        class Session:
+            def configure_blocker_diagnostics(self,directory,*,screenshot_budget):
+                configured.append((directory,screenshot_budget));self.budget=screenshot_budget
+            def configure_normal_navigation(self,*args,**kwargs):pass
+        class Browser:
+            def __init__(self,**kwargs):
+                starts.append(1);self._webkit_session=Session();self.capture_diagnostics={}
+            def capture(self,url,**kwargs):
+                self.capture_diagnostics={'phase':'event-link-ready'}
+                self._webkit_session.budget.claim()
+                raise VividCaptureError('provider-inventory-timeout',self.capture_diagnostics,retryable=True)
+            def close(self):pass
+        real_capture=nfl._capture_resolution
+        state,calls,captures=self.controlled(nfl,games)
+        with state,patch.object(nfl,'VividNFLBrowser',Browser),patch.object(nfl,'_capture_resolution',real_capture):
+            self.assertEqual(run_owner('nfl',nfl,self.mirror,'endpoint','token',45,self.health,self.pending,
+                now=lambda:NOW,blocker_diagnostics=True,stop_after_first_failure=True),1)
+        self.assertGreaterEqual(len(starts),2)
+        self.assertEqual(len({id(row[1]) for row in configured}),1)
+        self.assertTrue(configured[0][1].attempted)
+        self.assertTrue(all(row[0]==self.root/'nfl-blocker-diagnostics' for row in configured))
+
     def test_imports_old_backlog_once_current_first_fair_twenty_and_original_observation_time(self):
         games = [self.game('nfl', 'current-1')] + [self.game('nfl', 'older-'+str(i), 10) for i in range(21)]
         legacy = self.root/'free'; legacy.mkdir()

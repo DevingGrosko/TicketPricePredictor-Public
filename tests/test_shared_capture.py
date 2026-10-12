@@ -16,7 +16,7 @@ from collector import EventSnapshot, SectionSnapshot, SnapshotUploadError
 from nfl_collector import nfl_snapshot_to_payload
 from nhl_collector import nhl_snapshot_to_payload
 from tools.shared_capture import (MirrorQueue, _log_pa_delivery_failure, deliver_tidb,
-                                  export_observations, run_legacy, saved_observations)
+                                  export_observations, main, run_legacy, saved_observations)
 
 
 def payload(sport='nfl', pid='6493143', captured=None):
@@ -393,6 +393,28 @@ class SharedCaptureTests(unittest.TestCase):
                 run_legacy('nfl',self.mirror,self.pending,self.health,runner=runner)
         runner.assert_not_called()
         with self.assertRaises(ValueError):MirrorQueue(self.root/'mlb','mlb')
+
+    def test_diagnostic_cli_is_live_capture_only_and_forwards_explicit_options(self):
+        import sys
+        from contextlib import redirect_stderr
+        base=['shared_capture','collect','--sport','nfl','--directory',str(self.mirror),
+            '--pending-dir',str(self.pending),'--health-output',str(self.health)]
+        for options in (['--stop-after-first-failure'],
+                        ['--blocker-diagnostics','--saved-bundle','pilot-0400']):
+            with patch.object(sys,'argv',base+options),patch('tools.shared_capture.run_legacy') as run, \
+                 redirect_stderr(StringIO()),self.assertRaises(SystemExit) as error:
+                main()
+            self.assertEqual(error.exception.code,2);run.assert_not_called()
+        with patch.object(sys,'argv',base+['--blocker-diagnostics','--stop-after-first-failure']), \
+             patch('tools.shared_capture.run_legacy',return_value=1) as run:
+            self.assertEqual(main(),1)
+        self.assertTrue(run.call_args.kwargs['blocker_diagnostics'])
+        self.assertTrue(run.call_args.kwargs['stop_after_first_failure'])
+        for values in ({'stop_after_first_failure':True},
+                       {'blocker_diagnostics':True,'saved':[]},
+                       {'blocker_diagnostics':True,'runner':Mock()}):
+            with self.assertRaises(ValueError):
+                run_legacy('nfl',self.mirror,self.pending,self.health,**values)
 
     def test_legacy_failures_propagate_and_aliases_restore_on_interruption(self):
         originals=(collector.queue_snapshot,nfl.queue_snapshot,nhl.queue_snapshot)

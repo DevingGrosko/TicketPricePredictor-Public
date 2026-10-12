@@ -74,6 +74,11 @@ def capture_progress(sport, schedule_id, status, report, elapsed, *, category=No
     if isinstance(responses, list):
         clean['inventory_http_statuses'] = [value['status'] for value in responses[:10]
             if isinstance(value, dict) and type(value.get('status')) is int and 100 <= value['status'] <= 599]
+    if isinstance(diagnostics.get('blocker_element'), dict):
+        from vivid_webkit import safe_blocker_element
+        clean['blocker_element'] = safe_blocker_element(diagnostics['blocker_element'])
+    if diagnostics.get('blocker_diagnostic_status') in ('captured', 'unavailable', 'timeout', 'budget-exhausted', 'metadata-only'):
+        clean['blocker_diagnostic_status'] = diagnostics['blocker_diagnostic_status']
     if clean:
         row['diagnostics'] = clean
     print('SHARED_CAPTURE_PROGRESS ' + json.dumps(row, sort_keys=True, allow_nan=False), flush=True)
@@ -189,8 +194,13 @@ def replay_pa(module, endpoint, token, pending, *, clock=time.monotonic, budget=
 
 
 def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pending,
-              *, legacy=None, now=None, clock=time.monotonic, deadline_seconds=DEADLINE_SECONDS):
+              *, legacy=None, now=None, clock=time.monotonic, deadline_seconds=DEADLINE_SECONDS,
+              blocker_diagnostics=False, stop_after_first_failure=False):
     """Reuse trusted collection functions; resolve/capture current games before older work."""
+    if type(blocker_diagnostics) is not bool or type(stop_after_first_failure) is not bool:
+        raise ValueError('Diagnostic options must be boolean')
+    if stop_after_first_failure and not blocker_diagnostics:
+        raise ValueError('Stopping after a failure requires explicit blocker diagnostics')
     now = now or (lambda: datetime.now(timezone.utc))
     started = now(); slot = half_hour_capture_slot(started); began = clock()
     deadline = began + deadline_seconds
@@ -201,7 +211,7 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
         duplicates=0, failed=0, replayed=0, pending=0, uploads=[], errors=[], captured_current=0,
         capture_slot=slot.isoformat(), started_at=started.isoformat(), deferred_games=[],
         deadline_seconds=deadline_seconds, deadline_reached=False, unresolved=[], provider_gaps=[], excluded_games=[],
-        capture_failures=[])
+        capture_failures=[], blocker_diagnostics=blocker_diagnostics, diagnostic_stopped=False)
     def save():
         report['pending'] = len(list(pending.glob('*.json'))) + len(list(pending.glob('*.rejected')))
         report['archived_pythonanywhere_conflicts'] = len(list(pending.glob('*.archived-conflict')))
@@ -214,6 +224,13 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
     def room():
         return deadline - clock() > PHASE_RESERVE_SECONDS
     try:
+        if blocker_diagnostics:
+            from vivid_webkit import BlockerScreenshotBudget
+            diagnostic_directory = health_output.parent / (sport + '-blocker-diagnostics')
+            if diagnostic_directory.is_symlink():
+                raise ValueError('Blocker diagnostics require a job-local directory')
+            diagnostic_directory.mkdir(parents=True, exist_ok=True)
+            screenshot_budget = BlockerScreenshotBudget()
         restored = read_state(path)
         if restored and (restored.get('version') != 1 or restored.get('sport') != sport
                          or not isinstance(restored.get('pending'), dict)):
@@ -277,6 +294,8 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
             feed, warnings = getattr(module, 'discover_'+sport+'_games')(False, min(timeout, 20))
             report['errors'].extend(warnings)
         for index, game in enumerate(work):
+            if report['diagnostic_stopped']:
+                break
             identity = str(game.schedule_id)
             attempts = []
             if not room():
@@ -309,7 +328,11 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
                         attempts.append(dict(category=CaptureDeadlineReached.category,
                             error_type='CaptureDeadlineReached', capture_diagnostics={}))
                         raise CaptureDeadlineReached('No further browser starts inside this capture budget')
-                    return native_init(browser, *args, **kwargs)
+                    result = native_init(browser, *args, **kwargs)
+                    if blocker_diagnostics and getattr(browser, '_webkit_session', None) is not None:
+                        browser._webkit_session.configure_blocker_diagnostics(
+                            diagnostic_directory, screenshot_budget=screenshot_budget)
+                    return result
                 def traced_capture(browser, *args, **kwargs):
                     try:
                         if not room():
@@ -372,6 +395,9 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
                                                 if row['capture_diagnostics']), {})
                 capture_progress(sport, identity, outcome, report, clock() - began,
                     category=outcome_category, diagnostics=outcome_diagnostics, source_id=source_id)
+                if stop_after_first_failure and outcome in ('failed', 'unresolved', 'provider-gap'):
+                    report['diagnostic_stopped'] = True
+                    report['deferred_games'].extend(str(row.schedule_id) for row in work[index+1:])
             save()
     except BaseException as exc:
         report['errors'].append('Owner: ' + type(exc).__name__)
