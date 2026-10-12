@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 from tests.test_shared_capture import acknowledgment, payload
 from tools.shared_capture import EXPORT_MANIFEST, MirrorQueue, deliver_tidb, export_observations, run_legacy, validate_export
@@ -79,7 +79,7 @@ class SharedCaptureExportTests(unittest.TestCase):
              patch('sys.stdout', StringIO()):
             self.assertEqual(deliver_tidb('nfl', self.destination, self.output, sender=sender, legacy_free_state=legacy), 0)
         self.assertEqual(calls, [value])
-        replay.assert_called_once_with('nfl', legacy, sender=sender)
+        replay.assert_called_once_with('nfl', legacy, sender=sender, clock=ANY, budget=120)
         self.assertEqual(health.read_bytes(), original_health)
         self.assertEqual(json.loads(original_health)['status'], 'degraded')
 
@@ -104,7 +104,7 @@ class SharedCaptureExportTests(unittest.TestCase):
              patch('sys.stdout', StringIO()) as output:
             self.assertEqual(deliver_tidb('nfl', self.destination, self.output, sender=sender, legacy_free_state=legacy), 1)
         self.assertEqual(calls, [value]); self.assertEqual(queue.pending('tidb'), [])
-        replay.assert_called_once_with('nfl', legacy, sender=sender)
+        replay.assert_called_once_with('nfl', legacy, sender=sender, clock=ANY, budget=120)
         self.assertIn('incoming-export-ValueError', output.getvalue())
 
     def test_changed_record_count_digest_wrong_sport_or_nested_download_fails(self):
