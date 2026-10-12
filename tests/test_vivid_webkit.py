@@ -11,7 +11,7 @@ from collector import VividBrowser
 from nfl_collector import VividNFLBrowser
 from vivid_inventory import CurrentInventoryRecovery, VividCaptureError
 from vivid_performer_routes import configure_schedule_navigation
-from vivid_webkit import PUBLIC_PAGE_SCRIPT, PublicDOMDriver, WebKitInventorySession, public_inventory, verified_event_date
+from vivid_webkit import LINK_ACTIONABILITY_SCRIPT, PUBLIC_PAGE_SCRIPT, PublicDOMDriver, WebKitInventorySession, click_timeout_reason, public_inventory, verified_event_date
 
 AT = datetime(2026, 10, 11, 17, tzinfo=timezone.utc)
 URL = 'https://www.vividseats.com/old-slug-3-5-2027/production/123'
@@ -57,6 +57,10 @@ class Response:
 class Link:
     def __init__(self, page): self.page = page
     def evaluate(self, _script, **options):
+        if _script == LINK_ACTIONABILITY_SCRIPT:
+            return {'attached': True, 'has_box': True, 'in_viewport': True, 'receives_pointer': False,
+                    'obstructed_by_dialog': True, 'ready_state': self.page.context.browser.ready_state,
+                    'private_token': 'private'}
         if self.page.context.browser.fail_phase == 'performer-link-scan':
             self.page.context.clock.advance(options['timeout'])
             raise self.page.context.browser.timeout_error('Private timeout message must not enter diagnostics')
@@ -65,6 +69,16 @@ class Link:
     def is_visible(self): return True
     def is_enabled(self, **_options): return True
     def click(self, **options):
+        if options.get('trial'):
+            browser = self.page.context.browser
+            self.page.context.trials += 1
+            if browser.trial_failures:
+                browser.trial_failures -= 1
+                self.page.context.clock.advance(options['timeout'])
+                if browser.denial_during_trial:
+                    self.page.context.emit(Response(self.page.context, self.page, 403, document=True))
+                raise browser.timeout_error('private-token overlay intercepts pointer events')
+            return
         self.page.context.clicks += 1
         if self.page.context.browser.fail_phase == 'event-link-click':
             self.page.context.clock.advance(options['timeout'])
@@ -114,6 +128,13 @@ class Page:
                 return False
         return Popup()
     def wait_for_load_state(self, *_args, **options):
+        if not self.event:
+            self.context.browser.readiness_waits.append(options)
+            if self.context.browser.load_stall:
+                self.context.clock.advance(options['timeout'])
+                raise self.context.browser.timeout_error('private load stall')
+            self.context.browser.ready_state = 'complete'
+            return
         self.context.browser.popup_dom_options.append(options)
         if self.context.browser.fail_phase == 'event-domcontentloaded':
             self.context.clock.advance(options['timeout'])
@@ -136,6 +157,7 @@ class Context:
         self.browser, self.clock = browser, clock
         self.callbacks, self.removed, self.body_reads, self.navigations = {}, [], [], []
         self.clicks = 0
+        self.trials = 0
         self.pending_finish=[]
         self.popup = Page(self, 'https://www.vividseats.com/actual-event/production/'+browser.pid, event=True)
     def set_default_timeout(self, _timeout): pass
@@ -178,6 +200,9 @@ class Browser:
         self.performer_delay_ms = options.get('performer_delay_ms',0)
         self.iframe_status=options.get('iframe_status')
         self.navigation_options,self.popup_dom_options = [],[]
+        self.trial_failures = options.get('trial_failures', 0)
+        self.denial_during_trial = options.get('denial_during_trial', False)
+        self.readiness_waits = []
         self.context = Context(self, clock)
     def new_context(self): return self.context
     def close(self): self.closed = True
@@ -214,6 +239,8 @@ class WebKitTests(unittest.TestCase):
         self.assertEqual(stamp,AT);self.assertEqual(len(clean['tickets']),12)
         self.assertNotIn('private',json.dumps(clean));self.assertEqual(browser.context.body_reads,['123'])
         self.assertEqual(browser.context.clicks,1)
+        self.assertEqual(browser.context.trials,1)
+        self.assertEqual(browser.readiness_waits,[])
         self.assertEqual(set(browser.context.removed),{'response','requestfinished'})
         self.assertEqual(adapter.owner.capture_diagnostics['document_status'],200)
         self.assertTrue(adapter.owner.capture_diagnostics['event_opened_native_popup'])
@@ -254,6 +281,80 @@ class WebKitTests(unittest.TestCase):
                     self.assertTrue(browser.closed);self.assertEqual(browser.context.body_reads,[])
                     self.assertEqual(set(browser.context.removed),{'response','requestfinished'})
                     adapter.close()
+
+    def test_transient_layout_wait_retries_actionability_but_clicks_only_once(self):
+        browser=Browser(self.clock,trial_failures=1)
+        adapter=session(self.clock,[browser]);adapter.timeout=45
+        raw,stamp=adapter.capture(URL)
+        self.assertEqual(stamp,AT);self.assertEqual(len(raw['tickets']),12)
+        self.assertEqual(browser.context.trials,2);self.assertEqual(browser.context.clicks,1)
+        self.assertEqual(browser.context.body_reads,['123'])
+        self.assertEqual(browser.readiness_waits,[dict(timeout=5000)])
+        diagnostic=adapter.owner.capture_diagnostics
+        self.assertTrue(diagnostic['event_link_readiness_wait_completed'])
+        self.assertEqual(diagnostic['event_link_trial_timeout_reason'],'pointer-intercepted')
+        self.assertEqual(diagnostic['event_link_actionability'],{
+            'attached':True,'has_box':True,'in_viewport':True,'receives_pointer':False,
+            'obstructed_by_dialog':True,'ready_state':'interactive'})
+        self.assertEqual(diagnostic['performer_ready_state_at_click'],'complete')
+        self.assertNotIn('private',json.dumps(diagnostic));adapter.close()
+
+    def test_persistent_obstruction_stops_after_two_trials_without_click_or_inventory(self):
+        browser=Browser(self.clock,trial_failures=2,load_stall=True)
+        adapter=session(self.clock,[browser]);adapter.timeout=45
+        with self.assertRaises(VividCaptureError) as error:adapter.capture(URL)
+        self.assertEqual(error.exception.category,'provider-inventory-timeout')
+        self.assertEqual(browser.context.trials,2);self.assertEqual(browser.context.clicks,0)
+        self.assertEqual(browser.context.body_reads,[]);self.assertTrue(browser.closed)
+        diagnostic=adapter.owner.capture_diagnostics
+        self.assertEqual(diagnostic['timeout_phase'],'event-link-ready')
+        self.assertEqual(diagnostic['capture_elapsed_ms'],25000)
+        self.assertFalse(diagnostic['event_link_readiness_wait_completed'])
+        self.assertNotIn('private',json.dumps(diagnostic));adapter.close()
+
+    def test_trial_exhausting_remaining_budget_has_no_load_wait_or_second_attempt(self):
+        browser=Browser(self.clock,trial_failures=2,performer_delay_ms=7500)
+        adapter=session(self.clock,[browser])
+        with self.assertRaises(VividCaptureError):adapter.capture(URL)
+        self.assertEqual(browser.context.trials,1);self.assertEqual(browser.context.clicks,0)
+        self.assertEqual(browser.readiness_waits,[])
+        self.assertEqual(adapter.owner.capture_diagnostics['capture_elapsed_ms'],8000)
+        self.assertEqual(adapter.owner.capture_diagnostics['timeout_phase'],'event-link-ready')
+        self.assertTrue(browser.closed);adapter.close()
+
+    def test_provider_denial_during_trial_stops_without_readiness_retry(self):
+        browser=Browser(self.clock,trial_failures=2,denial_during_trial=True)
+        adapter=session(self.clock,[browser]);adapter.timeout=45
+        with self.assertRaises(VividCaptureError) as error:adapter.capture(URL)
+        self.assertEqual(error.exception.category,'provider-access-denied')
+        self.assertFalse(error.exception.retryable)
+        self.assertEqual(browser.context.trials,1);self.assertEqual(browser.context.clicks,0)
+        self.assertEqual(browser.readiness_waits,[]);self.assertTrue(browser.closed)
+        self.assertEqual(browser.context.body_reads,[]);adapter.close()
+
+    def test_actual_click_timeout_is_never_repeated(self):
+        browser=Browser(self.clock,fail_phase='event-link-click')
+        adapter=session(self.clock,[browser]);adapter.timeout=45
+        with self.assertRaises(VividCaptureError):adapter.capture(URL)
+        self.assertEqual(browser.context.trials,1);self.assertEqual(browser.context.clicks,1)
+        self.assertEqual(browser.readiness_waits,[])
+        diagnostic=adapter.owner.capture_diagnostics
+        self.assertEqual(diagnostic['timeout_phase'],'event-link-click')
+        self.assertEqual(diagnostic['event_link_click_timeout_reason'],'unclassified')
+        self.assertNotIn('Private',json.dumps(diagnostic));adapter.close()
+
+    def test_click_failure_categories_never_include_exception_text(self):
+        for phrase, expected in (
+            ('intercepts pointer events','pointer-intercepted'),
+            ('element is not stable','element-not-stable'),
+            ('element is outside of the viewport','outside-viewport'),
+            ('element is not visible','element-not-visible'),
+            ('element is not enabled','element-not-enabled'),
+            ('element was detached','element-detached'),
+            ('waiting for scheduled navigations','navigation-wait'),
+            ('private error text','unclassified')):
+            with self.subTest(phrase=phrase):
+                self.assertEqual(click_timeout_reason(Exception('private-token: '+phrase)),expected)
 
     def test_popup_dom_wait_uses_only_remaining_budget_after_a_slow_performer(self):
         browser=Browser(self.clock,performer_delay_ms=7500,fail_phase='event-domcontentloaded')

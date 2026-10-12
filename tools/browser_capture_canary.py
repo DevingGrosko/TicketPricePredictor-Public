@@ -82,7 +82,8 @@ def safe_diagnostics(value):
         result['engine'] = value['engine']
     if type(value.get('document_status')) is int:
         result['document_status'] = value['document_status']
-    phases = {'performer-navigation', 'performer-link-scan', 'event-link-click',
+    phases = {'performer-navigation', 'performer-link-scan', 'event-link-ready',
+              'performer-ready-wait', 'event-link-click',
               'event-popup', 'event-domcontentloaded', 'event-reload', 'inventory-wait',
               'inventory-body', 'event-identity', 'complete'}
     for key in ('phase', 'timeout_phase'):
@@ -106,12 +107,27 @@ def safe_diagnostics(value):
         result['acquisition_method'] = value['acquisition_method']
     if value.get('navigation_mode') in ('performer', 'direct'):
         result['navigation_mode'] = value['navigation_mode']
-    for key in ('visible_event_link_clicked', 'event_opened_new_window', 'event_opened_native_popup'):
+    for key in ('visible_event_link_clicked', 'event_opened_new_window', 'event_opened_native_popup',
+                'event_link_readiness_wait', 'event_link_readiness_wait_completed'):
         if type(value.get(key)) is bool:
             result[key] = value[key]
     for key in ('event_link_click_attempts', 'preclick_responses_ignored'):
         if type(value.get(key)) is int:
             result[key] = value[key]
+    if type(value.get('event_link_trial_attempts')) is int and 1 <= value['event_link_trial_attempts'] <= 2:
+        result['event_link_trial_attempts'] = value['event_link_trial_attempts']
+    for key in ('event_link_trial_timeout_reason', 'event_link_click_timeout_reason'):
+        if value.get(key) in ('pointer-intercepted', 'element-not-stable', 'outside-viewport',
+                              'element-not-visible', 'element-not-enabled', 'element-detached',
+                              'navigation-wait', 'unclassified'):
+            result[key] = value[key]
+    actionability = value.get('event_link_actionability')
+    if isinstance(actionability, dict):
+        result['event_link_actionability'] = {
+            key: actionability[key] for key in ('attached', 'has_box', 'in_viewport',
+                'receives_pointer', 'obstructed_by_dialog') if type(actionability.get(key)) is bool}
+        if actionability.get('ready_state') in ('loading', 'interactive', 'complete'):
+            result['event_link_actionability']['ready_state'] = actionability['ready_state']
     if value.get('last_link_error_type') in ('ElementNotInteractableException', 'StaleElementReferenceException'):
         result['last_link_error_type'] = value['last_link_error_type']
     runtime = value.get('runtime')
