@@ -34,6 +34,29 @@ class Browser:
 
 
 class CanaryTests(unittest.TestCase):
+    def test_actionability_diagnostics_keep_only_bounded_public_values(self):
+        clean=safe_diagnostics({
+            'phase':'event-link-ready','timeout_phase':'performer-ready-wait',
+            'event_link_trial_attempts':2,'event_link_readiness_wait':True,
+            'event_link_readiness_wait_completed':False,
+            'event_link_trial_timeout_reason':'pointer-intercepted',
+            'event_link_click_timeout_reason':'private exception',
+            'event_link_actionability':{'attached':True,'has_box':1,'in_viewport':False,
+                'receives_pointer':False,'obstructed_by_dialog':True,
+                'ready_state':'interactive','private_token':'private'},
+        })
+        self.assertEqual(clean['phase'],'event-link-ready')
+        self.assertEqual(clean['timeout_phase'],'performer-ready-wait')
+        self.assertEqual(clean['event_link_trial_attempts'],2)
+        self.assertEqual(clean['event_link_trial_timeout_reason'],'pointer-intercepted')
+        self.assertTrue(clean['event_link_readiness_wait'])
+        self.assertFalse(clean['event_link_readiness_wait_completed'])
+        self.assertEqual(clean['event_link_actionability'],{'attached':True,'in_viewport':False,
+            'receives_pointer':False,'obstructed_by_dialog':True,'ready_state':'interactive'})
+        self.assertNotIn('private',json.dumps(clean))
+        for invalid in (True,0,3,'2'):
+            self.assertNotIn('event_link_trial_attempts',safe_diagnostics({'event_link_trial_attempts':invalid}))
+
     def test_timeout_evidence_keeps_only_fixed_phases_and_finite_timings(self):
         diagnostics = {
             'phase': 'event-domcontentloaded', 'timeout_phase': 'event-domcontentloaded',

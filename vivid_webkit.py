@@ -37,6 +37,34 @@ PUBLIC_PAGE_SCRIPT = """() => {
  return {event, ready_state:document.readyState,
          challenge_visible:/(verify (you are|you're) human|access denied|unusual activity|captcha|too many requests)/i.test(text)};
 }"""
+LINK_ACTIONABILITY_SCRIPT = """node => {
+ const r = node.getBoundingClientRect();
+ const left = Math.max(0, r.left), right = Math.min(innerWidth, r.right);
+ const top = Math.max(0, r.top), bottom = Math.min(innerHeight, r.bottom);
+ const inViewport = right > left && bottom > top;
+ const hit = inViewport ? document.elementFromPoint((left + right) / 2, (top + bottom) / 2) : null;
+ return {attached:node.isConnected, has_box:r.width > 0 && r.height > 0,
+         in_viewport:inViewport, receives_pointer:!!hit && node.contains(hit),
+         obstructed_by_dialog:!!hit?.closest('[role="dialog"], [aria-modal="true"]'),
+         ready_state:document.readyState};
+}"""
+
+
+def click_timeout_reason(error):
+    """Keep fixed actionability categories, never the page's raw exception log."""
+    message = str(error).casefold()
+    for phrase, category in (
+        ('intercepts pointer events', 'pointer-intercepted'),
+        ('element is not stable', 'element-not-stable'),
+        ('element is outside of the viewport', 'outside-viewport'),
+        ('element is not visible', 'element-not-visible'),
+        ('element is not enabled', 'element-not-enabled'),
+        ('element was detached', 'element-detached'),
+        ('waiting for scheduled navigations', 'navigation-wait'),
+    ):
+        if phrase in message:
+            return category
+    return 'unclassified'
 
 
 def stop_after_denial(diagnostics):
@@ -375,6 +403,47 @@ class WebKitInventorySession:
                 raise VividCaptureError("provider-access-denied", diagnostics)
             return state
 
+        def link_timeout(link, error, *, trial):
+            key = "event_link_trial_timeout_reason" if trial else "event_link_click_timeout_reason"
+            diagnostics[key] = click_timeout_reason(error)
+            if time.monotonic() >= deadline:
+                return
+            try:
+                state = link.evaluate(LINK_ACTIONABILITY_SCRIPT, timeout=bounded_timeout(1000))
+                safe = {name: state[name] for name in ("attached", "has_box", "in_viewport",
+                        "receives_pointer", "obstructed_by_dialog") if type(state.get(name)) is bool}
+                if state.get("ready_state") in ("loading", "interactive", "complete"):
+                    safe["ready_state"] = state["ready_state"]
+                diagnostics["event_link_actionability"] = safe
+            except Exception:
+                # Diagnostics cannot hide the original timeout or extend its budget.
+                pass
+
+        def ready_link(page, link):
+            # A trial scrolls and waits for ordinary actionability without clicking.
+            # Keep this outside expect_popup so layout readiness cannot consume the
+            # popup's deadline. Never repeat a real click whose outcome is unknown.
+            for attempt in (1, 2):
+                phase("event-link-ready")
+                diagnostics["event_link_trial_attempts"] = attempt
+                check(page)
+                try:
+                    link.click(trial=True, timeout=bounded_timeout(10000))
+                    return
+                except self.timeout_error as exc:
+                    link_timeout(link, exc, trial=True)
+                    check(page)
+                    if attempt == 2 or time.monotonic() >= deadline:
+                        raise
+                    phase("performer-ready-wait")
+                    diagnostics["event_link_readiness_wait"] = True
+                    try:
+                        page.wait_for_load_state("load", timeout=bounded_timeout(5000))
+                        diagnostics["event_link_readiness_wait_completed"] = True
+                    except self.timeout_error:
+                        diagnostics["event_link_readiness_wait_completed"] = False
+                    check(page)
+
         context.on("response", observe)
         context.on("requestfinished", complete)
         try:
@@ -401,13 +470,18 @@ class WebKitInventorySession:
                         href = link.evaluate("node => node.href", timeout=bounded_timeout(10000))
                         if (event_url_matches(href, pid) and link.get_attribute("target", timeout=bounded_timeout(10000)) == "_blank"
                                 and link.is_visible() and link.is_enabled(timeout=bounded_timeout(10000))):
+                            ready_link(page, link)
                             check(page)
                             if diagnostics.get("performer_ready_state") is not None:
                                 diagnostics["performer_ready_state_at_click"] = diagnostics["performer_ready_state"]
                             gate[0] = time.time() * 1000
                             with page.expect_popup(timeout=bounded_timeout(10000)) as opened:
                                 phase("event-link-click")
-                                link.click(timeout=bounded_timeout(10000))
+                                try:
+                                    link.click(timeout=bounded_timeout(10000))
+                                except self.timeout_error as exc:
+                                    link_timeout(link, exc, trial=False)
+                                    raise
                                 diagnostics["visible_event_link_clicked"] = True
                                 phase("event-popup")
                             popup = opened.value
