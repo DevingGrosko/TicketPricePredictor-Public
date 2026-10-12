@@ -475,10 +475,13 @@ class WebKitInventorySession:
                             if diagnostics.get("performer_ready_state") is not None:
                                 diagnostics["performer_ready_state_at_click"] = diagnostics["performer_ready_state"]
                             gate[0] = time.time() * 1000
-                            with page.expect_popup(timeout=bounded_timeout(10000)) as opened:
+                            # The popup event includes its initial response. Wait
+                            # for it explicitly instead of making the same native
+                            # click also wait for navigation under a shorter clock.
+                            with page.expect_popup(timeout=bounded_timeout(20000)) as opened:
                                 phase("event-link-click")
                                 try:
-                                    link.click(timeout=bounded_timeout(10000))
+                                    link.click(no_wait_after=True, timeout=bounded_timeout(10000))
                                 except self.timeout_error as exc:
                                     link_timeout(link, exc, trial=False)
                                     raise

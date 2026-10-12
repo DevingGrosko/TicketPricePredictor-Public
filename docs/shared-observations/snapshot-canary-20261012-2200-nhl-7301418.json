@@ -1,0 +1,924 @@
+{
+  "captured_at": "2026-10-12T22:05:51.617637+00:00",
+  "currency": "USD",
+  "event_date": "2026-10-12T23:00:00+00:00",
+  "event_type": "nhl",
+  "schema_version": 1,
+  "section_count": 91,
+  "sections": [
+    {
+      "alternate_price": "179.00",
+      "displayed_price": "128.00",
+      "listing_count": 1,
+      "price": 128,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "A",
+      "section": "36"
+    },
+    {
+      "alternate_price": "292.00",
+      "displayed_price": "210.00",
+      "listing_count": 1,
+      "price": 210,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "A",
+      "section": "37"
+    },
+    {
+      "alternate_price": "144.00",
+      "displayed_price": "102.00",
+      "listing_count": 1,
+      "price": 102,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "A",
+      "section": "38"
+    },
+    {
+      "alternate_price": "120.00",
+      "displayed_price": "85.00",
+      "listing_count": 1,
+      "price": 85,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "T8",
+      "section": "GRAND CONCOURSE TERRACE TABLES"
+    },
+    {
+      "alternate_price": "116.00",
+      "displayed_price": "82.00",
+      "listing_count": 1,
+      "price": 82,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "4",
+      "section": "Lower Club 18"
+    },
+    {
+      "alternate_price": "209.00",
+      "displayed_price": "150.00",
+      "listing_count": 1,
+      "price": 150,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "8",
+      "section": "Lower Club 19"
+    },
+    {
+      "alternate_price": "209.00",
+      "displayed_price": "150.00",
+      "listing_count": 2,
+      "price": 150,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "7",
+      "section": "Lower Club 20"
+    },
+    {
+      "alternate_price": "128.00",
+      "displayed_price": "91.00",
+      "listing_count": 6,
+      "price": 91,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "8",
+      "section": "Lower Club 8"
+    },
+    {
+      "alternate_price": "93.00",
+      "displayed_price": "66.00",
+      "listing_count": 2,
+      "price": 66,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "15",
+      "section": "Lower End 1"
+    },
+    {
+      "alternate_price": "42.00",
+      "displayed_price": "29.00",
+      "listing_count": 3,
+      "price": 29,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "13",
+      "section": "Lower End 11"
+    },
+    {
+      "alternate_price": "77.00",
+      "displayed_price": "54.00",
+      "listing_count": 2,
+      "price": 54,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "19",
+      "section": "Lower End 12"
+    },
+    {
+      "alternate_price": "84.00",
+      "displayed_price": "59.00",
+      "listing_count": 2,
+      "price": 59,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "16",
+      "section": "Lower End 13"
+    },
+    {
+      "alternate_price": "84.00",
+      "displayed_price": "59.00",
+      "listing_count": 2,
+      "price": 59,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "22",
+      "section": "Lower End 14"
+    },
+    {
+      "alternate_price": "84.00",
+      "displayed_price": "59.00",
+      "listing_count": 1,
+      "price": 59,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "12",
+      "section": "Lower End 15"
+    },
+    {
+      "alternate_price": "59.00",
+      "displayed_price": "41.00",
+      "listing_count": 3,
+      "price": 41,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "20",
+      "section": "Lower End 16"
+    },
+    {
+      "alternate_price": "130.00",
+      "displayed_price": "92.00",
+      "listing_count": 2,
+      "price": 92,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "4",
+      "section": "Lower End 2"
+    },
+    {
+      "alternate_price": "93.00",
+      "displayed_price": "66.00",
+      "listing_count": 2,
+      "price": 66,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "17",
+      "section": "Lower End 3"
+    },
+    {
+      "alternate_price": "84.00",
+      "displayed_price": "59.00",
+      "listing_count": 2,
+      "price": 59,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "21",
+      "section": "Lower End 4"
+    },
+    {
+      "alternate_price": "106.00",
+      "displayed_price": "75.00",
+      "listing_count": 3,
+      "price": 75,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "24",
+      "section": "Lower Level 18"
+    },
+    {
+      "alternate_price": "114.00",
+      "displayed_price": "81.00",
+      "listing_count": 3,
+      "price": 81,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "22",
+      "section": "Lower Level 7"
+    },
+    {
+      "alternate_price": "120.00",
+      "displayed_price": "85.00",
+      "listing_count": 2,
+      "price": 85,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "13",
+      "section": "Lower Level 9"
+    },
+    {
+      "alternate_price": "108.00",
+      "displayed_price": "76.00",
+      "listing_count": 1,
+      "price": 76,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "6",
+      "section": "Lower Side 10"
+    },
+    {
+      "alternate_price": "99.00",
+      "displayed_price": "70.00",
+      "listing_count": 3,
+      "price": 70,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "C",
+      "section": "LT7"
+    },
+    {
+      "alternate_price": "76.00",
+      "displayed_price": "53.00",
+      "listing_count": 1,
+      "price": 53,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "5",
+      "section": "Mezzanine Center 127"
+    },
+    {
+      "alternate_price": "13.00",
+      "displayed_price": "8.00",
+      "listing_count": 6,
+      "price": 8,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "8",
+      "section": "Mezzanine Center 128"
+    },
+    {
+      "alternate_price": "14.00",
+      "displayed_price": "8.00",
+      "listing_count": 8,
+      "price": 8,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "5",
+      "section": "Mezzanine Center 129"
+    },
+    {
+      "alternate_price": "15.00",
+      "displayed_price": "9.00",
+      "listing_count": 5,
+      "price": 9,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "6",
+      "section": "Mezzanine Center 130"
+    },
+    {
+      "alternate_price": "10.00",
+      "displayed_price": "6.00",
+      "listing_count": 3,
+      "price": 6,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "5",
+      "section": "Mezzanine End 101"
+    },
+    {
+      "alternate_price": "10.00",
+      "displayed_price": "6.00",
+      "listing_count": 7,
+      "price": 6,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "7",
+      "section": "Mezzanine End 102"
+    },
+    {
+      "alternate_price": "17.00",
+      "displayed_price": "10.00",
+      "listing_count": 2,
+      "price": 10,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "3",
+      "section": "Mezzanine End 103"
+    },
+    {
+      "alternate_price": "18.00",
+      "displayed_price": "11.00",
+      "listing_count": 3,
+      "price": 11,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "6",
+      "section": "Mezzanine End 104"
+    },
+    {
+      "alternate_price": "16.00",
+      "displayed_price": "10.00",
+      "listing_count": 4,
+      "price": 10,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "3",
+      "section": "Mezzanine End 105"
+    },
+    {
+      "alternate_price": "10.00",
+      "displayed_price": "6.00",
+      "listing_count": 6,
+      "price": 6,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "8",
+      "section": "Mezzanine End 106"
+    },
+    {
+      "alternate_price": "10.00",
+      "displayed_price": "6.00",
+      "listing_count": 5,
+      "price": 6,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "7",
+      "section": "Mezzanine End 107"
+    },
+    {
+      "alternate_price": "12.00",
+      "displayed_price": "7.00",
+      "listing_count": 8,
+      "price": 7,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "10",
+      "section": "Mezzanine End 116"
+    },
+    {
+      "alternate_price": "10.00",
+      "displayed_price": "6.00",
+      "listing_count": 6,
+      "price": 6,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "13",
+      "section": "Mezzanine End 117"
+    },
+    {
+      "alternate_price": "11.00",
+      "displayed_price": "6.00",
+      "listing_count": 13,
+      "price": 6,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "13",
+      "section": "Mezzanine End 118"
+    },
+    {
+      "alternate_price": "11.00",
+      "displayed_price": "6.00",
+      "listing_count": 9,
+      "price": 6,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "12",
+      "section": "Mezzanine End 119"
+    },
+    {
+      "alternate_price": "10.00",
+      "displayed_price": "6.00",
+      "listing_count": 8,
+      "price": 6,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "11",
+      "section": "Mezzanine End 120"
+    },
+    {
+      "alternate_price": "10.00",
+      "displayed_price": "6.00",
+      "listing_count": 9,
+      "price": 6,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "13",
+      "section": "Mezzanine End 121"
+    },
+    {
+      "alternate_price": "10.00",
+      "displayed_price": "6.00",
+      "listing_count": 8,
+      "price": 6,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "12",
+      "section": "Mezzanine End 122"
+    },
+    {
+      "alternate_price": "10.00",
+      "displayed_price": "6.00",
+      "listing_count": 12,
+      "price": 6,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "11",
+      "section": "Mezzanine End 123"
+    },
+    {
+      "alternate_price": "10.00",
+      "displayed_price": "5.00",
+      "listing_count": 9,
+      "price": 5,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "8",
+      "section": "Mezzanine End 124"
+    },
+    {
+      "alternate_price": "12.00",
+      "displayed_price": "7.00",
+      "listing_count": 6,
+      "price": 7,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "8",
+      "section": "Mezzanine Side 108"
+    },
+    {
+      "alternate_price": "12.00",
+      "displayed_price": "7.00",
+      "listing_count": 5,
+      "price": 7,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "5",
+      "section": "Mezzanine Side 109"
+    },
+    {
+      "alternate_price": "76.00",
+      "displayed_price": "53.00",
+      "listing_count": 3,
+      "price": 53,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "6",
+      "section": "Mezzanine Side 110"
+    },
+    {
+      "alternate_price": "14.00",
+      "displayed_price": "9.00",
+      "listing_count": 7,
+      "price": 9,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "7",
+      "section": "Mezzanine Side 111"
+    },
+    {
+      "alternate_price": "14.00",
+      "displayed_price": "9.00",
+      "listing_count": 5,
+      "price": 9,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "5",
+      "section": "Mezzanine Side 112"
+    },
+    {
+      "alternate_price": "18.00",
+      "displayed_price": "11.00",
+      "listing_count": 1,
+      "price": 11,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "4",
+      "section": "Mezzanine Side 113"
+    },
+    {
+      "alternate_price": "14.00",
+      "displayed_price": "9.00",
+      "listing_count": 8,
+      "price": 9,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "5",
+      "section": "Mezzanine Side 114"
+    },
+    {
+      "alternate_price": "15.00",
+      "displayed_price": "9.00",
+      "listing_count": 4,
+      "price": 9,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "3",
+      "section": "Mezzanine Side 115"
+    },
+    {
+      "alternate_price": "15.00",
+      "displayed_price": "9.00",
+      "listing_count": 6,
+      "price": 9,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "5",
+      "section": "Mezzanine Side 125"
+    },
+    {
+      "alternate_price": "13.00",
+      "displayed_price": "8.00",
+      "listing_count": 7,
+      "price": 8,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "6",
+      "section": "Mezzanine Side 126"
+    },
+    {
+      "alternate_price": "13.00",
+      "displayed_price": "8.00",
+      "listing_count": 4,
+      "price": 8,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "4",
+      "section": "Mezzanine Side 131"
+    },
+    {
+      "alternate_price": "13.00",
+      "displayed_price": "8.00",
+      "listing_count": 4,
+      "price": 8,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "2",
+      "section": "Mezzanine Side 132"
+    },
+    {
+      "alternate_price": "12.00",
+      "displayed_price": "7.00",
+      "listing_count": 9,
+      "price": 7,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "8",
+      "section": "Mezzanine Side 133"
+    },
+    {
+      "alternate_price": "16.00",
+      "displayed_price": "10.00",
+      "listing_count": 5,
+      "price": 10,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "3",
+      "section": "Mezzanine Side 134"
+    },
+    {
+      "alternate_price": "327.00",
+      "displayed_price": "235.00",
+      "listing_count": 1,
+      "price": 235,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "GL1",
+      "section": "Prudential Lounge 6"
+    },
+    {
+      "alternate_price": "179.00",
+      "displayed_price": "128.00",
+      "listing_count": 1,
+      "price": 128,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "A",
+      "section": "Restaurant Ledge 2"
+    },
+    {
+      "alternate_price": "179.00",
+      "displayed_price": "128.00",
+      "listing_count": 1,
+      "price": 128,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "B",
+      "section": "Restaurant Ledge 3"
+    },
+    {
+      "alternate_price": "179.00",
+      "displayed_price": "128.00",
+      "listing_count": 1,
+      "price": 128,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "B",
+      "section": "Restaurant Ledge 4"
+    },
+    {
+      "alternate_price": "38.00",
+      "displayed_price": "26.00",
+      "listing_count": 1,
+      "price": 26,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "B",
+      "section": "S102"
+    },
+    {
+      "alternate_price": "36.00",
+      "displayed_price": "24.00",
+      "listing_count": 1,
+      "price": 24,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "B",
+      "section": "S219"
+    },
+    {
+      "alternate_price": "38.00",
+      "displayed_price": "26.00",
+      "listing_count": 2,
+      "price": 26,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "B",
+      "section": "S221"
+    },
+    {
+      "alternate_price": "74.00",
+      "displayed_price": "52.00",
+      "listing_count": 5,
+      "price": 52,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "ST",
+      "section": "SUITE 109"
+    },
+    {
+      "alternate_price": "40.00",
+      "displayed_price": "27.00",
+      "listing_count": 1,
+      "price": 27,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "B",
+      "section": "Suite 115"
+    },
+    {
+      "alternate_price": "26.00",
+      "displayed_price": "17.00",
+      "listing_count": 2,
+      "price": 17,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "ST",
+      "section": "Suite 123"
+    },
+    {
+      "alternate_price": "37.00",
+      "displayed_price": "25.00",
+      "listing_count": 1,
+      "price": 25,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "C",
+      "section": "Suite 126"
+    },
+    {
+      "alternate_price": "37.00",
+      "displayed_price": "25.00",
+      "listing_count": 1,
+      "price": 25,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "A",
+      "section": "Suite 218"
+    },
+    {
+      "alternate_price": "39.00",
+      "displayed_price": "27.00",
+      "listing_count": 2,
+      "price": 27,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "C",
+      "section": "Suite 228"
+    },
+    {
+      "alternate_price": "36.00",
+      "displayed_price": "24.00",
+      "listing_count": 2,
+      "price": 24,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "B",
+      "section": "Suite 231"
+    },
+    {
+      "alternate_price": "10.00",
+      "displayed_price": "6.00",
+      "listing_count": 8,
+      "price": 6,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "5",
+      "section": "Upper Center 211"
+    },
+    {
+      "alternate_price": "11.00",
+      "displayed_price": "6.00",
+      "listing_count": 9,
+      "price": 6,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "7",
+      "section": "Upper Center 212"
+    },
+    {
+      "alternate_price": "9.00",
+      "displayed_price": "5.00",
+      "listing_count": 3,
+      "price": 5,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "3",
+      "section": "Upper Center 213"
+    },
+    {
+      "alternate_price": "16.00",
+      "displayed_price": "10.00",
+      "listing_count": 4,
+      "price": 10,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "3",
+      "section": "Upper Center 228"
+    },
+    {
+      "alternate_price": "13.00",
+      "displayed_price": "7.00",
+      "listing_count": 12,
+      "price": 7,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "4",
+      "section": "Upper Center 229"
+    },
+    {
+      "alternate_price": "10.00",
+      "displayed_price": "6.00",
+      "listing_count": 9,
+      "price": 6,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "4",
+      "section": "Upper Center 230"
+    },
+    {
+      "alternate_price": "10.00",
+      "displayed_price": "6.00",
+      "listing_count": 10,
+      "price": 6,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "7",
+      "section": "Upper End 208"
+    },
+    {
+      "alternate_price": "10.00",
+      "displayed_price": "6.00",
+      "listing_count": 9,
+      "price": 6,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "4",
+      "section": "Upper End 216"
+    },
+    {
+      "alternate_price": "11.00",
+      "displayed_price": "6.00",
+      "listing_count": 7,
+      "price": 6,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "3",
+      "section": "Upper End 225"
+    },
+    {
+      "alternate_price": "10.00",
+      "displayed_price": "6.00",
+      "listing_count": 7,
+      "price": 6,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "9",
+      "section": "Upper End 233"
+    },
+    {
+      "alternate_price": "15.00",
+      "displayed_price": "9.00",
+      "listing_count": 11,
+      "price": 9,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "1",
+      "section": "Upper Side 209"
+    },
+    {
+      "alternate_price": "10.00",
+      "displayed_price": "6.00",
+      "listing_count": 8,
+      "price": 6,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "3",
+      "section": "Upper Side 210"
+    },
+    {
+      "alternate_price": "15.00",
+      "displayed_price": "9.00",
+      "listing_count": 5,
+      "price": 9,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "2",
+      "section": "Upper Side 214"
+    },
+    {
+      "alternate_price": "15.00",
+      "displayed_price": "9.00",
+      "listing_count": 5,
+      "price": 9,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "2",
+      "section": "Upper Side 215"
+    },
+    {
+      "alternate_price": "15.00",
+      "displayed_price": "9.00",
+      "listing_count": 6,
+      "price": 9,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "2",
+      "section": "Upper Side 226"
+    },
+    {
+      "alternate_price": "11.00",
+      "displayed_price": "6.00",
+      "listing_count": 6,
+      "price": 6,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "4",
+      "section": "Upper Side 227"
+    },
+    {
+      "alternate_price": "10.00",
+      "displayed_price": "6.00",
+      "listing_count": 6,
+      "price": 6,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "4",
+      "section": "Upper Side 231"
+    },
+    {
+      "alternate_price": "11.00",
+      "displayed_price": "6.00",
+      "listing_count": 11,
+      "price": 6,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "4",
+      "section": "Upper Side 232"
+    },
+    {
+      "alternate_price": "127.00",
+      "displayed_price": "90.00",
+      "listing_count": 1,
+      "price": 90,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "A",
+      "section": "VLB1"
+    },
+    {
+      "alternate_price": "110.00",
+      "displayed_price": "78.00",
+      "listing_count": 1,
+      "price": 78,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "A",
+      "section": "VLB10"
+    }
+  ],
+  "source_id": "7301418",
+  "source_url": "https://www.vividseats.com/new-jersey-devils-tickets-prudential-center-10-12-2026/production/7301418",
+  "title": "Ottawa Senators at New Jersey Devils",
+  "venue": "Prudential Center"
+}

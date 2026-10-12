@@ -26,6 +26,12 @@ DESTINATIONS = ('pythonanywhere', 'tidb')
 LIMIT = 20 * 1024**2
 FILE_LIMIT = 4 * 1024**2 + 8192
 EXPORT_MANIFEST = 'observations.manifest'
+SAVED_BUNDLES = {
+    'pilot-0400': ('docs/shared-observations/manifest-0400.json',
+                   '6b894990f80fb18f766427767944d0096f74e44bd0683e3630eda9e76999e287'),
+    'canary-20261012-2200': ('docs/shared-observations/manifest-canary-20261012-2200.json',
+                            '045e395392dbf6f86efb5f9370627e0d314ba96f4f06514e282f56b9fe920d72'),
+}
 FIELDS = {'schema_version', 'captured_at', 'event_date', 'source_url', 'source_id',
           'title', 'venue', 'section_count', 'sections', 'event_type', 'currency', 'schedule', 'map_geometry'}
 PRIVATE = re.compile(r'password|secret|token|authorization|cookie|headers|api.?key', re.I)
@@ -428,6 +434,13 @@ def saved_observations(manifest_path, expected_sha256, sport):
     return [value for value in validated if value['event_type'] == sport]
 
 
+def saved_bundle_observations(bundle, sport):
+    """Only explicitly reviewed, immutable bundles can be selected by a dispatch."""
+    if bundle not in SAVED_BUNDLES:
+        raise ValueError('Unknown saved observation bundle')
+    return saved_observations(*SAVED_BUNDLES[bundle], sport)
+
+
 def _log_pa_delivery_failure(sport, payload, *, error=None, record=None, response=None):
     """Log bounded public receipt facts, never HTTP bodies or exception text."""
     def number(value, maximum):
@@ -510,6 +523,30 @@ def run_legacy(sport, directory, pending_dir, health_output, *, timeout=45, runn
             mirror.merge(acknowledgments)
         progress('restore-original-observations')
         if saved is not None:
+            # Reject the whole sport's import before inserting any new original.
+            # A live owner may have captured the same slot since the review.
+            selected = {}
+            for observation in saved:
+                _source, _slot, key = identity(sport, observation)
+                digest = hashlib.sha256(encoded(observation)).hexdigest()
+                if key in selected and selected[key] != digest:
+                    raise ValueError('Saved bundle contains different originals for the same slot')
+                selected[key] = digest
+                target = mirror.root / (key + '.json')
+                if (target.exists() and mirror.read(target)['payload_sha256']
+                        != digest):
+                    raise ValueError('Saved observation slot already has a different original')
+            # A timeout can preserve the raw PA queue after the mirror checkpoint.
+            # Include these originals before import, not only during later recovery.
+            raw_pending = Path(pending_dir)
+            for path in sorted({*raw_pending.glob('*.json'), *raw_pending.glob('*.rejected'),
+                                *raw_pending.glob('*.archived-conflict')}):
+                if path.is_symlink() or not path.is_file() or path.stat().st_size > 4 * 1024**2:
+                    raise ValueError('Invalid existing pending snapshot')
+                observation = json.loads(path.read_bytes())
+                _source, _slot, key = identity(sport, observation)
+                if key in selected and selected[key] != hashlib.sha256(encoded(observation)).hexdigest():
+                    raise ValueError('Saved observation slot already has a different pending original')
             with mirror._batch_writes():
                 for observation in saved:
                     mirror.enqueue(observation)
@@ -710,6 +747,7 @@ def main():
     parser.add_argument('--legacy-free-state')
     parser.add_argument('--saved-manifest')
     parser.add_argument('--manifest-sha256')
+    parser.add_argument('--saved-bundle', choices=tuple(SAVED_BUNDLES))
     args = parser.parse_args()
     try:
         if args.command == 'export':
@@ -723,7 +761,11 @@ def main():
                 parser.error('collect requires pending-dir and health-output')
             if bool(args.saved_manifest) != bool(args.manifest_sha256):
                 parser.error('Saved replay requires both public manifest and its SHA-256')
+            if args.saved_bundle and args.saved_manifest:
+                parser.error('Choose a reviewed bundle or an explicit saved manifest, not both')
             saved = saved_observations(args.saved_manifest, args.manifest_sha256, args.sport) if args.saved_manifest else None
+            if args.saved_bundle:
+                saved = saved_bundle_observations(args.saved_bundle, args.sport)
             return run_legacy(args.sport, args.directory, args.pending_dir, args.health_output, timeout=args.timeout,
                               acknowledgments=args.acknowledgments, saved=saved, legacy_free_state=args.legacy_free_state)
         if not args.incoming:
