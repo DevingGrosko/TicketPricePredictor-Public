@@ -52,6 +52,8 @@ def slot_decision(rows, jobs_for, now, *, current_run=None, sport=None, manual_r
            and row.get('head_repository', {}).get('full_name', REPO) == REPO]
     current = next((row for row in own if row['id'] == current_run), None)
     current_created = utc_time(current.get('created_at')) if current else None
+    sports = (sport,) if sport else ('nfl', 'nhl')
+    capture_jobs = {'collect-' + value for value in sports}
     job_cache = {}
     def jobs(row):
         if row['id'] not in job_cache:
@@ -65,12 +67,15 @@ def slot_decision(rows, jobs_for, now, *, current_run=None, sport=None, manual_r
         newer = (current_run is not None and current_created is not None and created is not None
                  and (created, row['id']) > (current_created, current_run))
         if not newer:
-            relevant = [job for job in jobs(row) if job.get('name') == 'collect-' + sport] if sport else []
-            if sport and relevant and all(job.get('status') == 'completed' for job in relevant):
+            relevant = [job for job in jobs(row) if job.get('name') in capture_jobs]
+            # Delivery/publication may outlast the capture slot. Only known,
+            # completed capture jobs release their writer ownership; inspect
+            # their attempt timestamps below before permitting another capture.
+            if ({job.get('name') for job in relevant} == capture_jobs
+                    and all(job.get('status') == 'completed' for job in relevant)):
                 continue
             evidence['active_owner_run'] = row['id']
             return False, 'owner-active-or-queued', evidence
-    sports = (sport,) if sport else ('nfl', 'nhl')
     for row in own:
         if row['id'] == current_run:
             continue
@@ -78,7 +83,7 @@ def slot_decision(rows, jobs_for, now, *, current_run=None, sport=None, manual_r
         if row.get('status') == 'completed' and finished is not None and finished < slot:
             continue
         for job in jobs(row):
-            if job.get('name') not in {'collect-' + value for value in sports}:
+            if job.get('name') not in capture_jobs:
                 continue
             league = job['name'].removeprefix('collect-')
             for step in job.get('steps') or []:
