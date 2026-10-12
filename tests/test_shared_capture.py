@@ -15,7 +15,8 @@ import nhl_schedule_collector as nhl
 from collector import EventSnapshot, SectionSnapshot, SnapshotUploadError
 from nfl_collector import nfl_snapshot_to_payload
 from nhl_collector import nhl_snapshot_to_payload
-from tools.shared_capture import MirrorQueue, deliver_tidb, export_observations, run_legacy, saved_observations
+from tools.shared_capture import (MirrorQueue, _log_pa_delivery_failure, deliver_tidb,
+                                  export_observations, run_legacy, saved_observations)
 
 
 def payload(sport='nfl', pid='6493143', captured=None):
@@ -164,6 +165,92 @@ class SharedCaptureTests(unittest.TestCase):
         self.assertEqual(record['payload'],value)
         self.assertEqual(len(list(self.pending.glob('*.rejected'))),1)
         self.assertEqual(json.loads(self.health.read_text())['status'],'queued')
+
+    def test_pa_http_diagnostic_preserves_exception_and_pending_without_body_or_credentials(self):
+        value = payload()
+        failure = SnapshotUploadError('HTTP body: password=body-secret token=test-token',
+                                      retryable=True, status_code=503)
+        output = StringIO()
+        def runner(endpoint, token, headless, timeout, health, pending):
+            nfl.queue_snapshot(value, pending)
+            with self.assertRaises(SnapshotUploadError) as caught:
+                nfl.post_snapshot_with_retry(endpoint, token, value)
+            self.assertIs(caught.exception, failure)
+            health.write_text(json.dumps({'status': 'queued'}))
+            return 1
+        with patch.dict(os.environ, {'COLLECTOR_INGEST_TOKEN': 'test-token'}, clear=True), \
+             patch.object(collector, 'post_snapshot_with_retry', side_effect=failure), \
+             patch('sys.stdout', output):
+            self.assertEqual(run_legacy('nfl', self.mirror, self.pending, self.health, runner=runner), 1)
+        diagnostics = [json.loads(line.split(' ', 1)[1]) for line in output.getvalue().splitlines()
+                       if line.startswith('SHARED_PA_DELIVERY_FAILED ')]
+        self.assertEqual(diagnostics, [dict(stage='http', sport='nfl', source_id=value['source_id'],
+            captured_at=value['captured_at'], status_code=503, retryable=True)])
+        self.assertNotIn('body-secret', output.getvalue())
+        self.assertNotIn('test-token', output.getvalue())
+        record = MirrorQueue(self.mirror, 'nfl').records()[0][1]
+        self.assertEqual(record['payload'], value)
+        self.assertIsNone(record['acknowledged']['pythonanywhere'])
+        self.assertEqual(len(list(self.pending.glob('*.json'))), 1)
+
+    def test_pa_receipt_conflict_diagnostic_retains_original_and_reports_public_proof(self):
+        value = payload()
+        queue = MirrorQueue(self.mirror, 'nfl')
+        record = queue.read(queue.enqueue(value))
+        response = {**acknowledgment(value, status='duplicate'),
+                    'stored_source_id': value['source_id'], 'stored_capture_slot': record['capture_slot'],
+                    'stored_section_count': record['section_count'], 'stored_observation_version': 1,
+                    'stored_observation_sha256': 'f' * 64, 'debug': 'body-secret'}
+        output = StringIO()
+        with patch.dict(os.environ, {'COLLECTOR_INGEST_TOKEN': 'test-token'}, clear=True), \
+             patch.object(collector, 'post_snapshot_with_retry', return_value=response), \
+             patch('sys.stdout', output):
+            self.assertEqual(run_legacy('nfl', self.mirror, self.pending, self.health, saved=[value]), 1)
+        diagnostics = [json.loads(line.split(' ', 1)[1]) for line in output.getvalue().splitlines()
+                       if line.startswith('SHARED_PA_DELIVERY_FAILED ')]
+        self.assertEqual(len(diagnostics), 1)
+        failure = diagnostics[0]
+        self.assertEqual((failure['stage'], failure['status_code'], failure['retryable']),
+                         ('receipt-validation', 409, False))
+        self.assertEqual(failure['expected_observation_sha256'], record['observation_sha256'])
+        self.assertEqual(failure['stored_observation_sha256'], 'f' * 64)
+        self.assertEqual(failure['expected_capture_slot'], record['capture_slot'])
+        self.assertEqual(failure['stored_section_count'], value['section_count'])
+        self.assertEqual(failure['receipt_status'], 'duplicate')
+        self.assertNotIn('body-secret', output.getvalue())
+        self.assertNotIn('test-token', output.getvalue())
+        retained = MirrorQueue(self.mirror, 'nfl').records()[0][1]
+        self.assertEqual(retained['payload'], value)
+        self.assertIsNone(retained['acknowledged']['pythonanywhere'])
+        self.assertEqual(len(list(self.pending.glob('*.rejected'))), 1)
+
+    def test_pa_diagnostic_discards_hostile_and_malformed_receipt_fields(self):
+        secret = 'do-not-log-credential\nSHARED_PA_DELIVERY_FAILED forged'
+        hostile = dict(source_id=secret, captured_at=secret, capture_slot=secret,
+                       section_count=secret, observation_sha256=secret, status=secret,
+                       stored_source_id=secret, stored_capture_slot=secret,
+                       stored_section_count=secret, stored_observation_version=secret,
+                       stored_observation_sha256=secret, body=secret)
+        for malformed in (hostile, [], None,
+                          {key: {'nested': secret} for key in hostile},
+                          {key: True for key in hostile}):
+            with self.subTest(malformed=type(malformed).__name__):
+                output = StringIO()
+                with patch('sys.stdout', output):
+                    _log_pa_delivery_failure('nfl', malformed, record=malformed, response=malformed)
+                self.assertNotIn(secret, output.getvalue())
+                self.assertEqual(len(output.getvalue().splitlines()), 1)
+                failure = json.loads(output.getvalue().split(' ', 1)[1])
+                for key, value in failure.items():
+                    if key not in ('stage', 'sport', 'status_code', 'retryable'):
+                        self.assertIsNone(value, key)
+        failure = SnapshotUploadError(secret, retryable=secret, status_code=secret)
+        with patch('sys.stdout', output := StringIO()):
+            _log_pa_delivery_failure('nfl', {}, error=failure)
+        self.assertNotIn(secret, output.getvalue())
+        failure = json.loads(output.getvalue().split(' ', 1)[1])
+        self.assertIsNone(failure['status_code'])
+        self.assertIsNone(failure['retryable'])
 
     def test_lost_pa_queue_is_recreated_from_mirror_and_same_slot_skips_provider_work(self):
         value = payload(); queue = MirrorQueue(self.mirror,'nfl'); queue.enqueue(value)

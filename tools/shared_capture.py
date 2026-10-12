@@ -392,6 +392,47 @@ def saved_observations(manifest_path, expected_sha256, sport):
     return [value for value in validated if value['event_type'] == sport]
 
 
+def _log_pa_delivery_failure(sport, payload, *, error=None, record=None, response=None):
+    """Log bounded public receipt facts, never HTTP bodies or exception text."""
+    def number(value, maximum):
+        return value if type(value) is int and 0 < value <= maximum else None
+    def source(value):
+        if type(value) is int and 0 < value < 10**20:
+            return str(value)
+        return value if type(value) is str and re.fullmatch('[0-9]{1,20}', value) else None
+    def digest(value):
+        return value if type(value) is str and re.fullmatch('[0-9a-f]{64}', value) else None
+    def stamp(value):
+        if type(value) is not str or len(value) > 40:
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace('Z', '+00:00'))
+            return parsed.astimezone(timezone.utc).isoformat() if parsed.tzinfo is not None else None
+        except (ValueError, OverflowError):
+            return None
+    payload = payload if isinstance(payload, dict) else {}
+    failure = dict(stage='http' if error is not None else 'receipt-validation', sport=sport,
+                   source_id=source(payload.get('source_id')), captured_at=stamp(payload.get('captured_at')))
+    if error is not None:
+        status = number(error.status_code, 599)
+        failure.update(status_code=status if status is not None and status >= 100 else None,
+                       retryable=error.retryable if type(error.retryable) is bool else None)
+    else:
+        record = record if isinstance(record, dict) else {}
+        response = response if isinstance(response, dict) else {}
+        failure.update(status_code=409, retryable=False,
+                       expected_capture_slot=stamp(record.get('capture_slot')),
+                       expected_section_count=number(record.get('section_count'), 1_000_000),
+                       expected_observation_sha256=digest(record.get('observation_sha256')),
+                       receipt_status=response.get('status') if response.get('status') in ('stored', 'duplicate') else None,
+                       stored_source_id=source(response.get('stored_source_id')),
+                       stored_capture_slot=stamp(response.get('stored_capture_slot')),
+                       stored_section_count=number(response.get('stored_section_count'), 1_000_000),
+                       stored_observation_version=number(response.get('stored_observation_version'), 2**31 - 1),
+                       stored_observation_sha256=digest(response.get('stored_observation_sha256')))
+    print('SHARED_PA_DELIVERY_FAILED ' + json.dumps(failure), flush=True)
+
+
 @contextmanager
 def _bootstrap_health(sport, health_output, *, delivery_only=False):
     """Make queue startup visible even if the runner is terminated before capture."""
@@ -464,13 +505,18 @@ def run_legacy(sport, directory, pending_dir, health_output, *, timeout=45, runn
     def post(destination, ingest_token, payload, **kwargs):
         if destination != endpoint:
             raise ValueError('Shared capture uses the fixed matching PythonAnywhere endpoint')
-        response = post_original(destination, ingest_token, payload, **kwargs)
+        try:
+            response = post_original(destination, ingest_token, payload, **kwargs)
+        except collector.SnapshotUploadError as exc:
+            _log_pa_delivery_failure(sport, payload, error=exc)
+            raise
         record = mirror.read(mirror.enqueue(payload))
         try:
             mirror.acknowledgment(record, 'pythonanywhere', response)
         except ValueError as exc:
             # A real upload can report an existing, different immutable slot.
             # Retain it as rejected and continue independent pending games.
+            _log_pa_delivery_failure(sport, payload, record=record, response=response)
             raise collector.SnapshotUploadError(
                 f'PythonAnywhere observation conflict or unverified receipt: {exc}',
                 retryable=False, status_code=409,
