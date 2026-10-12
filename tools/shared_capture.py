@@ -506,7 +506,14 @@ def _bootstrap_health(sport, health_output, *, delivery_only=False):
 
 
 def run_legacy(sport, directory, pending_dir, health_output, *, timeout=45, runner=None,
-               acknowledgments=None, saved=None, legacy_free_state=None):
+               acknowledgments=None, saved=None, legacy_free_state=None,
+               blocker_diagnostics=False, stop_after_first_failure=False):
+    if type(blocker_diagnostics) is not bool or type(stop_after_first_failure) is not bool:
+        raise ValueError('Diagnostic options must be boolean')
+    if stop_after_first_failure and not blocker_diagnostics:
+        raise ValueError('Stopping after a failure requires explicit blocker diagnostics')
+    if blocker_diagnostics and (saved is not None or runner is not None):
+        raise ValueError('Blocker diagnostics require the production capture owner')
     with _bootstrap_health(sport, health_output, delivery_only=saved is not None) as (progress, bootstrap_started):
         import collector
         import nfl_schedule_collector as nfl
@@ -655,7 +662,9 @@ def run_legacy(sport, directory, pending_dir, health_output, *, timeout=45, runn
                 from tools.shared_capture_policy import DEADLINE_SECONDS, run_owner
                 code = run_owner(sport, module, mirror, endpoint, token, timeout,
                                  Path(health_output), pending_dir, legacy=legacy_free_state,
-                                 deadline_seconds=max(0, DEADLINE_SECONDS - bootstrap_seconds))
+                                 deadline_seconds=max(0, DEADLINE_SECONDS - bootstrap_seconds),
+                                 blocker_diagnostics=blocker_diagnostics,
+                                 stop_after_first_failure=stop_after_first_failure)
     health = json.loads(Path(health_output).read_text()) if Path(health_output).exists() else {'status': 'report-unavailable'}
     health['bootstrap_seconds'] = round(bootstrap_seconds, 3)
     health['pending_pythonanywhere'] = len(mirror.pending('pythonanywhere'))
@@ -748,7 +757,13 @@ def main():
     parser.add_argument('--saved-manifest')
     parser.add_argument('--manifest-sha256')
     parser.add_argument('--saved-bundle', choices=tuple(SAVED_BUNDLES))
+    parser.add_argument('--blocker-diagnostics', action='store_true')
+    parser.add_argument('--stop-after-first-failure', action='store_true')
     args = parser.parse_args()
+    if args.stop_after_first_failure and not args.blocker_diagnostics:
+        parser.error('stop-after-first-failure requires blocker-diagnostics')
+    if args.blocker_diagnostics and (args.command != 'collect' or args.saved_manifest or args.saved_bundle):
+        parser.error('Blocker diagnostics require live collect, not saved delivery')
     try:
         if args.command == 'export':
             if not args.output:
@@ -767,7 +782,9 @@ def main():
             if args.saved_bundle:
                 saved = saved_bundle_observations(args.saved_bundle, args.sport)
             return run_legacy(args.sport, args.directory, args.pending_dir, args.health_output, timeout=args.timeout,
-                              acknowledgments=args.acknowledgments, saved=saved, legacy_free_state=args.legacy_free_state)
+                              acknowledgments=args.acknowledgments, saved=saved, legacy_free_state=args.legacy_free_state,
+                              blocker_diagnostics=args.blocker_diagnostics,
+                              stop_after_first_failure=args.stop_after_first_failure)
         if not args.incoming:
             parser.error('deliver and verify-checkpoint require incoming')
         if args.command == 'verify-checkpoint':

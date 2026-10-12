@@ -41,6 +41,11 @@ on:
         type: boolean
         required: false
         default: true
+      stop_after_first_failure:
+        description: Manual repair diagnostic only; save and defer remaining games after the first capture failure
+        type: boolean
+        required: false
+        default: false
       manual_repair:
         description: Explicit manual repair may attempt a slot already attempted by the owner
         type: boolean
@@ -138,7 +143,12 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           MANUAL_REPAIR: ${{ inputs.manual_repair }}
           DELIVERY_ONLY: ${{ inputs.delivery_only }}
+          STOP_AFTER_FIRST_FAILURE: ${{ inputs.stop_after_first_failure }}
         run: |
+          if [[ "$STOP_AFTER_FIRST_FAILURE" == 'true' ]] && [[ "$EVENT_NAME" != 'workflow_dispatch' || "$MANUAL_REPAIR" != 'true' || "$DELIVERY_ONLY" == 'true' || "$SHARED_CAPTURE" != 'true' || "$TICKETSIGNAL_BROWSER_ENGINE" != 'webkit' ]]; then
+            echo "Early diagnostic stop requires an explicit shared WebKit manual repair capture."
+            exit 2
+          fi
           if [[ "$EVENT_NAME" == 'workflow_dispatch' && "$DELIVERY_ONLY" == 'true' ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "Explicit saved delivery makes no new browser capture."
@@ -234,8 +244,13 @@ jobs:
         timeout-minutes: 26
         if: steps.cadence.outputs.run == 'true' && env.SHARED_CAPTURE == 'true' && !inputs.delivery_only
         env:
+          STOP_AFTER_FIRST_FAILURE: ${{ inputs.stop_after_first_failure }}
           COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
         run: |
+          diagnostic=()
+          if [[ "$STOP_AFTER_FIRST_FAILURE" == 'true' ]]; then
+            diagnostic=(--stop-after-first-failure)
+          fi
           # Record the attempt even when the collector exits with a provider failure.
           echo "attempted=true" >> "$GITHUB_OUTPUT"
           python -m tools.run_bounded_capture run --seconds 1500 \
@@ -243,7 +258,8 @@ jobs:
             xvfb-run --auto-servernum python -m tools.shared_capture collect \
             --sport nfl --directory shared-capture/nfl --acknowledgments shared-acknowledgments/nfl \
             --pending-dir nfl_pending --health-output nfl_remote_health.json \
-            --legacy-free-state free-capture/nfl --timeout 45
+            --legacy-free-state free-capture/nfl --timeout 45 \
+            --blocker-diagnostics "${diagnostic[@]}"
 
       - name: Deliver saved NFL observations to both stores
         id: saved-delivery
@@ -314,7 +330,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: nfl-collector-report-${{ github.run_id }}
-          path: nfl_remote_health.json
+          path: |
+            nfl_remote_health.json
+            nfl-blocker-diagnostics/blocker-*.png
           if-no-files-found: warn
           retention-days: 14
 
@@ -347,7 +365,12 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           MANUAL_REPAIR: ${{ inputs.manual_repair }}
           DELIVERY_ONLY: ${{ inputs.delivery_only }}
+          STOP_AFTER_FIRST_FAILURE: ${{ inputs.stop_after_first_failure }}
         run: |
+          if [[ "$STOP_AFTER_FIRST_FAILURE" == 'true' ]] && [[ "$EVENT_NAME" != 'workflow_dispatch' || "$MANUAL_REPAIR" != 'true' || "$DELIVERY_ONLY" == 'true' || "$SHARED_CAPTURE" != 'true' || "$TICKETSIGNAL_BROWSER_ENGINE" != 'webkit' ]]; then
+            echo "Early diagnostic stop requires an explicit shared WebKit manual repair capture."
+            exit 2
+          fi
           if [[ "$EVENT_NAME" == 'workflow_dispatch' && "$DELIVERY_ONLY" == 'true' ]]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
             echo "Explicit saved delivery makes no new browser capture."
@@ -443,8 +466,13 @@ jobs:
         timeout-minutes: 26
         if: steps.cadence.outputs.run == 'true' && env.SHARED_CAPTURE == 'true' && !inputs.delivery_only
         env:
+          STOP_AFTER_FIRST_FAILURE: ${{ inputs.stop_after_first_failure }}
           COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
         run: |
+          diagnostic=()
+          if [[ "$STOP_AFTER_FIRST_FAILURE" == 'true' ]]; then
+            diagnostic=(--stop-after-first-failure)
+          fi
           # Record the attempt even when the collector exits with a provider failure.
           echo "attempted=true" >> "$GITHUB_OUTPUT"
           python -m tools.run_bounded_capture run --seconds 1500 \
@@ -452,7 +480,8 @@ jobs:
             xvfb-run --auto-servernum python -m tools.shared_capture collect \
             --sport nhl --directory shared-capture/nhl --acknowledgments shared-acknowledgments/nhl \
             --pending-dir nhl_pending --health-output nhl_remote_health.json \
-            --legacy-free-state free-capture/nhl --timeout 45
+            --legacy-free-state free-capture/nhl --timeout 45 \
+            --blocker-diagnostics "${diagnostic[@]}"
 
       - name: Deliver saved NHL observations to both stores
         id: saved-delivery
@@ -523,7 +552,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: nhl-collector-report-${{ github.run_id }}
-          path: nhl_remote_health.json
+          path: |
+            nhl_remote_health.json
+            nhl-blocker-diagnostics/blocker-*.png
           if-no-files-found: warn
           retention-days: 14
 

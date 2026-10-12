@@ -288,6 +288,18 @@ class PublicDOMDriver:
         return page.url
 
 
+class BlockerScreenshotBudget:
+    """One screenshot attempt shared by every browser/retry in a collector job."""
+    def __init__(self):
+        self.attempted = False
+
+    def claim(self):
+        if self.attempted:
+            return False
+        self.attempted = True
+        return True
+
+
 class WebKitInventorySession:
     def __init__(self, owner, *, headless, timeout):
         stop_after_denial({"engine": "webkit", "phase": "launch"})
@@ -302,12 +314,13 @@ class WebKitInventorySession:
         self.generation = 0
         owner.driver = PublicDOMDriver(self)
 
-    def configure_blocker_diagnostics(self, directory):
-        """Explicit read-only canary opt-in; ordinary captures never save these files."""
+    def configure_blocker_diagnostics(self, directory, *, screenshot_budget=None):
+        """Explicit read-only opt-in with an optional job-wide screenshot allowance."""
         directory = Path(directory)
         if directory.is_symlink() or not directory.is_dir():
             raise ValueError('Blocker diagnostics require an existing output directory')
         self.blocker_diagnostic_directory = directory
+        self.blocker_screenshot_budget = screenshot_budget if screenshot_budget is not None else BlockerScreenshotBudget()
 
     def configure_normal_navigation(self, performer_urls, expected_event_dates, *, official_games=None):
         if (not isinstance(performer_urls, dict) or not performer_urls
@@ -503,6 +516,9 @@ class WebKitInventorySession:
                 diagnostics['blocker_element'] = safe_blocker_element(
                     link.evaluate(BLOCKER_ELEMENT_SCRIPT, timeout=bounded_timeout(1000)))
                 check(page)
+                if not self.blocker_screenshot_budget.claim():
+                    diagnostics['blocker_diagnostic_status'] = 'metadata-only'
+                    return
                 if screenshot.exists() or screenshot.is_symlink():
                     return
                 owned = True
@@ -580,13 +596,10 @@ class WebKitInventorySession:
                             if diagnostics.get("performer_ready_state") is not None:
                                 diagnostics["performer_ready_state_at_click"] = diagnostics["performer_ready_state"]
                             gate[0] = time.time() * 1000
-                            # The popup event includes its initial response. Wait
-                            # for it explicitly instead of making the same native
-                            # click also wait for navigation under a shorter clock.
-                            with page.expect_popup(timeout=bounded_timeout(20000)) as opened:
+                            with page.expect_popup(timeout=bounded_timeout(10000)) as opened:
                                 phase("event-link-click")
                                 try:
-                                    link.click(no_wait_after=True, timeout=bounded_timeout(10000))
+                                    link.click(timeout=bounded_timeout(10000))
                                 except self.timeout_error as exc:
                                     link_timeout(link, exc, trial=False)
                                     capture_blocker(link)

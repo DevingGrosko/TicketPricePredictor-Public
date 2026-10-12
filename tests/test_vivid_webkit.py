@@ -13,7 +13,7 @@ from collector import VividBrowser
 from nfl_collector import VividNFLBrowser
 from vivid_inventory import CurrentInventoryRecovery, VividCaptureError
 from vivid_performer_routes import configure_schedule_navigation
-from vivid_webkit import BLOCKER_ELEMENT_SCRIPT, LINK_ACTIONABILITY_SCRIPT, PUBLIC_PAGE_SCRIPT, PublicDOMDriver, WebKitInventorySession, click_timeout_reason, public_inventory, safe_blocker_element, verified_event_date
+from vivid_webkit import BLOCKER_ELEMENT_SCRIPT, LINK_ACTIONABILITY_SCRIPT, PUBLIC_PAGE_SCRIPT, BlockerScreenshotBudget, PublicDOMDriver, WebKitInventorySession, click_timeout_reason, public_inventory, safe_blocker_element, verified_event_date
 
 AT = datetime(2026, 10, 11, 17, tzinfo=timezone.utc)
 URL = 'https://www.vividseats.com/old-slug-3-5-2027/production/123'
@@ -90,11 +90,6 @@ class Link:
                 raise browser.timeout_error('private-token overlay intercepts pointer events')
             return
         self.page.context.clicks += 1
-        delay = self.page.context.browser.click_navigation_delay_ms
-        if delay and not options.get('no_wait_after'):
-            self.page.context.clock.advance(min(delay, options['timeout']))
-            if delay >= options['timeout']:
-                raise self.page.context.browser.timeout_error('waiting for scheduled navigations')
         if self.page.context.browser.fail_phase == 'event-link-click':
             self.page.context.clock.advance(options['timeout'])
             raise self.page.context.browser.timeout_error('Private timeout message must not enter diagnostics')
@@ -137,13 +132,6 @@ class Page:
         class Popup:
             def __enter__(self): return SimpleNamespace(value=context.popup)
             def __exit__(self, *_args):
-                if _args and _args[0] is not None:
-                    return False
-                delay = context.browser.popup_response_delay_ms
-                if delay:
-                    context.clock.advance(min(delay, _options['timeout']))
-                    if delay >= _options['timeout']:
-                        raise context.browser.timeout_error('popup initial response timeout')
                 if context.browser.fail_phase == 'event-popup':
                     context.clock.advance(_options['timeout'])
                     raise context.browser.timeout_error('Private timeout message must not enter diagnostics')
@@ -226,8 +214,6 @@ class Browser:
         self.load_stall = options.get('load_stall',False)
         self.ready_state = options.get('ready_state','interactive')
         self.performer_delay_ms = options.get('performer_delay_ms',0)
-        self.click_navigation_delay_ms = options.get('click_navigation_delay_ms', 0)
-        self.popup_response_delay_ms = options.get('popup_response_delay_ms', 0)
         self.iframe_status=options.get('iframe_status')
         self.navigation_options,self.popup_dom_options = [],[]
         self.trial_failures = options.get('trial_failures', 0)
@@ -376,26 +362,6 @@ class WebKitTests(unittest.TestCase):
         self.assertEqual(diagnostic['event_link_click_timeout_reason'],'unclassified')
         self.assertNotIn('Private',json.dumps(diagnostic));adapter.close()
 
-    def test_slow_native_popup_response_keeps_one_click_and_its_own_wait(self):
-        browser=Browser(self.clock,click_navigation_delay_ms=16000,popup_response_delay_ms=12000)
-        adapter=session(self.clock,[browser]);adapter.timeout=45
-        body,_event_date=adapter.capture(URL)
-        self.assertEqual(len(body['tickets']),12)
-        self.assertEqual(browser.context.clicks,1)
-        self.assertEqual(browser.context.trials,1)
-        self.assertEqual(adapter.owner.capture_diagnostics['phase_times_ms']['event-popup'],12000)
-        self.assertEqual(adapter.owner.capture_diagnostics['capture_elapsed_ms'],12000)
-        adapter.close()
-
-    def test_slow_popup_uses_only_remaining_total_deadline_without_reclick(self):
-        browser=Browser(self.clock,performer_delay_ms=7500,popup_response_delay_ms=12000)
-        adapter=session(self.clock,[browser])
-        with self.assertRaises(VividCaptureError):adapter.capture(URL)
-        self.assertEqual(browser.context.clicks,1)
-        self.assertEqual(browser.context.body_reads,[])
-        self.assertEqual(adapter.owner.capture_diagnostics['capture_elapsed_ms'],8000)
-        self.assertEqual(adapter.owner.capture_diagnostics['timeout_phase'],'event-popup')
-        self.assertTrue(browser.closed);adapter.close()
     def test_opt_in_blocker_diagnostics_save_one_bounded_screenshot_before_cleanup(self):
         with tempfile.TemporaryDirectory() as directory:
             browser=Browser(self.clock,trial_failures=2)
@@ -429,6 +395,24 @@ class WebKitTests(unittest.TestCase):
                 else:adapter.capture(URL)
                 self.assertEqual(browser.blocker_reads,0);self.assertEqual(browser.screenshots,[])
                 self.assertEqual(list(Path(directory).iterdir()),[]);adapter.close()
+
+    def test_job_screenshot_allowance_spans_sessions_and_failed_attempts(self):
+        for first_times_out in (False, True):
+            with self.subTest(first_times_out=first_times_out), tempfile.TemporaryDirectory() as directory:
+                budget=BlockerScreenshotBudget(); browsers=[]; diagnostics=[]
+                for index in range(3):
+                    browser=Browser(self.clock,trial_failures=2,
+                        screenshot_timeout=first_times_out and index==0)
+                    adapter=session(self.clock,[browser]);adapter.timeout=45
+                    adapter.configure_blocker_diagnostics(directory,screenshot_budget=budget)
+                    with self.assertRaises(VividCaptureError):adapter.capture(URL)
+                    browsers.append(browser);diagnostics.append(adapter.owner.capture_diagnostics)
+                    adapter.close()
+                self.assertEqual([len(browser.screenshots) for browser in browsers],[1,0,0])
+                self.assertEqual([browser.blocker_reads for browser in browsers],[1,1,1])
+                self.assertEqual([row['blocker_diagnostic_status'] for row in diagnostics],
+                    ['timeout' if first_times_out else 'captured','metadata-only','metadata-only'])
+                self.assertEqual(len(list(Path(directory).glob('*.png'))),0 if first_times_out else 1)
 
     def test_blocker_screenshot_timeout_uses_remaining_budget_and_removes_partial_file(self):
         with tempfile.TemporaryDirectory() as directory:

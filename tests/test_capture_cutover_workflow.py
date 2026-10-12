@@ -108,6 +108,38 @@ class CaptureCutoverWorkflowTests(unittest.TestCase):
                 self.assertEqual(output.read_text(), 'attempted=true\n')
                 self.assertTrue((root / (sport + '-capture-stopped.json')).is_file())
 
+    def test_early_diagnostic_stop_is_manual_shared_webkit_only_and_evidence_is_uploaded(self):
+        owner=workflow('collect-ticket-prices')
+        self.assertRegex(owner,r'stop_after_first_failure:\n(?:        .*\n)*?        default: false\n')
+        for sport in ('nfl','nhl'):
+            collect=job(owner,'collect-'+sport)
+            gate=step(collect,'Select the half-hour '+sport.upper()+' slot')
+            script=textwrap.dedent(gate.split('        run: |\n',1)[1])
+            capture=step(collect,'Attempt shared '+sport.upper()+' capture for the half-hour')
+            self.assertIn('--blocker-diagnostics "${diagnostic[@]}"',capture)
+            self.assertIn('diagnostic=(--stop-after-first-failure)',capture)
+            self.assertIn(sport+'-blocker-diagnostics/blocker-*.png',collect)
+            cases=[('workflow_dispatch','true','false','true','webkit',0),
+                   ('schedule','true','false','true','webkit',2),
+                   ('workflow_dispatch','false','false','true','webkit',2),
+                   ('workflow_dispatch','true','true','true','webkit',2),
+                   ('workflow_dispatch','true','false','false','webkit',2),
+                   ('workflow_dispatch','true','false','true','chrome',2)]
+            for event,repair,delivery,shared,engine,code in cases:
+                with self.subTest(sport=sport,event=event,repair=repair,delivery=delivery,shared=shared,engine=engine), \
+                     tempfile.TemporaryDirectory() as directory:
+                    root=Path(directory);command=root/'python'
+                    command.write_text('#!/bin/bash\necho called > "$CALL_LOG"\n');command.chmod(0o700)
+                    calls=root/'calls'
+                    env={**os.environ,'PATH':str(root)+os.pathsep+os.environ.get('PATH',''),
+                        'EVENT_NAME':event,'MANUAL_REPAIR':repair,'DELIVERY_ONLY':delivery,
+                        'SHARED_CAPTURE':shared,'TICKETSIGNAL_BROWSER_ENGINE':engine,
+                        'STOP_AFTER_FIRST_FAILURE':'true','CALL_LOG':str(calls),
+                        'GITHUB_OUTPUT':str(root/'output')}
+                    result=subprocess.run(['bash','-e','-c',script],env=env,
+                        capture_output=True,text=True,timeout=5)
+                    self.assertEqual(result.returncode,code);self.assertEqual(calls.exists(),code==0)
+
     def test_actual_capture_is_separate_from_zero_browser_saved_delivery_and_failures_still_mirror(self):
         owner = workflow('collect-ticket-prices')
         for sport in ('nfl', 'nhl'):
