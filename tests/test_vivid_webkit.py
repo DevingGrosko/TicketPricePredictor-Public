@@ -1,8 +1,10 @@
 from datetime import datetime, timedelta, timezone
 import ast
+import hashlib
 import json
 import os
 from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -11,7 +13,7 @@ from collector import VividBrowser
 from nfl_collector import VividNFLBrowser
 from vivid_inventory import CurrentInventoryRecovery, VividCaptureError
 from vivid_performer_routes import configure_schedule_navigation
-from vivid_webkit import LINK_ACTIONABILITY_SCRIPT, PUBLIC_PAGE_SCRIPT, PublicDOMDriver, WebKitInventorySession, click_timeout_reason, public_inventory, verified_event_date
+from vivid_webkit import BLOCKER_ELEMENT_SCRIPT, LINK_ACTIONABILITY_SCRIPT, PUBLIC_PAGE_SCRIPT, PublicDOMDriver, WebKitInventorySession, click_timeout_reason, public_inventory, safe_blocker_element, verified_event_date
 
 AT = datetime(2026, 10, 11, 17, tzinfo=timezone.utc)
 URL = 'https://www.vividseats.com/old-slug-3-5-2027/production/123'
@@ -57,6 +59,14 @@ class Response:
 class Link:
     def __init__(self, page): self.page = page
     def evaluate(self, _script, **options):
+        if _script == BLOCKER_ELEMENT_SCRIPT:
+            self.page.context.browser.blocker_reads += 1
+            return {'hit':{'tag':'IFRAME','id':'ad-frame','classes':['overlay','https://private/?token=secret'],
+                           'position':'fixed','src':'https://private/?token=secret'},
+                    'hit_is_iframe':True,'hit_contains_iframe':False,'hit_inside_iframe':False,
+                    'hit_in_header':False,'known_consent_present':True,'hit_in_known_consent':False,
+                    'hit_box':{'x':0,'y':0,'width':1280,'height':720},
+                    'viewport':{'width':1280,'height':720},'text':'private'}
         if _script == LINK_ACTIONABILITY_SCRIPT:
             return {'attached': True, 'has_box': True, 'in_viewport': True, 'receives_pointer': False,
                     'obstructed_by_dialog': True, 'ready_state': self.page.context.browser.ready_state,
@@ -149,7 +159,13 @@ class Page:
         self.reloads += 1
         self.context.emit_event()
     def content(self): return '<html>public feed</html>'
-    def screenshot(self, **_options): pass
+    def screenshot(self, **options):
+        browser=self.context.browser
+        browser.screenshots.append((options,browser.closed))
+        Path(options['path']).write_bytes(browser.screenshot_bytes)
+        if browser.screenshot_timeout:
+            self.context.clock.advance(options['timeout'])
+            raise browser.timeout_error('private screenshot failure')
 
 
 class Context:
@@ -203,6 +219,9 @@ class Browser:
         self.trial_failures = options.get('trial_failures', 0)
         self.denial_during_trial = options.get('denial_during_trial', False)
         self.readiness_waits = []
+        self.blocker_reads,self.screenshots = 0,[]
+        self.screenshot_timeout=options.get('screenshot_timeout',False)
+        self.screenshot_bytes=options.get('screenshot_bytes',b'public viewport')
         self.context = Context(self, clock)
     def new_context(self): return self.context
     def close(self): self.closed = True
@@ -342,6 +361,97 @@ class WebKitTests(unittest.TestCase):
         self.assertEqual(diagnostic['timeout_phase'],'event-link-click')
         self.assertEqual(diagnostic['event_link_click_timeout_reason'],'unclassified')
         self.assertNotIn('Private',json.dumps(diagnostic));adapter.close()
+
+    def test_opt_in_blocker_diagnostics_save_one_bounded_screenshot_before_cleanup(self):
+        with tempfile.TemporaryDirectory() as directory:
+            browser=Browser(self.clock,trial_failures=2)
+            adapter=session(self.clock,[browser]);adapter.timeout=45
+            adapter.configure_blocker_diagnostics(directory)
+            with self.assertRaises(VividCaptureError):adapter.capture(URL)
+            diagnostic=adapter.owner.capture_diagnostics
+            self.assertEqual(browser.context.clicks,0);self.assertEqual(browser.context.trials,2)
+            self.assertEqual(browser.blocker_reads,1);self.assertEqual(len(browser.screenshots),1)
+            options,closed_at_screenshot=browser.screenshots[0]
+            self.assertFalse(closed_at_screenshot);self.assertTrue(browser.closed)
+            self.assertEqual(options,dict(path=str(Path(directory)/'blocker-123.png'),type='png',
+                full_page=False,animations='allow',caret='initial',timeout=1500))
+            self.assertEqual((Path(directory)/'blocker-123.png').read_bytes(),browser.screenshot_bytes)
+            self.assertEqual(diagnostic['blocker_diagnostic_status'],'captured')
+            self.assertEqual(diagnostic['blocker_screenshot_sha256'],hashlib.sha256(browser.screenshot_bytes).hexdigest())
+            self.assertTrue(diagnostic['blocker_element']['hit_is_iframe'])
+            self.assertTrue(diagnostic['blocker_element']['known_consent_present'])
+            self.assertEqual(diagnostic['blocker_element']['hit']['classes'],['overlay'])
+            self.assertNotIn('private',json.dumps(diagnostic));self.assertNotIn('secret',json.dumps(diagnostic))
+            adapter.close()
+
+    def test_default_and_successful_capture_do_not_take_blocker_screenshots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            for enabled,failures in ((False,2),(True,0)):
+                browser=Browser(self.clock,trial_failures=failures)
+                adapter=session(self.clock,[browser]);adapter.timeout=45
+                if enabled:adapter.configure_blocker_diagnostics(directory)
+                if failures:
+                    with self.assertRaises(VividCaptureError):adapter.capture(URL)
+                else:adapter.capture(URL)
+                self.assertEqual(browser.blocker_reads,0);self.assertEqual(browser.screenshots,[])
+                self.assertEqual(list(Path(directory).iterdir()),[]);adapter.close()
+
+    def test_blocker_screenshot_timeout_uses_remaining_budget_and_removes_partial_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            browser=Browser(self.clock,trial_failures=2,screenshot_timeout=True)
+            adapter=session(self.clock,[browser]);adapter.timeout=21
+            adapter.configure_blocker_diagnostics(directory)
+            with self.assertRaises(VividCaptureError):adapter.capture(URL)
+            self.assertEqual(browser.screenshots[0][0]['timeout'],1000)
+            self.assertEqual(adapter.owner.capture_diagnostics['capture_elapsed_ms'],21000)
+            self.assertEqual(adapter.owner.capture_diagnostics['blocker_diagnostic_status'],'timeout')
+            self.assertEqual(list(Path(directory).iterdir()),[])
+            self.assertTrue(browser.closed);adapter.close()
+
+    def test_access_denial_still_stops_before_any_blocker_diagnostic_read_or_screenshot(self):
+        with tempfile.TemporaryDirectory() as directory:
+            browser=Browser(self.clock,trial_failures=2,denial_during_trial=True)
+            adapter=session(self.clock,[browser]);adapter.timeout=45
+            adapter.configure_blocker_diagnostics(directory)
+            with self.assertRaises(VividCaptureError) as error:adapter.capture(URL)
+            self.assertEqual(error.exception.category,'provider-access-denied')
+            self.assertEqual(browser.blocker_reads,0);self.assertEqual(browser.screenshots,[])
+            self.assertEqual(browser.context.clicks,0);adapter.close()
+
+    def test_actual_click_timeout_saves_blocker_and_never_reclicks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            browser=Browser(self.clock,fail_phase='event-link-click')
+            adapter=session(self.clock,[browser]);adapter.timeout=45
+            adapter.configure_blocker_diagnostics(directory)
+            with self.assertRaises(VividCaptureError):adapter.capture(URL)
+            self.assertEqual(browser.context.clicks,1);self.assertEqual(browser.context.trials,1)
+            self.assertEqual(browser.blocker_reads,1);self.assertEqual(len(browser.screenshots),1)
+            self.assertEqual(adapter.owner.capture_diagnostics['timeout_phase'],'event-link-click')
+            self.assertEqual(adapter.owner.capture_diagnostics['blocker_diagnostic_status'],'captured')
+            self.assertTrue(browser.closed);adapter.close()
+
+    def test_blocker_screenshot_budget_rejects_large_images_without_retaining_them(self):
+        with tempfile.TemporaryDirectory() as directory:
+            browser=Browser(self.clock,trial_failures=2,screenshot_bytes=b'x'*(2*1024**2+1))
+            adapter=session(self.clock,[browser]);adapter.timeout=45
+            adapter.configure_blocker_diagnostics(directory)
+            with self.assertRaises(VividCaptureError):adapter.capture(URL)
+            diagnostic=adapter.owner.capture_diagnostics
+            self.assertEqual(diagnostic['blocker_diagnostic_status'],'unavailable')
+            self.assertNotIn('blocker_screenshot_file',diagnostic)
+            self.assertEqual(list(Path(directory).iterdir()),[]);adapter.close()
+
+    def test_blocker_layout_whitelist_bounds_tokens_ancestors_and_coordinates(self):
+        value=safe_blocker_element({'hit':{'tag':'CUSTOM-PRIVATE','role':'private','id':'overlay',
+            'classes':['safe']*10+['private'],'position':'fixed','text':'private'},
+            'ancestors':[{'tag':'DIV','id':'x'*81,'classes':['url?token=private']}] * 20,
+            'hit_box':{'x':-12.567,'y':True,'width':float('nan'),'height':100001,'secret':1},
+            'viewport':{'width':1280,'height':720},'hit_is_iframe':1,'cookies':'private'})
+        self.assertEqual(value['hit'],{'tag':'OTHER','id':'overlay','classes':['safe']*6,'position':'fixed'})
+        self.assertEqual(len(value['ancestors']),4)
+        self.assertEqual(value['hit_box'],{'x':-12.57})
+        self.assertNotIn('hit_is_iframe',value)
+        self.assertNotIn('private',json.dumps(value,allow_nan=False))
 
     def test_click_failure_categories_never_include_exception_text(self):
         for phrase, expected in (

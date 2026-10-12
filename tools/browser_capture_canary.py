@@ -128,6 +128,17 @@ def safe_diagnostics(value):
                 'receives_pointer', 'obstructed_by_dialog') if type(actionability.get(key)) is bool}
         if actionability.get('ready_state') in ('loading', 'interactive', 'complete'):
             result['event_link_actionability']['ready_state'] = actionability['ready_state']
+    if isinstance(value.get('blocker_element'), dict):
+        from vivid_webkit import safe_blocker_element
+        result['blocker_element'] = safe_blocker_element(value['blocker_element'])
+    if value.get('blocker_diagnostic_status') in ('captured', 'unavailable', 'timeout', 'budget-exhausted'):
+        result['blocker_diagnostic_status'] = value['blocker_diagnostic_status']
+    if (re.fullmatch(r'[0-9]{1,12}', pid)
+            and value.get('blocker_screenshot_file') == f'blocker-{pid}.png'
+            and isinstance(value.get('blocker_screenshot_sha256'), str)
+            and re.fullmatch(r'[0-9a-f]{64}', value['blocker_screenshot_sha256'])):
+        result['blocker_screenshot_file'] = value['blocker_screenshot_file']
+        result['blocker_screenshot_sha256'] = value['blocker_screenshot_sha256']
     if value.get('last_link_error_type') in ('ElementNotInteractableException', 'StaleElementReferenceException'):
         result['last_link_error_type'] = value['last_link_error_type']
     runtime = value.get('runtime')
@@ -162,7 +173,7 @@ def safe_diagnostics(value):
     return result
 
 
-def run_canary(events, directory, *, timeout=45, pace_seconds=0, factory=None, normal_navigation=False, isolated_events=False, engine='firefox'):
+def run_canary(events, directory, *, timeout=45, pace_seconds=0, factory=None, normal_navigation=False, isolated_events=False, engine='firefox', blocker_diagnostics=False):
     if engine not in ('firefox', 'webkit'):
         raise ValueError('Canary engine must be Firefox or WebKit')
     if engine == 'webkit':
@@ -171,6 +182,8 @@ def run_canary(events, directory, *, timeout=45, pace_seconds=0, factory=None, n
         raise ValueError('pace_seconds must be an integer between 0 and 90')
     if type(normal_navigation) is not bool or type(isolated_events) is not bool:
         raise ValueError('Canary navigation/session options must be boolean')
+    if type(blocker_diagnostics) is not bool or blocker_diagnostics and (engine != 'webkit' or not isolated_events):
+        raise ValueError('Blocker diagnostics require isolated stock WebKit events')
     routes = {event['production_id']: normal_route(event) for event in events} if normal_navigation else {}
     import selenium
     from nfl_collector import VividNFLBrowser, NFLSnapshotParser, nfl_snapshot_to_payload
@@ -179,6 +192,7 @@ def run_canary(events, directory, *, timeout=45, pace_seconds=0, factory=None, n
     directory = Path(directory); directory.mkdir(parents=True, exist_ok=True)
     report = dict(status='running', database_calls=0, upload_calls=0, pace_seconds=pace_seconds,
                   normal_navigation=normal_navigation, engine=engine,
+                  blocker_diagnostics=blocker_diagnostics,
                   isolated_events=isolated_events,
                   observations=[], browser_sessions=[], selenium_version=selenium.__version__,
                   started_at=datetime.now(timezone.utc).isoformat())
@@ -243,6 +257,8 @@ def run_canary(events, directory, *, timeout=45, pace_seconds=0, factory=None, n
             if engine == 'webkit':
                 if webkit is None:
                     raise ValueError('The WebKit canary did not start WebKit')
+                if blocker_diagnostics:
+                    webkit.configure_blocker_diagnostics(directory)
                 capabilities = {'browserName': 'webkit'}
             else:
                 capabilities = browser.driver.capabilities
@@ -298,13 +314,16 @@ def main():
                         help='Use observed performer links from paired schedule fields or the fixed known routes; default direct.')
     parser.add_argument('--isolated-events', action='store_true',
                         help='Start and close one fresh browser per distinct event, without repeats.')
+    parser.add_argument('--blocker-diagnostics', action='store_true',
+                        help='Save bounded blocker layout and viewport screenshot on an isolated WebKit click timeout.')
     args = parser.parse_args()
     if not 20 <= args.timeout <= 60:
         parser.error('timeout must be between20 and60 seconds')
     if not 0 <= args.pace_seconds <= 90:
         parser.error('pace-seconds must be between 0 and 90')
     result = run_canary(events_from_json(args.events), args.directory, timeout=args.timeout,
-                        pace_seconds=args.pace_seconds, normal_navigation=args.normal_navigation, isolated_events=args.isolated_events, engine=args.engine)
+                        pace_seconds=args.pace_seconds, normal_navigation=args.normal_navigation, isolated_events=args.isolated_events, engine=args.engine,
+                        blocker_diagnostics=args.blocker_diagnostics)
     print('BROWSER_CAPTURE_CANARY ' + json.dumps(result, sort_keys=True))
     return int(result['status'] != 'passed')
 

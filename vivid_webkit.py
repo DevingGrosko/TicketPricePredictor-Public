@@ -9,8 +9,10 @@ from __future__ import annotations
 from collections import deque
 from datetime import datetime
 from importlib.metadata import version
+import hashlib
 import json
 import math
+from pathlib import Path
 import re
 import time
 from urllib.parse import parse_qs, urlsplit
@@ -48,6 +50,65 @@ LINK_ACTIONABILITY_SCRIPT = """node => {
          obstructed_by_dialog:!!hit?.closest('[role="dialog"], [aria-modal="true"]'),
          ready_state:document.readyState};
 }"""
+BLOCKER_ELEMENT_SCRIPT = """node => {
+ const r = node.getBoundingClientRect();
+ const x = (Math.max(0, r.left) + Math.min(innerWidth, r.right)) / 2;
+ const y = (Math.max(0, r.top) + Math.min(innerHeight, r.bottom)) / 2;
+ const hit = document.elementFromPoint(x, y);
+ const consent = '#onetrust-banner-sdk, #onetrust-consent-sdk, #CybotCookiebotDialog, '
+   + '#didomi-host, .qc-cmp2-container, .fc-consent-root, [id^="sp_message_container"], #truste-consent-track';
+ const box = e => { const b = e.getBoundingClientRect();
+   return {x:b.x, y:b.y, width:b.width, height:b.height}; };
+ const element = e => e ? {tag:e.tagName, role:e.getAttribute('role'), id:e.id,
+   classes:Array.from(e.classList).slice(0, 6), position:getComputedStyle(e).position} : {};
+ const ancestors = []; let p = hit?.parentElement;
+ while (p && ancestors.length < 4) { ancestors.push(element(p)); p = p.parentElement; }
+ return {hit:element(hit), ancestors, hit_box:hit ? box(hit) : {}, link_box:box(node),
+   viewport:{width:innerWidth, height:innerHeight},
+   hit_is_iframe:hit?.tagName === 'IFRAME', hit_contains_iframe:!!hit?.querySelector('iframe'),
+   hit_inside_iframe:!!hit?.ownerDocument.defaultView.frameElement,
+   hit_in_header:!!hit?.closest('header, nav, [role="banner"], [role="navigation"]'),
+   known_consent_present:!!document.querySelector(consent), hit_in_known_consent:!!hit?.closest(consent),
+   hit_contains_link:!!hit && hit.contains(node), link_pointer_events_none:getComputedStyle(node).pointerEvents === 'none'};
+}"""
+
+
+def safe_blocker_element(value):
+    """Keep bounded public layout tokens, never text, HTML, URLs or attributes."""
+    if not isinstance(value, dict):
+        return {}
+    tags = {'A', 'ARTICLE', 'ASIDE', 'BODY', 'BUTTON', 'CANVAS', 'DIV', 'FOOTER', 'HEADER',
+            'HTML', 'IFRAME', 'IMG', 'INPUT', 'LABEL', 'MAIN', 'NAV', 'P', 'SECTION', 'SPAN', 'SVG', 'UL', 'LI'}
+    roles = {'button', 'dialog', 'alert', 'alertdialog', 'banner', 'navigation', 'link', 'none', 'presentation', 'region'}
+    def element(row):
+        if not isinstance(row, dict):
+            return {}
+        clean = {}
+        if isinstance(row.get('tag'), str):
+            clean['tag'] = row['tag'] if row['tag'] in tags else 'OTHER'
+        if isinstance(row.get('role'), str) and row['role'] in roles:
+            clean['role'] = row['role']
+        if row.get('position') in ('static', 'relative', 'absolute', 'fixed', 'sticky'):
+            clean['position'] = row['position']
+        token = lambda val: isinstance(val, str) and re.fullmatch(r'[A-Za-z_][A-Za-z0-9_-]{0,79}', val)
+        if token(row.get('id')):
+            clean['id'] = row['id']
+        if isinstance(row.get('classes'), list):
+            clean['classes'] = [item for item in row['classes'][:6] if token(item)]
+        return clean
+    result = {'hit': element(value.get('hit'))}
+    if isinstance(value.get('ancestors'), list):
+        result['ancestors'] = [element(row) for row in value['ancestors'][:4] if isinstance(row, dict)]
+    for key in ('hit_box', 'link_box', 'viewport'):
+        if isinstance(value.get(key), dict):
+            result[key] = {name: round(number, 2) for name, number in value[key].items()
+                if name in ('x', 'y', 'width', 'height') and type(number) in (int, float)
+                and math.isfinite(number) and (-100000 if name in ('x', 'y') else 0) <= number <= 100000}
+    for key in ('hit_is_iframe', 'hit_contains_iframe', 'hit_inside_iframe', 'hit_in_header',
+                'known_consent_present', 'hit_in_known_consent', 'hit_contains_link', 'link_pointer_events_none'):
+        if type(value.get(key)) is bool:
+            result[key] = value[key]
+    return result
 
 
 def click_timeout_reason(error):
@@ -241,6 +302,13 @@ class WebKitInventorySession:
         self.generation = 0
         owner.driver = PublicDOMDriver(self)
 
+    def configure_blocker_diagnostics(self, directory):
+        """Explicit read-only canary opt-in; ordinary captures never save these files."""
+        directory = Path(directory)
+        if directory.is_symlink() or not directory.is_dir():
+            raise ValueError('Blocker diagnostics require an existing output directory')
+        self.blocker_diagnostic_directory = directory
+
     def configure_normal_navigation(self, performer_urls, expected_event_dates, *, official_games=None):
         if (not isinstance(performer_urls, dict) or not performer_urls
                 or not isinstance(expected_event_dates, dict) or set(expected_event_dates) != set(performer_urls)):
@@ -419,6 +487,42 @@ class WebKitInventorySession:
                 # Diagnostics cannot hide the original timeout or extend its budget.
                 pass
 
+        def capture_blocker(link):
+            directory = getattr(self, 'blocker_diagnostic_directory', None)
+            if directory is None or 'blocker_diagnostic_status' in diagnostics:
+                return
+            diagnostics['blocker_diagnostic_status'] = 'unavailable'
+            if time.monotonic() >= deadline:
+                diagnostics['blocker_diagnostic_status'] = 'budget-exhausted'
+                return
+            page = performer_page[0]
+            check(page)  # Denials and visible challenges remain authoritative.
+            screenshot = directory / f'blocker-{pid}.png'
+            owned = False
+            try:
+                diagnostics['blocker_element'] = safe_blocker_element(
+                    link.evaluate(BLOCKER_ELEMENT_SCRIPT, timeout=bounded_timeout(1000)))
+                check(page)
+                if screenshot.exists() or screenshot.is_symlink():
+                    return
+                owned = True
+                page.screenshot(path=str(screenshot), type='png', full_page=False,
+                    animations='allow', caret='initial', timeout=bounded_timeout(1500))
+                if screenshot.stat().st_size > 2 * 1024**2:
+                    return
+                digest = hashlib.sha256(screenshot.read_bytes()).hexdigest()
+                diagnostics.update(blocker_screenshot_file=screenshot.name,
+                    blocker_screenshot_sha256=digest, blocker_diagnostic_status='captured')
+            except VividCaptureError:
+                raise
+            except self.timeout_error:
+                diagnostics['blocker_diagnostic_status'] = 'timeout'
+            except Exception:
+                pass
+            finally:
+                if owned and diagnostics['blocker_diagnostic_status'] != 'captured':
+                    screenshot.unlink(missing_ok=True)
+
         def ready_link(page, link):
             # A trial scrolls and waits for ordinary actionability without clicking.
             # Keep this outside expect_popup so layout readiness cannot consume the
@@ -434,6 +538,7 @@ class WebKitInventorySession:
                     link_timeout(link, exc, trial=True)
                     check(page)
                     if attempt == 2 or time.monotonic() >= deadline:
+                        capture_blocker(link)
                         raise
                     phase("performer-ready-wait")
                     diagnostics["event_link_readiness_wait"] = True
@@ -481,6 +586,7 @@ class WebKitInventorySession:
                                     link.click(timeout=bounded_timeout(10000))
                                 except self.timeout_error as exc:
                                     link_timeout(link, exc, trial=False)
+                                    capture_blocker(link)
                                     raise
                                 diagnostics["visible_event_link_clicked"] = True
                                 phase("event-popup")
