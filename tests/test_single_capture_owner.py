@@ -137,6 +137,43 @@ class SingleOwnerTests(unittest.TestCase):
         jobs[1][0]=job('nfl',started=NOW-timedelta(minutes=25))
         self.assertTrue(self.decide(rows,jobs,sport='nfl')[0])
 
+    def test_backup_can_start_next_slot_while_previous_owner_only_delivers(self):
+        rows=[owner(1,'in_progress')]
+        jobs={1:[job('nfl',started=NOW-timedelta(minutes=25)),
+                 job('nhl','success',started=NOW-timedelta(minutes=25)),
+                 {'name':'mirror-nhl-staging / mirror','status':'in_progress'}]}
+        decision,reason,evidence=self.decide(rows,jobs)
+        self.assertTrue(decision)
+        self.assertEqual(reason,'no-owner-attempt-in-this-slot')
+        self.assertEqual(evidence['attempts'],[])
+
+    def test_backup_still_deduplicates_completed_attempts_while_owner_delivers(self):
+        rows=[owner(1,'in_progress')]
+        jobs={1:[job('nfl'),job('nhl','success'),
+                 {'name':'mirror-nhl-staging / mirror','status':'in_progress'}]}
+        decision,reason,evidence=self.decide(rows,jobs)
+        self.assertFalse(decision)
+        self.assertEqual(reason,'slot-already-attempted-including-failure')
+        self.assertEqual({item['sport'] for item in evidence['attempts']},{'nfl','nhl'})
+        jobs[1][1]=job('nhl',started=NOW-timedelta(minutes=25))
+        self.assertTrue(self.decide(rows,jobs)[0])
+        self.assertFalse(self.decide(rows,jobs,sport='nfl')[0])
+        self.assertTrue(self.decide(rows,jobs,sport='nhl')[0])
+
+    def test_backup_preserves_active_owner_when_any_capture_is_missing_or_unfinished(self):
+        nfl=job('nfl',started=NOW-timedelta(minutes=25))
+        nhl=job('nhl',started=NOW-timedelta(minutes=25))
+        incomplete=[[],[nfl],[nfl,nfl],
+                    [nfl,{**nhl,'name':'collect-nhl-spoof'}],
+                    *[[nfl,{**nhl,'status':status}] for status in
+                      ('in_progress','queued','waiting','pending','requested',None)]]
+        for jobs in incomplete:
+            with self.subTest(jobs=jobs):
+                decision,reason,evidence=self.decide([owner(1,'in_progress')],{1:jobs})
+                self.assertFalse(decision)
+                self.assertEqual(reason,'owner-active-or-queued')
+                self.assertEqual(evidence['active_owner_run'],1)
+
     def test_other_branches_workflows_and_forks_never_block(self):
         rows=[{**owner(1,'queued'),'head_branch':'feature'},
               {**owner(2,'queued'),'path':'.github/workflows/other.yml'},
