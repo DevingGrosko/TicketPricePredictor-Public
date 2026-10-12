@@ -6,8 +6,10 @@ from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import json
+import math
 import os
 from pathlib import Path
+import re
 import time
 from unittest.mock import patch
 
@@ -18,6 +20,63 @@ STATE_LIMIT = 1024**2
 RECOVERY_LIMIT = 20
 DEADLINE_SECONDS = 24 * 60
 PHASE_RESERVE_SECONDS = 180
+
+
+def capture_progress(sport, schedule_id, status, report, elapsed, *, category=None, diagnostics=None, source_id=None):
+    """Emit a bounded operational record; never serialize page or exception text."""
+    phases = {'performer-navigation', 'performer-link-scan', 'event-link-ready', 'performer-ready-wait',
+              'event-link-click', 'event-popup', 'event-domcontentloaded', 'event-reload',
+              'inventory-wait', 'inventory-body', 'event-identity', 'complete'}
+    reasons = {'pointer-intercepted', 'element-not-stable', 'outside-viewport', 'element-not-visible',
+               'element-not-enabled', 'element-detached', 'navigation-wait', 'unclassified'}
+    categories = {'capture-deferred-deadline', 'provider-access-denied', 'provider-rate-limited',
+        'provider-authentication-required', 'provider-inventory-timeout', 'provider-inventory-not-found',
+        'provider-server-error', 'provider-http-error', 'provider-recovery-failed', 'provider-event-unresolved', 'provider-gap',
+        'unexpected-inventory-payload', 'inventory-identity-mismatch', 'empty-inventory', 'incomplete-inventory',
+        'invalid-inventory-ticket', 'filtered-inventory-only', 'event-metadata-identity-mismatch',
+        'event-metadata-time-mismatch', 'event-metadata-timeout', 'event-route-not-configured',
+        'reload-event-identity-mismatch', 'event-navigation-identity-mismatch', 'event-link-not-found',
+        'delivery-failed', 'archived-observation-conflict'}
+    row = {'sport': sport if sport in ('nfl', 'nhl') else 'unknown',
+           'status': status if status in ('started', 'stored', 'duplicate', 'failed', 'unresolved',
+               'provider-gap', 'deferred', 'delivery-failed', 'archived-conflict', 'interrupted') else 'failed'}
+    for key in ('captured', 'captured_current', 'uploaded', 'duplicates', 'failed', 'current_due', 'scheduled_selected'):
+        if type(report.get(key)) is int and 0 <= report[key] <= 1000000:
+            row[key] = report[key]
+    if type(elapsed) in (int, float) and math.isfinite(elapsed) and 0 <= elapsed <= 86400:
+        row['elapsed_seconds'] = round(elapsed, 3)
+    if category is not None:
+        row['category'] = category if isinstance(category, str) and category in categories else 'other-failure'
+    diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
+    for key, value in (('schedule_id', schedule_id), ('source_id', source_id or diagnostics.get('production_id'))):
+        if type(value) in (str, int) and re.fullmatch(r'[0-9]{1,12}', str(value)):
+            row[key] = str(value)
+    clean = {}
+    for key in ('phase', 'timeout_phase'):
+        if isinstance(diagnostics.get(key), str) and diagnostics[key] in phases:
+            clean[key] = diagnostics[key]
+    for key in ('event_link_trial_timeout_reason', 'event_link_click_timeout_reason'):
+        if isinstance(diagnostics.get(key), str) and diagnostics[key] in reasons:
+            clean[key] = diagnostics[key]
+    trials = diagnostics.get('event_link_trial_attempts')
+    if type(trials) is int and 1 <= trials <= 2:
+        clean['event_link_trial_attempts'] = trials
+    for key in ('performer_document_status', 'document_status'):
+        value = diagnostics.get(key)
+        if type(value) is int and 100 <= value <= 599:
+            clean[key] = value
+    state = diagnostics.get('event_link_actionability')
+    if isinstance(state, dict):
+        clean['event_link_actionability'] = {key: state[key] for key in
+            ('attached', 'has_box', 'in_viewport', 'receives_pointer', 'obstructed_by_dialog')
+            if type(state.get(key)) is bool}
+    responses = diagnostics.get('responses')
+    if isinstance(responses, list):
+        clean['inventory_http_statuses'] = [value['status'] for value in responses[:10]
+            if isinstance(value, dict) and type(value.get('status')) is int and 100 <= value['status'] <= 599]
+    if clean:
+        row['diagnostics'] = clean
+    print('SHARED_CAPTURE_PROGRESS ' + json.dumps(row, sort_keys=True, allow_nan=False), flush=True)
 
 
 class CaptureDeadlineReached(RuntimeError):
@@ -224,12 +283,15 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
                 report['deadline_reached'] = True
                 report['deferred_games'].extend(str(row.schedule_id) for row in work[index:]); break
             state['pending'][identity]['last_attempt'] = now().isoformat(); save()
+            outcome, outcome_category, outcome_diagnostics, source_id = 'interrupted', None, {}, None
+            capture_progress(sport, identity, 'started', report, clock() - began)
             try:
                 # Incremental resolution prevents older searches from delaying current captures.
                 resolutions, errors = module.resolve_schedule_games([game], feed, headless=False, timeout=min(timeout, 20))
                 report['errors'].extend(errors)
                 resolution = next((row for row in resolutions if str(row.game.schedule_id) == identity), None)
                 if resolution is None or not resolution.candidates:
+                    outcome, outcome_category = 'unresolved', 'provider-event-unresolved'
                     report['unresolved'].append(identity)
                     if sport == 'nhl':
                         report['provider_gaps'].append(identity + ': no exact-date Vivid event was available')
@@ -237,6 +299,7 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
                         report['errors'].append(identity + ': unresolved official event')
                     save(); continue
                 if not room():
+                    outcome, outcome_category = 'deferred', CaptureDeadlineReached.category
                     report['deadline_reached'] = True
                     report['deferred_games'].extend(str(row.schedule_id) for row in work[index:]); break
                 native_capture = module.VividNFLBrowser.capture
@@ -259,6 +322,8 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
                 with patch.object(module.VividNFLBrowser, '__init__', bounded_init), \
                      patch.object(module.VividNFLBrowser, 'capture', traced_capture):
                     url, event_at, snapshot = module._capture_resolution(resolution, headless=False, timeout=timeout)
+                source_id = getattr(snapshot, 'source_id', None)
+                outcome_diagnostics = getattr(snapshot, 'capture_diagnostics', None) or {}
                 observed_at = now()
                 if not in_window(event_at, observed_at):
                     raise ValueError('Captured event is no longer within its collection window')
@@ -273,28 +338,40 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
                     response = module.post_snapshot_with_retry(endpoint, token, value, timeout=20, retry_delays=(2, 5))
                     queued.unlink(missing_ok=True)
                     report['uploaded' if response['status'] == 'stored' else 'duplicates'] += 1
+                    outcome = 'stored' if response['status'] == 'stored' else 'duplicate'
                     report['uploads'].append(dict(schedule_id=identity, source_id=value['source_id'],
                         captured_at=observed_at.isoformat(), sections=value['section_count'], result=response['status'],
                         title=snapshot.title, resolution_source=resolution.source,
                         inventory_listing_count=getattr(snapshot, 'inventory_listing_count', None),
                         capture_diagnostics=getattr(snapshot, 'capture_diagnostics', None)))
                 except ArchivedCaptureConflict:
+                    outcome, outcome_category = 'archived-conflict', 'archived-observation-conflict'
                     preserve_pending(queued, mirror.read(mirror.enqueue(value)))
                 except Exception as exc:
+                    outcome, outcome_category = 'delivery-failed', 'delivery-failed'
                     report['errors'].append(identity + ': delivery ' + type(exc).__name__)
             except Exception as exc:
                 category = getattr(exc, 'category', None) or next((row['category'] for row in reversed(attempts)
                     if row['category']), None)
+                outcome, outcome_category = 'failed', category or 'other-failure'
                 if category == CaptureDeadlineReached.category:
+                    outcome = 'deferred'
                     report['deadline_reached'] = True
                     report['deferred_games'].extend(str(row.schedule_id) for row in work[index:]); break
                 elif sport == 'nhl' and isinstance(exc, module.NHLProviderGapError):
+                    outcome, outcome_category = 'provider-gap', 'provider-gap'
                     report['provider_gaps'].append(identity + ': ' + type(exc).__name__)
                 else:
                     report['failed'] += 1
                     report['errors'].append(identity + ': ' + type(exc).__name__ + (': '+category if category else ''))
                     report['capture_failures'].append(dict(schedule_id=identity, error_type=type(exc).__name__,
                         category=category, attempts=attempts[-16:]))
+            finally:
+                if not outcome_diagnostics and attempts:
+                    outcome_diagnostics = next((row['capture_diagnostics'] for row in reversed(attempts)
+                                                if row['capture_diagnostics']), {})
+                capture_progress(sport, identity, outcome, report, clock() - began,
+                    category=outcome_category, diagnostics=outcome_diagnostics, source_id=source_id)
             save()
     except BaseException as exc:
         report['errors'].append('Owner: ' + type(exc).__name__)
