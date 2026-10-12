@@ -7,7 +7,7 @@ imports this draft from recurring production entry points.
 from __future__ import annotations
 
 import argparse
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
@@ -81,30 +81,70 @@ class MirrorQueue:
         if self.root.is_symlink():
             raise ValueError('Shared state cannot be a symlink')
         self.root.mkdir(parents=True, exist_ok=True)
+        self._batch_depth = 0
+        self._write_budget = None
+
+    @staticmethod
+    def _reserved(record, size):
+        return size + 1024 * sum(ack is None for ack in record['acknowledged'].values())
+
+    def _budget_snapshot(self):
+        costs = {path: self._reserved(self.read(path), path.stat().st_size)
+                 for path in self.root.glob('*.json')}
+        auxiliary = sum(path.stat().st_size for path in self.root.rglob('*') if path.is_file()
+                        and (path.parent != self.root or path.suffix != '.json'))
+        return costs, sum(costs.values()) + auxiliary
+
+    @contextmanager
+    def _batch_writes(self):
+        """Account once for an exclusive batch; callers only write through this queue.
+
+        The workflow owns its local queue exclusively. Keep this scope around merge
+        or delivery only, never around recovery checkpoint writes to other files.
+        Every subsequent batch revalidates disk state; no validation cache escapes.
+        """
+        self._batch_depth += 1
+        try:
+            yield
+        finally:
+            self._batch_depth -= 1
+            if not self._batch_depth:
+                self._write_budget = None
 
     def _save(self, path, value):
         data = encoded(value)
         if len(data) > FILE_LIMIT:
             raise ValueError('Shared record exceeds its budget')
-        def reserved(record, size):
-            return size + 1024 * sum(ack is None for ack in record['acknowledged'].values())
-        used = sum(reserved(self.read(p), p.stat().st_size) for p in self.root.glob('*.json') if p != path)
-        used += sum(p.stat().st_size for p in self.root.rglob('*') if p.is_file()
-                    and (p.parent != self.root or p.suffix != '.json'))
-        if used + reserved(value, len(data)) > self.byte_limit:
+        if self._batch_depth and self._write_budget is not None:
+            costs, used = self._write_budget
+        else:
+            costs, used = self._budget_snapshot()
+        cost = self._reserved(value, len(data))
+        updated = used - costs.get(path, 0) + cost
+        if updated > self.byte_limit:
             raise ValueError('Shared queue budget exhausted; pending observations remain intact')
-        with tempfile.NamedTemporaryFile(dir=self.root, prefix='.shared-', delete=False) as out:
-            temporary = Path(out.name)
-            out.write(data); out.flush(); os.fsync(out.fileno())
+        temporary = None
         try:
+            with tempfile.NamedTemporaryFile(dir=self.root, prefix='.shared-', delete=False) as out:
+                temporary = Path(out.name)
+                out.write(data); out.flush(); os.fsync(out.fileno())
             temporary.replace(path)
             fd = os.open(self.root, os.O_RDONLY)
             try:
                 os.fsync(fd)
             finally:
                 os.close(fd)
+            if self._batch_depth:
+                costs[path] = cost
+                self._write_budget = costs, updated
+        except BaseException:
+            # A replacement may have succeeded before fsync failed. Reconcile
+            # from disk before another write even when the caller catches this.
+            self._write_budget = None
+            raise
         finally:
-            temporary.unlink(missing_ok=True)
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
 
     def read(self, path):
         if path.is_symlink() or not path.is_file() or path.stat().st_size > FILE_LIMIT:
@@ -195,19 +235,22 @@ class MirrorQueue:
 
     def merge(self, directory):
         incoming = MirrorQueue(directory, self.sport)
-        for path, value in incoming.records():
-            target = self.root / path.name
-            if target.exists():
-                current = self.read(target)
-                if current['payload_sha256'] != value['payload_sha256']:
-                    raise ValueError('Incoming observation collides with the stored slot')
-                for dest in DESTINATIONS:
-                    current['acknowledged'][dest] = current['acknowledged'][dest] or value['acknowledged'][dest]
-                if all(current['acknowledged'].values()):
-                    current.pop('payload', None)
-                self._save(target, current)
-            else:
-                self._save(target, value)
+        with self._batch_writes():
+            for path, value in incoming.records():
+                target = self.root / path.name
+                if target.exists():
+                    current = self.read(target)
+                    if current['payload_sha256'] != value['payload_sha256']:
+                        raise ValueError('Incoming observation collides with the stored slot')
+                    before = encoded(current)
+                    for dest in DESTINATIONS:
+                        current['acknowledged'][dest] = current['acknowledged'][dest] or value['acknowledged'][dest]
+                    if all(current['acknowledged'].values()):
+                        current.pop('payload', None)
+                    if encoded(current) != before:
+                        self._save(target, current)
+                else:
+                    self._save(target, value)
 
     def pending(self, destination):
         return [(path, value) for path, value in self.records() if value['acknowledged'][destination] is None]
@@ -349,38 +392,70 @@ def saved_observations(manifest_path, expected_sha256, sport):
     return [value for value in validated if value['event_type'] == sport]
 
 
+@contextmanager
+def _bootstrap_health(sport, health_output, *, delivery_only=False):
+    """Make queue startup visible even if the runner is terminated before capture."""
+    began = time.monotonic()
+    path = Path(health_output)
+    report = dict(status='running', event_type=sport, mode='delivery-only' if delivery_only else 'capture',
+                  started_at=datetime.now(timezone.utc).isoformat(), captured=0, uploaded=0,
+                  pending=0, errors=[])
+    def progress(phase):
+        report.update(phase=phase, bootstrap_seconds=round(time.monotonic() - began, 3))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(report, indent=2) + '\n')
+        print('SHARED_CAPTURE_BOOTSTRAP ' + json.dumps(dict(sport=sport, phase=phase,
+              seconds=report['bootstrap_seconds'], status=report['status'])), flush=True)
+    progress('imports')
+    try:
+        yield progress, began
+    except BaseException as exc:
+        report.update(status='degraded', errors=['Bootstrap: ' + type(exc).__name__])
+        progress('failed-' + report['phase'])
+        raise
+
+
 def run_legacy(sport, directory, pending_dir, health_output, *, timeout=45, runner=None,
                acknowledgments=None, saved=None, legacy_free_state=None):
-    import collector
-    import nfl_schedule_collector as nfl
-    import nhl_schedule_collector as nhl
-    if (sport not in SPORTS or os.environ.get('TICKETSIGNAL_STAGING_SITE') == '1'
-            or any(os.environ.get(k) for k in ('TIDB_STAGING_HOST', 'TIDB_STAGING_USERNAME', 'TIDB_STAGING_PASSWORD'))):
-        raise RuntimeError('Legacy capture requires a separate PythonAnywhere credential environment')
-    token = os.environ.get('COLLECTOR_INGEST_TOKEN')
-    if not token:
-        raise RuntimeError('COLLECTOR_INGEST_TOKEN is required')
-    mirror = MirrorQueue(directory, sport)
-    if acknowledgments is not None:
-        mirror.merge(acknowledgments)
-    if saved is not None:
-        for observation in saved:
-            mirror.enqueue(observation)
-    mirror.prune_receipts(datetime.now(timezone.utc))
-    pending_dir = Path(pending_dir); pending_dir.mkdir(parents=True, exist_ok=True)
-    queue_original, post_original = collector.queue_snapshot, collector.post_snapshot_with_retry
-    # Mirror ALL existing payloads before replay can unlink an acknowledged PA file.
-    existing_payloads = set()
-    for path in sorted({*pending_dir.glob('*.json'), *pending_dir.glob('*.rejected')}):
-        if path.is_symlink() or path.stat().st_size > 4 * 1024**2:
-            raise ValueError('Invalid existing pending snapshot')
-        observation = json.loads(path.read_bytes())
-        mirror.enqueue(observation)
-        existing_payloads.add(hashlib.sha256(encoded(observation)).hexdigest())
-    # A prior runner may have cached the mirror but missed saving the PA queue.
-    for _path, value in mirror.pending('pythonanywhere'):
-        if value['payload_sha256'] not in existing_payloads:
-            queue_original(value['payload'], pending_dir)
+    with _bootstrap_health(sport, health_output, delivery_only=saved is not None) as (progress, bootstrap_started):
+        import collector
+        import nfl_schedule_collector as nfl
+        import nhl_schedule_collector as nhl
+        if (sport not in SPORTS or os.environ.get('TICKETSIGNAL_STAGING_SITE') == '1'
+                or any(os.environ.get(k) for k in ('TIDB_STAGING_HOST', 'TIDB_STAGING_USERNAME', 'TIDB_STAGING_PASSWORD'))):
+            raise RuntimeError('Legacy capture requires a separate PythonAnywhere credential environment')
+        token = os.environ.get('COLLECTOR_INGEST_TOKEN')
+        if not token:
+            raise RuntimeError('COLLECTOR_INGEST_TOKEN is required')
+        progress('merge-acknowledgments')
+        mirror = MirrorQueue(directory, sport)
+        if acknowledgments is not None:
+            mirror.merge(acknowledgments)
+        progress('restore-original-observations')
+        if saved is not None:
+            with mirror._batch_writes():
+                for observation in saved:
+                    mirror.enqueue(observation)
+        progress('prune-confirmed-receipts')
+        mirror.prune_receipts(datetime.now(timezone.utc))
+        progress('recover-pythonanywhere-queue')
+        pending_dir = Path(pending_dir); pending_dir.mkdir(parents=True, exist_ok=True)
+        queue_original, post_original = collector.queue_snapshot, collector.post_snapshot_with_retry
+        # Mirror ALL existing payloads before replay can unlink an acknowledged PA file.
+        existing_payloads = set()
+        with mirror._batch_writes():
+            for path in sorted({*pending_dir.glob('*.json'), *pending_dir.glob('*.rejected')}):
+                if path.is_symlink() or path.stat().st_size > 4 * 1024**2:
+                    raise ValueError('Invalid existing pending snapshot')
+                observation = json.loads(path.read_bytes())
+                mirror.enqueue(observation)
+                existing_payloads.add(hashlib.sha256(encoded(observation)).hexdigest())
+        # A prior runner may have cached the mirror but missed saving the PA queue.
+        for _path, value in mirror.pending('pythonanywhere'):
+            if value['payload_sha256'] not in existing_payloads:
+                queue_original(value['payload'], pending_dir)
+        progress('ready')
+    bootstrap_seconds = time.monotonic() - bootstrap_started
     endpoint = f'https://bunnyjeff.pythonanywhere.com/api/{sport}/snapshot'
     def queue(payload, pending):
         path = queue_original(payload, pending)
@@ -435,10 +510,13 @@ def run_legacy(sport, directory, pending_dir, health_output, *, timeout=45, runn
             if runner is not None:
                 code = runner(endpoint, token, False, timeout, Path(health_output), pending_dir)
             else:
-                from tools.shared_capture_policy import run_owner
+                from tools.shared_capture_policy import DEADLINE_SECONDS, run_owner
                 code = run_owner(sport, module, mirror, endpoint, token, timeout,
-                                 Path(health_output), pending_dir, legacy=legacy_free_state)
+                                 Path(health_output), pending_dir, legacy=legacy_free_state,
+                                 deadline_seconds=max(0, DEADLINE_SECONDS - bootstrap_seconds))
     health = json.loads(Path(health_output).read_text()) if Path(health_output).exists() else {'status': 'report-unavailable'}
+    health['bootstrap_seconds'] = round(bootstrap_seconds, 3)
+    Path(health_output).write_text(json.dumps(health, indent=2) + '\n')
     report = dict(sport=sport, reused_current_observations=sorted(set(reused)),
         pending_pythonanywhere=len(mirror.pending('pythonanywhere')), pending_tidb=len(mirror.pending('tidb')),
         legacy_status=health['status'], legacy_exit_code=code, mode=health.get('mode', 'capture'))
@@ -446,9 +524,11 @@ def run_legacy(sport, directory, pending_dir, health_output, *, timeout=45, runn
     return code or int(health['status'] != 'healthy' or report['pending_pythonanywhere'] > 0)
 
 
-def deliver_tidb(sport, directory, incoming, *, sender=None, legacy_free_state=None):
+def deliver_tidb(sport, directory, incoming, *, sender=None, legacy_free_state=None,
+                 clock=time.monotonic, budget=8 * 60):
+    began = clock()
     mirror = MirrorQueue(directory, sport)
-    errors = []
+    errors, failures = [], []
     try:
         validate_export(sport, incoming)
     except Exception as exc:
@@ -459,24 +539,48 @@ def deliver_tidb(sport, directory, incoming, *, sender=None, legacy_free_state=N
         mirror.merge(incoming)
     if sender is None:
         from tools.import_shared_snapshot import deliver_tidb as sender
-    for _path, value in mirror.pending('tidb'):
-        try:
-            response = sender(value['payload'])
-            if (response.get('source_id') != value['source_id']
-                    or response.get('observed_at') != value['captured_at']
-                    or response.get('price_readback_verified') is not True
-                    or response.get('identity_readback_verified') is not True):
-                raise ValueError('TiDB readback did not verify the original observation')
-            mirror.acknowledge(value['payload'], 'tidb', response)
-        except Exception as exc:
-            errors.append(type(exc).__name__)
+    pending = sorted(mirror.pending('tidb'), key=lambda row: (
+        datetime.fromisoformat(row[1]['captured_at']), row[1]['source_id']), reverse=True)
+    attempted = delivered = 0
+    def progress():
+        print('SHARED_TIDB_PROGRESS ' + json.dumps(dict(sport=sport, attempted=attempted,
+              delivered=delivered, remaining=len(pending) - delivered,
+              seconds=round(clock() - began, 3))), flush=True)
+    progress()
+    with mirror._batch_writes():
+        for _path, value in pending:
+            if clock() - began >= budget:
+                break
+            attempted += 1
+            try:
+                response = sender(value['payload'])
+                if (response.get('source_id') != value['source_id']
+                        or response.get('observed_at') != value['captured_at']
+                        or response.get('price_readback_verified') is not True
+                        or response.get('identity_readback_verified') is not True):
+                    raise ValueError('TiDB readback did not verify the original observation')
+                mirror.acknowledge(value['payload'], 'tidb', response)
+                delivered += 1
+            except Exception as exc:
+                errors.append(type(exc).__name__)
+                failure = dict(source_id=value['source_id'], captured_at=value['captured_at'],
+                               error_type=type(exc).__name__)
+                if len(failures) < 20:
+                    failures.append(failure)
+                print('SHARED_TIDB_DELIVERY_FAILED ' + json.dumps(failure), flush=True)
+            if attempted % 10 == 0:
+                progress()
+    progress()
     legacy = {}
     if legacy_free_state is not None:
         from tools.shared_capture_policy import replay_free_pending
-        legacy = replay_free_pending(sport, legacy_free_state, sender=sender)
+        legacy = replay_free_pending(sport, legacy_free_state, sender=sender, clock=clock,
+                                     budget=min(120, max(0, budget - (clock() - began))))
         errors.extend(legacy['errors'])
     report = dict(sport=sport, pending_tidb=len(mirror.pending('tidb')), error_types=errors,
-                  legacy_replay=legacy)
+                  legacy_replay=legacy, delivered=delivered, attempted=attempted,
+                  deferred=len(pending) - attempted, delivery_failures=failures,
+                  deadline_reached=clock() - began >= budget, seconds=round(clock() - began, 3))
     print('SHARED_TIDB_REPORT ' + json.dumps(report), flush=True)
     return int(bool(errors or report['pending_tidb'] or legacy.get('pending')))
 

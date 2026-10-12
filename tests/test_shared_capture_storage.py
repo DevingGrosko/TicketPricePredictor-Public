@@ -4,8 +4,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from tools.shared_capture_storage import QUEUE_LIMIT, queue_budget, removable_generations
-from tools.single_capture_owner import OWNER
+from tools.shared_capture_storage import PROVENANCE_RUN_LIMIT, QUEUE_LIMIT, queue_budget, removable_generations
+from tools.single_capture_owner import OWNER, REPO
 
 NOW=datetime(2026,10,8,5,tzinfo=timezone.utc)
 
@@ -15,10 +15,15 @@ def cache(identity,sport='nfl',role='capture',version='path-version1',ref='refs/
             'ref':ref,'created_at':(NOW+timedelta(seconds=identity)).isoformat()}
 
 
+def provenance(identity, **changes):
+    return dict(id=identity, status='completed', path=OWNER, head_branch='main',
+                repository={'full_name':REPO}, head_repository={'full_name':REPO}, **changes)
+
+
 class SharedStorageTests(unittest.TestCase):
     def test_pagination_duplicates_do_not_count_as_two_distinct_cache_generations(self):
         rows = [cache(2), cache(2), cache(1), {**cache(2), 'id': 20}]
-        remove = removable_generations(rows, lambda _: {'status':'completed', 'path':OWNER}, current_run=99)
+        remove = removable_generations(rows, provenance, current_run=99)
         self.assertEqual(remove, [])
 
     def test_two_completed_generations_each_sport_role_branch_and_path_version(self):
@@ -26,7 +31,7 @@ class SharedStorageTests(unittest.TestCase):
               cache(7,sport='nhl'),cache(8,sport='nhl'),cache(9,sport='nhl'),
               cache(10,version='different-path'),cache(11,version='different-path'),cache(12,version='different-path'),
               cache(13,ref='refs/heads/other')]
-        remove=removable_generations(rows,lambda _: {'status':'completed','path':OWNER},current_run=99)
+        remove=removable_generations(rows,provenance,current_run=99)
         self.assertEqual({row['id'] for row in remove},{1,4,7,10})
 
     def test_active_current_unrelated_namespace_workflow_and_unknown_version_are_untouched(self):
@@ -34,7 +39,7 @@ class SharedStorageTests(unittest.TestCase):
         rows += [{'id':8,'key':'ticketsignal-free-v1-state-nhl-8-1','ref':'refs/heads/main'},
                  {**cache(9),'version':None}]
         def run(identity):
-            return {'status':'in_progress' if identity==4 else 'completed',
+            return {**provenance(identity), 'status':'in_progress' if identity==4 else 'completed',
                     'path':'.github/workflows/other.yml' if identity==5 else OWNER}
         remove=removable_generations(rows,run,current_run=6)
         self.assertEqual({row['id'] for row in remove},{1,2})
@@ -62,10 +67,33 @@ class SharedStorageTests(unittest.TestCase):
         rows[6]['version'] = 'another-cache-path'
         rows[7]['ref'] = 'refs/heads/unrelated'
         def run(identity):
-            return {'status': 'in_progress' if identity == 4 else 'completed',
+            return {**provenance(identity), 'status': 'in_progress' if identity == 4 else 'completed',
                     'path': '.github/workflows/free-ticket-collect.yml' if identity == 5 else OWNER}
         remove = removable_generations(rows, run, current_run=6)
         self.assertEqual([row['id'] for row in remove], [1])
+
+    def test_unknown_provenance_and_artifact_proof_are_not_pruned(self):
+        rows = [cache(i) for i in range(1, 8)]
+        def run(identity):
+            value = provenance(identity)
+            if identity == 1: value['head_repository'] = {'full_name':'other/repo'}
+            if identity == 2: value['id'] = 999
+            if identity == 3: value['head_branch'] = 'other'
+            return value
+        remove = removable_generations(rows, run, current_run=99,
+                                       protected_keys={cache(4)['key']})
+        self.assertEqual([row['id'] for row in remove], [5])
+
+    def test_generation_provenance_reads_are_bounded_newest_first(self):
+        seen = []
+        def run(identity):
+            seen.append(identity)
+            return provenance(identity)
+        count = PROVENANCE_RUN_LIMIT + 10
+        remove = removable_generations([cache(i) for i in range(1, count+1)], run, current_run=999)
+        self.assertEqual(len(seen), PROVENANCE_RUN_LIMIT)
+        self.assertEqual(seen[:2], [count, count-1])
+        self.assertFalse(any(row['id'] <= 10 for row in remove))
 
 
 if __name__=='__main__':unittest.main()

@@ -13,7 +13,7 @@ from tools.shared_capture import MirrorQueue, export_observations, verify_delive
 from tools.shared_capture_storage import (
     ARCHIVE_MARGIN, PEER_UPLOAD_RESERVE, PROVENANCE_RUN_LIMIT, PUBLISHER_RESERVE,
     QUEUE_LIMIT, TOTAL_ARTIFACT_LIMIT, TRANSPORT_LIMIT, artifact_upload_budget,
-    prune_shared_caches, removable_transport_artifacts,
+    prune_shared_caches, removable_transport_artifacts, retained_artifact_cache_keys,
 )
 from tools.single_capture_owner import OWNER, REPO
 
@@ -178,6 +178,40 @@ class TransportRetentionTests(unittest.TestCase):
         unrelated[0]['size_in_bytes'] += 1
         with self.assertRaises(RuntimeError): artifact_upload_budget(unrelated, new)
 
+    def test_preserved_historical_exports_allow_three_worst_case_serialized_cycles(self):
+        mib = 1024**2
+        # Round the measured 103.875MiB of retained originals up conservatively;
+        # six maximum-size uploads represent NFL+NHL for three half-hour cycles.
+        original = {**artifact(1), 'size_in_bytes':104*mib}
+        rows = [original, dict(name='other-preserved-artifacts', expired=False, size_in_bytes=9*mib)]
+        new = 21*mib
+        for run in range(2, 8):
+            evidence = artifact_upload_budget(rows, new)
+            self.assertEqual(evidence['peer_upload_reserve_bytes'], 21*mib)
+            self.assertEqual(evidence['publisher_reserve_bytes'], 128*mib)
+            self.assertEqual(evidence['maximum_repository_bytes'], 450*mib)
+            rows.append({**artifact(run), 'size_in_bytes':new})
+        self.assertIs(rows[0], original)
+        self.assertEqual(original['size_in_bytes'], 104*mib)
+        # Space remains bounded: a seventh maximum export must wait for verified
+        # retention cleanup; admission never deletes the historical originals.
+        with self.assertRaisesRegex(RuntimeError, 'preserve unconfirmed'):
+            artifact_upload_budget(rows, new)
+        self.assertEqual(len(rows), 8)
+
+    def test_256mib_transport_partition_and_450mib_repository_limit_are_independent(self):
+        mib = 1024**2
+        new = 21*mib
+        rows = [{**artifact(1), 'size_in_bytes':214*mib}]
+        artifact_upload_budget(rows, new)  # 214 + new21 + peer21 = 256MiB.
+        rows[0]['size_in_bytes'] += 1
+        with self.assertRaises(RuntimeError): artifact_upload_budget(rows, new)
+        rows = [{**artifact(1), 'size_in_bytes':104*mib},
+                dict(name='other-preserved-artifacts', expired=False, size_in_bytes=176*mib)]
+        artifact_upload_budget(rows, new)  # 104 + 176 + 21 + 21 + 128 = 450MiB.
+        rows[1]['size_in_bytes'] += 1
+        with self.assertRaises(RuntimeError): artifact_upload_budget(rows, new)
+
     def test_artifact_deletion_failure_aborts_cache_pruning_before_any_cache_delete(self):
         env = dict(GITHUB_REPOSITORY=REPO, GITHUB_REF='refs/heads/main', GITHUB_RUN_ID='99', GH_TOKEN='test')
         def inventory(path, key): return checkpoint_caches(1)+checkpoint_caches(2)+checkpoint_caches(3)
@@ -186,6 +220,57 @@ class TransportRetentionTests(unittest.TestCase):
              patch('tools.shared_capture_storage._delete') as delete:
             with self.assertRaises(ConnectionError): prune_shared_caches()
         delete.assert_not_called()
+
+    def test_retained_artifacts_protect_all_attempts_versions_and_both_checkpoint_roles(self):
+        caches = checkpoint_caches(1) + checkpoint_caches(1, attempt=2) + checkpoint_caches(2)
+        caches += [{**checkpoint_caches(1)[0], 'version':'other-path'},
+                   {**checkpoint_caches(1)[0], 'key':'ticketsignal-free-v1-state-nfl-shared-1-1'},
+                   {**checkpoint_caches(1)[0], 'key':'ticketsignal-free-v1-state-nfl-1-1'}]
+        rows = [artifact(1), {**artifact(2), 'expired':True}]
+        protected = retained_artifact_cache_keys(rows, caches)
+        self.assertEqual(protected, {row['key'] for row in caches if '-1-' in row['key']
+                                     and row['key'] != 'ticketsignal-free-v1-state-nfl-1-1'})
+
+    def test_failed_mirror_retains_artifact_and_exact_caches_for_a_future_recovery(self):
+        env = dict(GITHUB_REPOSITORY=REPO, GITHUB_REF='refs/heads/main', GITHUB_RUN_ID='99', GH_TOKEN='test')
+        rows = [artifact(i) for i in range(1, 5)]
+        caches = [row for i in range(1, 5) for row in checkpoint_caches(i)]
+        def inventory(path, key): return caches if key == 'actions_caches' else rows
+        def api(path):
+            if '/attempts/' in path:
+                run = int(path.split('/')[3]); values = jobs(run, 1)
+                if run == 1: values[1]['steps'][0]['conclusion'] = 'failure'
+                return {'total_count':len(values), 'jobs':values}
+            return provenance(int(path.rsplit('/',1)[1]))
+        with patch.dict(os.environ, env, clear=True), patch('tools.shared_capture_storage._inventory', inventory), \
+             patch('tools.shared_capture_storage.api', side_effect=api), \
+             patch('tools.shared_capture_storage._delete') as delete, patch('sys.stdout', new_callable=StringIO):
+            report = prune_shared_caches()
+        self.assertEqual(delete.call_args_list[0].args, ('/actions/artifacts/2',))
+        self.assertEqual(delete.call_count, 1)
+        self.assertEqual(report['retained_artifact_checkpoint_keys_preserved'], 6)
+        # Failed artifact1 and its exact checkpoints remain; artifacts3/4 are the
+        # latest two, and the two spare cache generations remain conservative.
+
+    def test_deleting_verified_artifacts_releases_only_their_cache_protection(self):
+        env = dict(GITHUB_REPOSITORY=REPO, GITHUB_REF='refs/heads/main', GITHUB_RUN_ID='99', GH_TOKEN='test')
+        rows = [artifact(i) for i in range(1, 7)]
+        caches = [row for i in range(1, 7) for row in checkpoint_caches(i)]
+        def inventory(path, key): return caches if key == 'actions_caches' else rows
+        def api(path):
+            if '/attempts/' in path:
+                run = int(path.split('/')[3]); values = jobs(run, 1)
+                return {'total_count':len(values), 'jobs':values}
+            return provenance(int(path.rsplit('/',1)[1]))
+        with patch.dict(os.environ, env, clear=True), patch('tools.shared_capture_storage._inventory', inventory), \
+             patch('tools.shared_capture_storage.api', side_effect=api), \
+             patch('tools.shared_capture_storage._delete') as delete, patch('sys.stdout', new_callable=StringIO):
+            report = prune_shared_caches()
+        paths = [call.args[0] for call in delete.call_args_list]
+        self.assertEqual(set(paths[:4]), {'/actions/artifacts/'+str(i) for i in range(1,5)})
+        self.assertEqual(set(paths[4:]), {'/actions/caches/'+str(row['id']) for i in (1,2) for row in checkpoint_caches(i)})
+        self.assertEqual(report['retained_artifact_checkpoint_keys_preserved'], 4)
+        self.assertEqual(report['provenance_runs_read'], 6)
 
     def test_workflow_preflight_checkpoint_and_cleanup_order_are_explicit(self):
         import yaml

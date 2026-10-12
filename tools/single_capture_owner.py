@@ -195,6 +195,37 @@ def check_scope():
         raise RuntimeError('Owner gates are restricted to the public main workflows')
 
 
+def validate_publication_handoff_owner(owner, current):
+    """Validate identity separately from GitHub's aggregate scheduling status.
+
+    An end-job can be running while the run still reports a queued/waiting
+    transition for another job. Completed capture and mirror jobs, checked
+    independently below, are the evidence that publication can start.
+    """
+    checks = {
+        'id': owner.get('id') == current,
+        'path': owner.get('path') == OWNER,
+        'head_branch': owner.get('head_branch') == 'main',
+        'head_repository': (owner.get('head_repository') or {}).get('full_name') == REPO,
+        'repository': (owner.get('repository') or {}).get('full_name') == REPO,
+        'public_repository': (owner.get('repository') or {}).get('private') is False,
+        'actor': (owner.get('actor') or {}).get('login') == 'github-actions[bot]',
+        'triggering_actor': (owner.get('triggering_actor') or {}).get('login') == 'github-actions[bot]',
+        'status': owner.get('status') in (*ACTIVE, 'completed'),
+    }
+    failed = [name for name, valid in checks.items() if not valid]
+    if failed:
+        # Only public scheduling metadata and check names: never a token, raw
+        # response, or arbitrary exception message in workflow diagnostics.
+        print('SINGLE_CAPTURE_OWNER_HANDOFF_VALIDATION ' + json.dumps({
+            'owner_run_id': current,
+            'owner_status': owner.get('status'),
+            'failed_checks': failed,
+        }), flush=True)
+        raise RuntimeError('Publication handoff must belong to the canonical public main owner; '
+                           'failed checks: ' + ', '.join(failed))
+
+
 def run(kind, *, sport=None, manual_repair=False, owner_run_id=None):
     check_scope()
     def jobs(run_id):
@@ -211,16 +242,9 @@ def run(kind, *, sport=None, manual_repair=False, owner_run_id=None):
                 or owner_run_id not in (None, current) or sport is not None or manual_repair):
             raise RuntimeError('Publication handoff is restricted to its own backup-dispatched owner')
         owner = api('/actions/runs/'+str(current))
-        if (owner.get('id') != current or owner.get('path') != OWNER or owner.get('head_branch') != 'main'
-                or (owner.get('head_repository') or {}).get('full_name') != REPO
-                or (owner.get('repository') or {}).get('full_name') != REPO
-                or (owner.get('repository') or {}).get('private') is not False
-                or (owner.get('actor') or {}).get('login') != 'github-actions[bot]'
-                or (owner.get('triggering_actor') or {}).get('login') != 'github-actions[bot]'
-                or owner.get('status') not in ('in_progress', 'completed')):
-            raise RuntimeError('Publication handoff must belong to the canonical public main owner')
+        validate_publication_handoff_owner(owner, current)
         decision, reason = publication_handoff_needed(jobs(current))
-        evidence = {'owner_run_id':current}
+        evidence = {'owner_run_id':current, 'owner_status':owner.get('status')}
     elif kind == 'publication-gate':
         if type(owner_run_id) is not int or owner_run_id <= 0:
             raise ValueError('Publication gate requires an explicit owner run ID')

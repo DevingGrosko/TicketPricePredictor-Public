@@ -16,7 +16,10 @@ MIGRATION_KEY = re.compile(r'^ticketsignal-free-v1-state-(nfl|nhl)-shared-(\d+)-
 MIRROR = '.github/workflows/shared-snapshot-mirror.yml'
 QUEUE_LIMIT = 20 * 1024**2
 ARTIFACT = re.compile(r'^shared-observations-(nfl|nhl)-(\d+)$')
-TRANSPORT_LIMIT = 128 * 1024**2
+# Internal transport partition: preserve the historical exports while admitting
+# six bounded uploads plus the peer reserve. The existing whole-repository cap
+# and publisher reserve still constrain every upload independently.
+TRANSPORT_LIMIT = 256 * 1024**2
 TOTAL_ARTIFACT_LIMIT = 450 * 1024**2
 PUBLISHER_RESERVE = 128 * 1024**2
 ARCHIVE_MARGIN = 1024**2
@@ -41,16 +44,43 @@ def queue_budget(directory):
     return {'queue_bytes':total, 'queue_files':files, 'maximum_bytes':QUEUE_LIMIT}
 
 
-def removable_generations(rows, runs_for, *, current_run, current_ref='refs/heads/main', keep=2):
-    """Keep two completed generations per sport/role/ref/path-version plus live owners."""
+def retained_artifact_cache_keys(artifacts, caches):
+    """Keep exact checkpoint evidence until its transport artifact is removed.
+
+    Even an unexamined, failed, or older-attempt artifact can still hold the only
+    unconfirmed originals. Do not require successful provenance to preserve it.
+    Matching all attempts and path versions is deliberately conservative.
+    """
+    owners = {match.groups() for row in artifacts
+              if not row.get('expired') and (match := ARTIFACT.fullmatch(row.get('name', '')))}
+    protected = set()
+    for row in caches:
+        match = KEY.fullmatch(row.get('key', ''))
+        migration = MIGRATION_KEY.fullmatch(row.get('key', ''))
+        if match:
+            sport, _role, run, _attempt = match.groups()
+        elif migration:
+            sport, run, _attempt = migration.groups()
+        else:
+            continue
+        if row.get('ref') == 'refs/heads/main' and (sport, run) in owners:
+            protected.add(row['key'])
+    return protected
+
+
+def removable_generations(rows, runs_for, *, current_run, current_ref='refs/heads/main', keep=2,
+                          protected_keys=frozenset()):
+    """Keep pending-artifact proof, live owners, and two other completed generations."""
     if keep != 2:
         raise ValueError('Shared queues retain exactly two completed generations')
     groups, runs, seen_ids, seen_generations = {}, {}, set(), set()
-    for row in rows:
+    # Newest-first bounded provenance reads preserve unknown older generations.
+    for row in sorted(rows, key=lambda row: row.get('created_at') or '', reverse=True):
         match = KEY.fullmatch(row.get('key', ''))
         migration = MIGRATION_KEY.fullmatch(row.get('key', ''))
         version = row.get('version')
-        if not (match or migration) or row.get('ref') != current_ref or not isinstance(version, str) or not version:
+        if (not (match or migration) or row.get('ref') != current_ref
+                or not isinstance(version, str) or not version or row.get('key') in protected_keys):
             continue
         generation = (row['key'], row['ref'], version)
         if row.get('id') in seen_ids or generation in seen_generations:
@@ -65,10 +95,15 @@ def removable_generations(rows, runs_for, *, current_run, current_ref='refs/head
         if run_id == current_run:
             continue
         if run_id not in runs:
+            if len(runs) >= PROVENANCE_RUN_LIMIT:
+                continue
             runs[run_id] = runs_for(run_id)
         run = runs[run_id]
         paths = {OWNER, MIRROR} if role == 'tidb' else {OWNER}
-        if run.get('path') not in paths or run.get('status') != 'completed':
+        if (run.get('id') != run_id or run.get('path') not in paths or run.get('status') != 'completed'
+                or run.get('head_branch') != 'main'
+                or (run.get('repository') or {}).get('full_name') != REPO
+                or (run.get('head_repository') or {}).get('full_name') != REPO):
             continue
         try:
             created = datetime.fromisoformat(row['created_at'].replace('Z','+00:00'))
@@ -112,7 +147,7 @@ def removable_transport_artifacts(rows, caches, runs_for, jobs_for, *, current_r
         run = known[run_id]
         started = utc_time(run.get('run_started_at'))
         attempt = run.get('run_attempt')
-        if (run.get('path') != OWNER or run.get('status') != 'completed'
+        if (run.get('id') != run_id or run.get('path') != OWNER or run.get('status') != 'completed'
                 or run.get('head_branch') != 'main'
                 or (run.get('repository') or {}).get('full_name') != REPO
                 or (run.get('head_repository') or {}).get('full_name') != REPO
@@ -167,7 +202,7 @@ def _delete(path):
             raise
 
 
-def prune_transport_artifacts(*, rows=None, caches=None):
+def prune_transport_artifacts(*, rows=None, caches=None, runs_for=None):
     check_scope()
     rows = rows if rows is not None else _inventory('/actions/artifacts', 'artifacts')
     caches = caches if caches is not None else _inventory('/actions/caches', 'actions_caches')
@@ -176,12 +211,14 @@ def prune_transport_artifacts(*, rows=None, caches=None):
         if value.get('total_count', 0) > 100:
             raise RuntimeError('Owner checkpoint job inventory exceeds bound')
         return value['jobs']
-    remove = removable_transport_artifacts(rows, caches, lambda run:api('/actions/runs/'+str(run)), jobs,
+    runs_for = runs_for or (lambda run: api('/actions/runs/'+str(run)))
+    remove = removable_transport_artifacts(rows, caches, runs_for, jobs,
                                           current_run=int(os.environ['GITHUB_RUN_ID']))
     for row in remove:
         _delete('/actions/artifacts/'+str(row['id']))
     total = sum(bool(ARTIFACT.fullmatch(row.get('name', ''))) and not row.get('expired') for row in rows)
     report = {'removed_transport_artifacts': len(remove), 'retained_transport_artifacts': total-len(remove),
+              'removed_transport_artifact_ids': [row['id'] for row in remove],
               'latest_completed_artifacts_retained_per_sport': 2, 'unconfirmed_artifacts_preserved': True}
     print('SHARED_TRANSPORT_STORAGE '+json.dumps(report), flush=True)
     return report
@@ -221,14 +258,25 @@ def before_artifact_upload(sport, directory):
 def prune_shared_caches():
     check_scope()
     rows = _inventory('/actions/caches', 'actions_caches')
+    artifacts = _inventory('/actions/artifacts', 'artifacts')
+    known_runs = {}
+    def runs_for(run):
+        if run not in known_runs:
+            known_runs[run] = api('/actions/runs/' + str(run))
+        return known_runs[run]
     # Artifact confirmation uses these still-present exact cache keys. A failed
     # artifact deletion aborts here before the evidence checkpoints are pruned.
-    prune_transport_artifacts(caches=rows)
-    remove = removable_generations(rows, lambda run:api('/actions/runs/' + str(run)),
-                                   current_run=int(os.environ['GITHUB_RUN_ID']), current_ref=os.environ['GITHUB_REF'])
+    transport = prune_transport_artifacts(rows=artifacts, caches=rows, runs_for=runs_for)
+    deleted = set(transport['removed_transport_artifact_ids'])
+    retained = [row for row in artifacts if row.get('id') not in deleted]
+    protected = retained_artifact_cache_keys(retained, rows)
+    remove = removable_generations(rows, runs_for, current_run=int(os.environ['GITHUB_RUN_ID']),
+                                   current_ref=os.environ['GITHUB_REF'], protected_keys=protected)
     for row in remove:
         _delete('/actions/caches/' + str(int(row['id'])))
-    report = {'removed_shared_generations':len(remove), 'completed_generations_retained_per_group':2}
+    report = {'removed_shared_generations':len(remove), 'completed_generations_retained_per_group':2,
+              'retained_artifact_checkpoint_keys_preserved':len(protected),
+              'provenance_runs_read':len(known_runs)}
     print('SHARED_CAPTURE_STORAGE ' + json.dumps(report), flush=True)
     return report
 

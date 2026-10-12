@@ -1,5 +1,6 @@
 """Bot-dispatched owners explicitly publish after capture and mirror completion."""
 from io import StringIO
+import json
 import os
 from pathlib import Path
 import unittest
@@ -30,6 +31,46 @@ ENV = dict(GITHUB_REPOSITORY=REPO, GITHUB_REF='refs/heads/main', GITHUB_RUN_ID='
 
 
 class PublicationHandoffTests(unittest.TestCase):
+    def test_aggregate_queued_status_does_not_hide_completed_capture_and_mirror_jobs(self):
+        jobs=[capture('nfl'),capture('nhl'),mirror('nfl'),mirror('nhl')]
+        for status in ('queued','waiting','pending','requested','in_progress','completed'):
+            with self.subTest(status=status), patch.dict(os.environ,ENV,clear=True), \
+                 patch('tools.single_capture_owner.api',side_effect=[
+                     {**owner(),'status':status},{'total_count':4,'jobs':jobs},None]) as api, \
+                 patch('sys.stdout',StringIO()):
+                report=run('publication-handoff')
+            self.assertTrue(report['dispatched'])
+            self.assertEqual(report['owner_status'],status)
+            self.assertEqual(api.call_count,3)
+
+    def test_aggregate_active_status_never_substitutes_for_finished_job_proof(self):
+        good=[capture('nfl'),capture('nhl'),mirror('nfl'),mirror('nhl')]
+        for unfinished in (0,3):
+            jobs=[dict(job) for job in good]
+            jobs[unfinished]['status']='in_progress'
+            with self.subTest(unfinished=unfinished), patch.dict(os.environ,ENV,clear=True), \
+                 patch('tools.single_capture_owner.api',side_effect=[
+                     {**owner(),'status':'queued'},{'total_count':4,'jobs':jobs}]) as api, \
+                 self.assertRaises(RuntimeError):
+                run('publication-handoff')
+            self.assertEqual(api.call_count,2)
+
+    def test_invalid_owner_reports_the_exact_failed_checks_without_dispatching(self):
+        changes=({'status':'unknown'}, {'status':None}, {'repository':{}},
+                 {'head_repository':{}}, {'triggering_actor':{}},
+                 {'path':'wrong','actor':{'login':'human'}})
+        for change in changes:
+            output=StringIO()
+            with self.subTest(change=change), patch.dict(os.environ,ENV,clear=True), \
+                 patch('tools.single_capture_owner.api',return_value={**owner(),**change}) as api, \
+                 patch('sys.stdout',output), self.assertRaisesRegex(RuntimeError,'failed checks:'):
+                run('publication-handoff')
+            self.assertEqual(api.call_count,1)
+            diagnostic=json.loads(output.getvalue().split(' ',1)[1])
+            self.assertEqual(diagnostic['owner_run_id'],10)
+            self.assertTrue(diagnostic['failed_checks'])
+            self.assertEqual(set(diagnostic),{'owner_run_id','owner_status','failed_checks'})
+
     def test_failed_and_partial_attempts_publish_while_parent_end_job_is_active(self):
         for conclusions in (('success','success'), ('failure','success'), ('failure','failure')):
             with self.subTest(conclusions=conclusions):
