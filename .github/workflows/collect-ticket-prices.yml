@@ -26,10 +26,16 @@ on:
         options: [direct, performer]
         default: direct
       delivery_only:
-        description: Replay the fixed verified04:00 observations to both stores with zero browser captures
+        description: Replay the selected reviewed observations to both stores with zero browser captures
         type: boolean
         required: false
         default: false
+      saved_bundle:
+        description: Fixed immutable bundle used only when delivery_only is true
+        type: choice
+        required: false
+        options: [pilot-0400, canary-20261012-2200]
+        default: pilot-0400
       shared_capture:
         description: Capture each observation once and deliver it to both stores
         type: boolean
@@ -45,7 +51,7 @@ permissions:
   contents: read
 
 env:
-  SHARED_SAVED_MANIFEST_SHA256: 6b894990f80fb18f766427767944d0096f74e44bd0683e3630eda9e76999e287
+  SHARED_SAVED_BUNDLE: ${{ inputs.saved_bundle || 'pilot-0400' }}
 
 jobs:
   collect-baseball:
@@ -250,7 +256,7 @@ jobs:
             --sport nfl --directory shared-capture/nfl --acknowledgments shared-acknowledgments/nfl \
             --pending-dir nfl_pending --health-output nfl_remote_health.json \
             --legacy-free-state free-capture/nfl \
-            --saved-manifest docs/shared-observations/manifest-0400.json --manifest-sha256 "$SHARED_SAVED_MANIFEST_SHA256"
+            --saved-bundle "$SHARED_SAVED_BUNDLE"
 
       - name: Confirm shared NFL capture writers stopped before checkpointing
         id: shared-stopped
@@ -459,7 +465,7 @@ jobs:
             --sport nhl --directory shared-capture/nhl --acknowledgments shared-acknowledgments/nhl \
             --pending-dir nhl_pending --health-output nhl_remote_health.json \
             --legacy-free-state free-capture/nhl \
-            --saved-manifest docs/shared-observations/manifest-0400.json --manifest-sha256 "$SHARED_SAVED_MANIFEST_SHA256"
+            --saved-bundle "$SHARED_SAVED_BUNDLE"
 
       - name: Confirm shared NHL capture writers stopped before checkpointing
         id: shared-stopped

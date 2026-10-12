@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "observations": [
+    {
+      "sport": "nhl",
+      "file": "docs/shared-observations/snapshot-canary-20261012-2200-nhl-7301418.json",
+      "sha256": "828ba83b7692ec92415ac236a612edc3e147a50bfecaf958617c93d80b22d751"
+    },
+    {
+      "sport": "nhl",
+      "file": "docs/shared-observations/snapshot-canary-20261012-2200-nhl-7302299.json",
+      "sha256": "484030fb13ca9f53df223f0a16b5f74e53fdecf827e0dbf07b07b44be7f440b7"
+    },
+    {
+      "sport": "nfl",
+      "file": "docs/shared-observations/snapshot-canary-20261012-2200-nfl-6491666.json",
+      "sha256": "dc94fcdba5b0af3c5dcb5f9a3444aa0696a82eef4b4820ee78a38ca1906bd480"
+    }
+  ]
+}

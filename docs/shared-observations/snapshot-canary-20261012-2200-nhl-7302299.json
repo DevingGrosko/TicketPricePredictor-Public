@@ -1,0 +1,224 @@
+{
+  "captured_at": "2026-10-12T22:06:00.265848+00:00",
+  "currency": "USD",
+  "event_date": "2026-10-13T00:00:00+00:00",
+  "event_type": "nhl",
+  "schema_version": 1,
+  "section_count": 21,
+  "sections": [
+    {
+      "alternate_price": "147.00",
+      "displayed_price": "105.00",
+      "listing_count": 1,
+      "price": 105,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "5",
+      "section": "Club Level 25"
+    },
+    {
+      "alternate_price": "147.00",
+      "displayed_price": "105.00",
+      "listing_count": 1,
+      "price": 105,
+      "price_source": "p",
+      "quantity": "1",
+      "row": "7",
+      "section": "Club Level 26"
+    },
+    {
+      "alternate_price": "112.00",
+      "displayed_price": "79.00",
+      "listing_count": 1,
+      "price": 79,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "2",
+      "section": "Club Level 27"
+    },
+    {
+      "alternate_price": "147.00",
+      "displayed_price": "105.00",
+      "listing_count": 1,
+      "price": 105,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "4",
+      "section": "Club Level 5"
+    },
+    {
+      "alternate_price": "77.00",
+      "displayed_price": "54.00",
+      "listing_count": 2,
+      "price": 54,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "25",
+      "section": "Lower Level 101"
+    },
+    {
+      "alternate_price": "125.00",
+      "displayed_price": "89.00",
+      "listing_count": 3,
+      "price": 89,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "5",
+      "section": "Lower Level 103"
+    },
+    {
+      "alternate_price": "131.00",
+      "displayed_price": "93.00",
+      "listing_count": 2,
+      "price": 93,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "9",
+      "section": "Lower Level 104"
+    },
+    {
+      "alternate_price": "130.00",
+      "displayed_price": "93.00",
+      "listing_count": 1,
+      "price": 93,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "5",
+      "section": "Lower Level 113"
+    },
+    {
+      "alternate_price": "172.00",
+      "displayed_price": "123.00",
+      "listing_count": 2,
+      "price": 123,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "7",
+      "section": "Lower Level 116"
+    },
+    {
+      "alternate_price": "189.00",
+      "displayed_price": "136.00",
+      "listing_count": 1,
+      "price": 136,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "16",
+      "section": "Lower Level 117"
+    },
+    {
+      "alternate_price": "108.00",
+      "displayed_price": "77.00",
+      "listing_count": 1,
+      "price": 77,
+      "price_source": "p",
+      "quantity": "5",
+      "row": "6",
+      "section": "Lower Level 118"
+    },
+    {
+      "alternate_price": "90.00",
+      "displayed_price": "64.00",
+      "listing_count": 3,
+      "price": 64,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "23",
+      "section": "Lower Level 119"
+    },
+    {
+      "alternate_price": "92.00",
+      "displayed_price": "65.00",
+      "listing_count": 1,
+      "price": 65,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "7",
+      "section": "Lower Level 121"
+    },
+    {
+      "alternate_price": "107.00",
+      "displayed_price": "76.00",
+      "listing_count": 1,
+      "price": 76,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "11",
+      "section": "Lower Level 123"
+    },
+    {
+      "alternate_price": "118.00",
+      "displayed_price": "84.00",
+      "listing_count": 1,
+      "price": 84,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "20",
+      "section": "Lower Level 126"
+    },
+    {
+      "alternate_price": "62.00",
+      "displayed_price": "43.00",
+      "listing_count": 1,
+      "price": 43,
+      "price_source": "p",
+      "quantity": "6",
+      "row": "5",
+      "section": "Upper Level 205"
+    },
+    {
+      "alternate_price": "52.00",
+      "displayed_price": "36.08",
+      "listing_count": 1,
+      "price": 36,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "3",
+      "section": "Upper Level 218"
+    },
+    {
+      "alternate_price": "73.00",
+      "displayed_price": "52.00",
+      "listing_count": 2,
+      "price": 52,
+      "price_source": "p",
+      "quantity": "2",
+      "row": "6",
+      "section": "Upper Level 219"
+    },
+    {
+      "alternate_price": "62.00",
+      "displayed_price": "43.00",
+      "listing_count": 1,
+      "price": 43,
+      "price_source": "p",
+      "quantity": "5",
+      "row": "2",
+      "section": "Upper Level 221"
+    },
+    {
+      "alternate_price": "81.00",
+      "displayed_price": "57.00",
+      "listing_count": 1,
+      "price": 57,
+      "price_source": "p",
+      "quantity": "3",
+      "row": "3",
+      "section": "Upper Level 225"
+    },
+    {
+      "alternate_price": "73.00",
+      "displayed_price": "51.00",
+      "listing_count": 1,
+      "price": 51,
+      "price_source": "p",
+      "quantity": "4",
+      "row": "4",
+      "section": "Upper Level 226"
+    }
+  ],
+  "source_id": "7302299",
+  "source_url": "https://www.vividseats.com/minnesota-wild-tickets-grand-casino-arena-10-12-2026/production/7302299",
+  "title": "Vegas Golden Knights at Minnesota Wild",
+  "venue": "Grand Casino Arena"
+}
