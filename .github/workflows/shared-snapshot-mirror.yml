@@ -74,6 +74,9 @@ jobs:
           cp bridge/tools/shared_capture.py source/tools/shared_capture.py
           cp bridge/tools/shared_capture_policy.py source/tools/shared_capture_policy.py
           cp bridge/tools/shared_capture_storage.py source/tools/shared_capture_storage.py
+          cp bridge/tools/historical_capture_conflicts.py source/tools/historical_capture_conflicts.py
+          mkdir -p source/docs/shared-observations/conflicts
+          cp bridge/docs/shared-observations/conflicts/*.json source/docs/shared-observations/conflicts/
           cp bridge/tools/import_shared_snapshot.py source/tools/import_shared_snapshot.py
           cp bridge/Flask_App/observation_receipt.py source/Flask_App/observation_receipt.py
           cd source

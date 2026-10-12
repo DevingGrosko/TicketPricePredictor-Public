@@ -178,6 +178,9 @@ class MirrorQueue:
         for dest, ack in value['acknowledged'].items():
             if ack is not None and self.acknowledgment(value, dest, ack) != ack:
                 raise ValueError('Invalid saved destination acknowledgment')
+        if 'archived_conflicts' in value:
+            from tools.historical_capture_conflicts import validate
+            validate(value)
         return value
 
     def records(self):
@@ -228,10 +231,28 @@ class MirrorQueue:
     def acknowledge(self, payload, destination, response):
         path = self.enqueue(payload)
         value = self.read(path)
+        if destination in value.get('archived_conflicts', {}):
+            raise ValueError('A historical conflict is not a destination acknowledgment')
         value['acknowledged'][destination] = self.acknowledgment(value, destination, response)
         if all(value['acknowledged'].values()):
             value.pop('payload', None)
         self._save(path, value)
+
+    def archive_conflict(self, payload, response):
+        from tools.historical_capture_conflicts import classify
+        path = self.enqueue(payload)
+        value = self.read(path)
+        marker = classify(value, response)
+        if marker is None:
+            return False
+        if value['acknowledged']['pythonanywhere'] is not None:
+            raise ValueError('Cannot archive an acknowledged PythonAnywhere observation')
+        previous = value.get('archived_conflicts')
+        if previous is not None and previous != {'pythonanywhere': marker}:
+            raise ValueError('Historical conflict proof changed')
+        value['archived_conflicts'] = {'pythonanywhere': marker}
+        self._save(path, value)
+        return True
 
     def merge(self, directory):
         incoming = MirrorQueue(directory, self.sport)
@@ -245,6 +266,14 @@ class MirrorQueue:
                     before = encoded(current)
                     for dest in DESTINATIONS:
                         current['acknowledged'][dest] = current['acknowledged'][dest] or value['acknowledged'][dest]
+                    if 'archived_conflicts' in value:
+                        if ('archived_conflicts' in current
+                                and current['archived_conflicts'] != value['archived_conflicts']):
+                            raise ValueError('Incoming historical conflict proof changed')
+                        current['archived_conflicts'] = value['archived_conflicts']
+                    if 'archived_conflicts' in current:
+                        from tools.historical_capture_conflicts import validate
+                        validate(current)
                     if all(current['acknowledged'].values()):
                         current.pop('payload', None)
                     if encoded(current) != before:
@@ -254,6 +283,10 @@ class MirrorQueue:
 
     def pending(self, destination):
         return [(path, value) for path, value in self.records() if value['acknowledged'][destination] is None]
+
+    def retryable_pending(self, destination):
+        return [(path, value) for path, value in self.pending(destination)
+                if destination not in value.get('archived_conflicts', {})]
 
     def covered(self, game, slot):
         return any(value['schedule_id'] == str(game.schedule_id) and value['capture_slot'] == slot.isoformat()
@@ -346,6 +379,9 @@ def verify_delivery_checkpoint(sport, directory, incoming):
         for key in ('payload_sha256', 'observation_sha256', 'source_id', 'capture_slot', 'captured_at', 'section_count'):
             if stored[key] != value[key]:
                 raise ValueError('Delivery checkpoint contains a different observation')
+        if ('archived_conflicts' in value
+                and stored.get('archived_conflicts') != value['archived_conflicts']):
+            raise ValueError('Delivery checkpoint lost the archived historical conflict proof')
         # read() already rejects lost payloads unless both validated receipts exist.
     marker = mirror.root / 'delivery.checkpoint'
     data = (Path(incoming) / EXPORT_MANIFEST).read_bytes()
@@ -482,19 +518,31 @@ def run_legacy(sport, directory, pending_dir, health_output, *, timeout=45, runn
         progress('recover-pythonanywhere-queue')
         pending_dir = Path(pending_dir); pending_dir.mkdir(parents=True, exist_ok=True)
         queue_original, post_original = collector.queue_snapshot, collector.post_snapshot_with_retry
+        from tools.historical_capture_conflicts import ArchivedCaptureConflict, preserve_pending
         # Mirror ALL existing payloads before replay can unlink an acknowledged PA file.
         existing_payloads = set()
         with mirror._batch_writes():
-            for path in sorted({*pending_dir.glob('*.json'), *pending_dir.glob('*.rejected')}):
+            for path in sorted({*pending_dir.glob('*.json'), *pending_dir.glob('*.rejected'),
+                                *pending_dir.glob('*.archived-conflict')}):
                 if path.is_symlink() or path.stat().st_size > 4 * 1024**2:
                     raise ValueError('Invalid existing pending snapshot')
                 observation = json.loads(path.read_bytes())
-                mirror.enqueue(observation)
+                record = mirror.read(mirror.enqueue(observation))
+                if 'archived_conflicts' in record:
+                    preserve_pending(path, record)
+                elif path.suffix == '.archived-conflict':
+                    # The suffix alone is never permission to stop delivery.
+                    target = path.with_suffix('.json')
+                    if target.exists() and (target.is_symlink() or target.read_bytes() != path.read_bytes()):
+                        raise ValueError('Unproved archived pending file conflicts with active delivery')
+                    path.replace(target)
                 existing_payloads.add(hashlib.sha256(encoded(observation)).hexdigest())
         # A prior runner may have cached the mirror but missed saving the PA queue.
         for _path, value in mirror.pending('pythonanywhere'):
             if value['payload_sha256'] not in existing_payloads:
-                queue_original(value['payload'], pending_dir)
+                path = queue_original(value['payload'], pending_dir)
+                if 'archived_conflicts' in value:
+                    preserve_pending(path, value)
         progress('ready')
     bootstrap_seconds = time.monotonic() - bootstrap_started
     endpoint = f'https://bunnyjeff.pythonanywhere.com/api/{sport}/snapshot'
@@ -505,22 +553,32 @@ def run_legacy(sport, directory, pending_dir, health_output, *, timeout=45, runn
     def post(destination, ingest_token, payload, **kwargs):
         if destination != endpoint:
             raise ValueError('Shared capture uses the fixed matching PythonAnywhere endpoint')
+        record = mirror.read(mirror.enqueue(payload))
+        if 'archived_conflicts' in record:
+            raise ArchivedCaptureConflict('Historical original and different PA receipt remain archived')
         try:
             response = post_original(destination, ingest_token, payload, **kwargs)
         except collector.SnapshotUploadError as exc:
             _log_pa_delivery_failure(sport, payload, error=exc)
             raise
-        record = mirror.read(mirror.enqueue(payload))
         try:
             mirror.acknowledgment(record, 'pythonanywhere', response)
         except ValueError as exc:
             # A real upload can report an existing, different immutable slot.
             # Retain it as rejected and continue independent pending games.
+            if mirror.archive_conflict(payload, response):
+                print('SHARED_PA_ARCHIVED_CONFLICT ' + json.dumps(dict(sport=sport,
+                      source_id=record['source_id'], captured_at=record['captured_at'],
+                      original_observation_sha256=record['observation_sha256'],
+                      stored_observation_sha256=response['stored_observation_sha256'])), flush=True)
+                raise ArchivedCaptureConflict('Historical original and different PA receipt archived') from exc
             _log_pa_delivery_failure(sport, payload, record=record, response=response)
-            raise collector.SnapshotUploadError(
+            failure = collector.SnapshotUploadError(
                 f'PythonAnywhere observation conflict or unverified receipt: {exc}',
                 retryable=False, status_code=409,
-            ) from exc
+            )
+            failure.receipt_validation_failed = True
+            raise failure from exc
         mirror.acknowledge(payload, 'pythonanywhere', response)  # No synthetic acknowledgment.
         return response
     module = nfl if sport == 'nfl' else nhl
@@ -545,11 +603,12 @@ def run_legacy(sport, directory, pending_dir, health_output, *, timeout=45, runn
             stack.enter_context(patch.object(target, 'post_snapshot_with_retry', post))
         stack.enter_context(patch.object(module, 'schedule_games_due', due))
         if saved is not None:
-            count, available, errors = collector.replay_pending_snapshots(endpoint, token, pending_dir)
+            from tools.shared_capture_policy import replay_pa
+            count, errors, deferred = replay_pa(module, endpoint, token, pending_dir, mirror=mirror)
             pending = len(list(pending_dir.glob('*.json'))) + len(list(pending_dir.glob('*.rejected')))
-            report = dict(status='healthy' if available and not errors and not pending else 'queued',
+            report = dict(status='healthy' if not errors and not pending else 'queued',
                 mode='delivery-only', event_type=sport, captured=0, scheduled_due=None, coverage_percent=None,
-                replayed=count, pending=pending, errors=errors)
+                replayed=count, pending=pending, errors=errors, deferred_uploads=deferred)
             Path(health_output).write_text(json.dumps(report, indent=2) + '\n')
             code = int(report['status'] != 'healthy')
         else:
@@ -562,12 +621,18 @@ def run_legacy(sport, directory, pending_dir, health_output, *, timeout=45, runn
                                  deadline_seconds=max(0, DEADLINE_SECONDS - bootstrap_seconds))
     health = json.loads(Path(health_output).read_text()) if Path(health_output).exists() else {'status': 'report-unavailable'}
     health['bootstrap_seconds'] = round(bootstrap_seconds, 3)
+    health['pending_pythonanywhere'] = len(mirror.pending('pythonanywhere'))
+    health['retryable_pending_pythonanywhere'] = len(mirror.retryable_pending('pythonanywhere'))
+    health['archived_pythonanywhere_conflicts'] = (health['pending_pythonanywhere']
+                                                 - health['retryable_pending_pythonanywhere'])
     Path(health_output).write_text(json.dumps(health, indent=2) + '\n')
     report = dict(sport=sport, reused_current_observations=sorted(set(reused)),
         pending_pythonanywhere=len(mirror.pending('pythonanywhere')), pending_tidb=len(mirror.pending('tidb')),
+        retryable_pending_pythonanywhere=health['retryable_pending_pythonanywhere'],
+        archived_pythonanywhere_conflicts=health['archived_pythonanywhere_conflicts'],
         legacy_status=health['status'], legacy_exit_code=code, mode=health.get('mode', 'capture'))
     print('SHARED_CAPTURE_REPORT ' + json.dumps(report), flush=True)
-    return code or int(health['status'] != 'healthy' or report['pending_pythonanywhere'] > 0)
+    return code or int(health['status'] != 'healthy' or report['retryable_pending_pythonanywhere'] > 0)
 
 
 def deliver_tidb(sport, directory, incoming, *, sender=None, legacy_free_state=None,

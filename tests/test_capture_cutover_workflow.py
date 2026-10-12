@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 import re
 import subprocess
+import sys
 import tempfile
 import textwrap
 import unittest
@@ -97,13 +98,15 @@ class CaptureCutoverWorkflowTests(unittest.TestCase):
                 command = root / 'xvfb-run'
                 command.write_text('#!/bin/bash\nexit 17\n')
                 command.chmod(0o700)
+                (root / 'python').symlink_to(sys.executable)
                 output = root / 'output'
                 env = {**os.environ, 'PATH': str(root) + os.pathsep + os.environ.get('PATH', ''),
-                       'GITHUB_OUTPUT': str(output)}
-                result = subprocess.run(['bash', '-e', '-c', script], env=env,
+                       'GITHUB_OUTPUT': str(output), 'RUNNER_TEMP': str(root)}
+                result = subprocess.run(['bash', '-e', '-c', script], env=env, cwd=ROOT,
                                         capture_output=True, text=True, timeout=5)
                 self.assertEqual(result.returncode, 17)
                 self.assertEqual(output.read_text(), 'attempted=true\n')
+                self.assertTrue((root / (sport + '-capture-stopped.json')).is_file())
 
     def test_actual_capture_is_separate_from_zero_browser_saved_delivery_and_failures_still_mirror(self):
         owner = workflow('collect-ticket-prices')

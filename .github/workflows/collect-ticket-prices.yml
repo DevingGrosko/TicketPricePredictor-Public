@@ -232,7 +232,9 @@ jobs:
         run: |
           # Record the attempt even when the collector exits with a provider failure.
           echo "attempted=true" >> "$GITHUB_OUTPUT"
-          xvfb-run --auto-servernum python -m tools.shared_capture collect \
+          python -m tools.run_bounded_capture run --seconds 1500 \
+            --marker "$RUNNER_TEMP/nfl-capture-stopped.json" -- \
+            xvfb-run --auto-servernum python -m tools.shared_capture collect \
             --sport nfl --directory shared-capture/nfl --acknowledgments shared-acknowledgments/nfl \
             --pending-dir nfl_pending --health-output nfl_remote_health.json \
             --legacy-free-state free-capture/nfl --timeout 45
@@ -250,9 +252,14 @@ jobs:
             --legacy-free-state free-capture/nfl \
             --saved-manifest docs/shared-observations/manifest-0400.json --manifest-sha256 "$SHARED_SAVED_MANIFEST_SHA256"
 
+      - name: Confirm shared NFL capture writers stopped before checkpointing
+        id: shared-stopped
+        if: always() && steps.cadence.outputs.run == 'true' && env.SHARED_CAPTURE == 'true' && !inputs.delivery_only
+        run: python -m tools.run_bounded_capture verify --marker "$RUNNER_TEMP/nfl-capture-stopped.json"
+
       - name: Bound the NFL shared queue without discarding observations
         id: shared-budget
-        if: always() && steps.cadence.outputs.run == 'true' && (env.SHARED_CAPTURE == 'true' || inputs.delivery_only)
+        if: always() && steps.cadence.outputs.run == 'true' && (env.SHARED_CAPTURE == 'true' || inputs.delivery_only) && (inputs.delivery_only || steps.shared-stopped.outcome == 'success')
         run: python -m tools.shared_capture_storage queue-budget --directory shared-capture/nfl
 
       - name: Checkpoint the NFL shared queue even after a failed capture
@@ -286,7 +293,7 @@ jobs:
 
       - name: Bound pending NFL delivery files without discarding them
         id: pending-budget
-        if: always() && steps.cadence.outputs.run == 'true'
+        if: always() && steps.cadence.outputs.run == 'true' && (env.SHARED_CAPTURE != 'true' || inputs.delivery_only || steps.shared-stopped.outcome == 'success')
         run: python -m tools.shared_capture_storage queue-budget --directory nfl_pending
 
       - name: Save pending NFL snapshot queue
@@ -434,7 +441,9 @@ jobs:
         run: |
           # Record the attempt even when the collector exits with a provider failure.
           echo "attempted=true" >> "$GITHUB_OUTPUT"
-          xvfb-run --auto-servernum python -m tools.shared_capture collect \
+          python -m tools.run_bounded_capture run --seconds 1500 \
+            --marker "$RUNNER_TEMP/nhl-capture-stopped.json" -- \
+            xvfb-run --auto-servernum python -m tools.shared_capture collect \
             --sport nhl --directory shared-capture/nhl --acknowledgments shared-acknowledgments/nhl \
             --pending-dir nhl_pending --health-output nhl_remote_health.json \
             --legacy-free-state free-capture/nhl --timeout 45
@@ -452,9 +461,14 @@ jobs:
             --legacy-free-state free-capture/nhl \
             --saved-manifest docs/shared-observations/manifest-0400.json --manifest-sha256 "$SHARED_SAVED_MANIFEST_SHA256"
 
+      - name: Confirm shared NHL capture writers stopped before checkpointing
+        id: shared-stopped
+        if: always() && steps.cadence.outputs.run == 'true' && env.SHARED_CAPTURE == 'true' && !inputs.delivery_only
+        run: python -m tools.run_bounded_capture verify --marker "$RUNNER_TEMP/nhl-capture-stopped.json"
+
       - name: Bound the NHL shared queue without discarding observations
         id: shared-budget
-        if: always() && steps.cadence.outputs.run == 'true' && (env.SHARED_CAPTURE == 'true' || inputs.delivery_only)
+        if: always() && steps.cadence.outputs.run == 'true' && (env.SHARED_CAPTURE == 'true' || inputs.delivery_only) && (inputs.delivery_only || steps.shared-stopped.outcome == 'success')
         run: python -m tools.shared_capture_storage queue-budget --directory shared-capture/nhl
 
       - name: Checkpoint the NHL shared queue even after a failed capture
@@ -488,7 +502,7 @@ jobs:
 
       - name: Bound pending NHL delivery files without discarding them
         id: pending-budget
-        if: always() && steps.cadence.outputs.run == 'true'
+        if: always() && steps.cadence.outputs.run == 'true' && (env.SHARED_CAPTURE != 'true' || inputs.delivery_only || steps.shared-stopped.outcome == 'success')
         run: python -m tools.shared_capture_storage queue-budget --directory nhl_pending
 
       - name: Save pending NHL snapshot queue
