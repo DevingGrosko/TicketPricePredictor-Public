@@ -17,7 +17,8 @@ from Flask_App.collection_cadence import half_hour_capture_slot
 from tools.historical_capture_conflicts import ArchivedCaptureConflict, preserve_pending
 
 STATE_LIMIT = 1024**2
-RECOVERY_LIMIT = 20
+CAPTURE_RECOVERY_LIMIT = 40
+DELIVERY_RECOVERY_LIMIT = 20
 DEADLINE_SECONDS = 24 * 60
 PHASE_RESERVE_SECONDS = 180
 
@@ -170,7 +171,7 @@ def replay_pa(module, endpoint, token, pending, *, clock=time.monotonic, budget=
     files = sorted({*pending.glob('*.json'), *pending.glob('*.rejected')})
     attempted = 0
     for path in files:
-        if attempted >= RECOVERY_LIMIT or clock() - started >= budget:
+        if attempted >= DELIVERY_RECOVERY_LIMIT or clock() - started >= budget:
             break
         attempted += 1
         try:
@@ -281,7 +282,7 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
         current.sort(key=lambda game: (game.event_date, str(game.schedule_id)))
         older.sort(key=lambda game: (state['pending'][str(game.schedule_id)].get('last_attempt') or '',
             state['pending'][str(game.schedule_id)]['first_due'], game.event_date, str(game.schedule_id)))
-        recovery, unselected = older[:RECOVERY_LIMIT], older[RECOVERY_LIMIT:]
+        recovery, unselected = older[:CAPTURE_RECOVERY_LIMIT], older[CAPTURE_RECOVERY_LIMIT:]
         work = current + recovery
         report.update(scheduled_in_window=raw_schedule_count, scheduled_in_scope=len(schedule), scheduled_due=len(active),
             scheduled_selected=len(work),
@@ -445,7 +446,7 @@ def replay_free_pending(sport, directory, *, sender=None, now=None, clock=time.m
         return original(kind, value, now=stamp)
     with patch.object(storage, 'parse_payload', preserved), patch.object(collector, 'MIN_USABLE_SECTIONS', 1):
         for path in sorted({*pending.glob('*.json'), *pending.glob('*.rejected')}):
-            if attempted >= RECOVERY_LIMIT or clock() - started >= budget:
+            if attempted >= DELIVERY_RECOVERY_LIMIT or clock() - started >= budget:
                 break
             attempted += 1
             try:
