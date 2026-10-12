@@ -12,6 +12,7 @@ import time
 from unittest.mock import patch
 
 from Flask_App.collection_cadence import half_hour_capture_slot
+from tools.historical_capture_conflicts import ArchivedCaptureConflict, preserve_pending
 
 STATE_LIMIT = 1024**2
 RECOVERY_LIMIT = 20
@@ -98,7 +99,7 @@ def excluded_nhl(game):
             and game.home_team == 'Winnipeg Jets' and game.venue == 'Princess Auto Stadium')
 
 
-def replay_pa(module, endpoint, token, pending, *, clock=time.monotonic, budget=120):
+def replay_pa(module, endpoint, token, pending, *, clock=time.monotonic, budget=120, mirror=None):
     """Bound old delivery work; every unattempted or rejected payload stays durable."""
     import collector
     started = clock(); count = 0; errors = []
@@ -112,8 +113,15 @@ def replay_pa(module, endpoint, token, pending, *, clock=time.monotonic, budget=
             value = json.loads(path.read_bytes()); collector.snapshot_from_payload(value)
             module.post_snapshot_with_retry(endpoint, token, value, timeout=20, retry_delays=(2, 5))
             path.unlink(); count += 1
+        except ArchivedCaptureConflict:
+            if mirror is None:
+                raise ValueError('Archived conflict requires its verified durable mirror')
+            preserve_pending(path, mirror.read(mirror.enqueue(value)))
         except collector.SnapshotUploadError as exc:
-            errors.append(path.name + ': ' + type(exc).__name__)
+            message = path.name + ': ' + type(exc).__name__
+            if getattr(exc, 'receipt_validation_failed', False) is True:
+                message += ': observation conflict or unverified receipt'
+            errors.append(message)
             if not exc.retryable and exc.status_code in (400, 409, 422):
                 path.replace(path.with_suffix('.rejected'))
         except Exception as exc:
@@ -137,6 +145,7 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
         capture_failures=[])
     def save():
         report['pending'] = len(list(pending.glob('*.json'))) + len(list(pending.glob('*.rejected')))
+        report['archived_pythonanywhere_conflicts'] = len(list(pending.glob('*.archived-conflict')))
         report['unfinished_games'] = sorted(state['pending'])
         report['seconds'] = round(clock() - began, 3)
         health_output.parent.mkdir(parents=True, exist_ok=True)
@@ -155,7 +164,7 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
         state_writable = True
         save()
         report['replayed'], replay_errors, report['deferred_uploads'] = replay_pa(
-            module, endpoint, token, pending, clock=clock)
+            module, endpoint, token, pending, clock=clock, mirror=mirror)
         report['errors'].extend(replay_errors)
         schedule, source = module.fetch_schedule_games(started)
         raw_schedule_count = len(schedule)
@@ -269,6 +278,8 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
                         title=snapshot.title, resolution_source=resolution.source,
                         inventory_listing_count=getattr(snapshot, 'inventory_listing_count', None),
                         capture_diagnostics=getattr(snapshot, 'capture_diagnostics', None)))
+                except ArchivedCaptureConflict:
+                    preserve_pending(queued, mirror.read(mirror.enqueue(value)))
                 except Exception as exc:
                     report['errors'].append(identity + ': delivery ' + type(exc).__name__)
             except Exception as exc:
@@ -296,6 +307,7 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
         report['provider_supported_expected'] = max(0, report.get('scheduled_due', 0) - report['provider_gap_count'])
         report['provider_supported_coverage_percent'] = (round(100 * report['captured'] /
             report['provider_supported_expected'], 2) if report['provider_supported_expected'] else None)
+        report['pending'] = len(list(pending.glob('*.json'))) + len(list(pending.glob('*.rejected')))
         report['status'] = 'degraded' if state['pending'] or report['errors'] or report['pending'] else 'healthy'
         report['coverage_percent'] = (round(100 * (report['captured'] + report.get('already_observed_current', 0)) /
             (report.get('scheduled_due', 0) + report.get('already_observed_current', 0)), 2)

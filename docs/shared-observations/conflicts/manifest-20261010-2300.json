@@ -1,0 +1,93 @@
+{
+  "capture_slot": "2026-10-10T23:00:00+00:00",
+  "observations": [
+    {
+      "canonical_section_count": 181,
+      "capture_slot": "2026-10-10T23:00:00+00:00",
+      "captured_at": "2026-10-10T23:20:42.392405+00:00",
+      "event_date": "2026-10-11T17:00:00+00:00",
+      "file": "docs/shared-observations/conflicts/snapshot-nfl-6493301-20261010-2300.json",
+      "observation_sha256": "5489009e9d19edb7b31d10aafc99ede767c07dc912597af7ea8e095b9b6f82a3",
+      "provenance": {
+        "branch": "main",
+        "earlier_stored_capture_run_id": 38090261381,
+        "earlier_stored_capture_url": "https://github.com/DevingGrosko/TicketPricePredictor-Public/actions/runs/38090261381",
+        "earlier_stored_captured_at": "2026-10-10T23:00:12.571437+00:00",
+        "earlier_stored_health_artifact_id": 11685016469,
+        "earlier_stored_health_result": "stored",
+        "earlier_stored_health_zip_sha256": "85d4a6039ced6a9ce2ea776e3438a8724c96478f940eb51ee7ce1bd8100824b7",
+        "earlier_stored_sections": 181,
+        "original_capture_run_id": 38092150724,
+        "original_capture_url": "https://github.com/DevingGrosko/TicketPricePredictor-Public/actions/runs/38092150724",
+        "preserved_export_artifact_id": 11774750709,
+        "preserved_export_run_id": 38307874399,
+        "preserved_export_zip_sha256": "e568d7b7dbfa9ed6e27802da48c5ffa0d3cdaf78703b2e580a467f386fa2b6be",
+        "repository": "DevingGrosko/TicketPricePredictor-Public"
+      },
+      "public_price_mismatch": {
+        "archived_listing_count": 30,
+        "archived_price": 162,
+        "capture_slot": "2026-10-10T23:00:00+00:00",
+        "hours_before_event": 18.0,
+        "html_sha256": "266b14b57f647af9546ceb24b0cce26779332f9f1da768c2ddc027785877a597",
+        "limitation": "A price mismatch proves different observations. The graph does not supply the canonical full observation digest or listing counts.",
+        "method": "Public exact-section historical graph: raw stored ticket price at the matching hours-before-event point, with no averaging.",
+        "retrieved_at": "2026-10-12T21:41:13.816869+00:00",
+        "section": "Lower Level 122",
+        "stored_price": 144,
+        "url": "https://bunnyjeff.pythonanywhere.com/nfl/graph?team=Washington+Commanders&game=69&section=Lower+Level+122"
+      },
+      "reason": "Earlier PythonAnywhere observation reached the immutable half-hour slot after the predecessor checkpoint; the following capture has different prices.",
+      "schedule_id": "401872988",
+      "section_count": 181,
+      "sha256": "638ad7232338393dec79cef7d9d22caeba5147d203821024be6febe27b30680b",
+      "source_id": "6493301",
+      "sport": "nfl"
+    },
+    {
+      "canonical_section_count": 92,
+      "capture_slot": "2026-10-10T23:00:00+00:00",
+      "captured_at": "2026-10-10T23:26:40.983928+00:00",
+      "event_date": "2026-10-11T22:00:00+00:00",
+      "file": "docs/shared-observations/conflicts/snapshot-nhl-7301426-20261010-2300.json",
+      "observation_sha256": "6e424c0f4cfec64d03a7cdfa496f5f925b8d3bc74a84032a493ae4db172b19bf",
+      "provenance": {
+        "branch": "main",
+        "earlier_stored_capture_run_id": 38090261381,
+        "earlier_stored_capture_url": "https://github.com/DevingGrosko/TicketPricePredictor-Public/actions/runs/38090261381",
+        "earlier_stored_captured_at": "2026-10-10T23:00:09.026934+00:00",
+        "earlier_stored_health_artifact_id": 11684659275,
+        "earlier_stored_health_result": "stored",
+        "earlier_stored_health_zip_sha256": "fe955000b43768215cfec8c597d994ab6dc90b5ca67f030674f4545ee9cc48ac",
+        "earlier_stored_sections": 92,
+        "original_capture_run_id": 38092150724,
+        "original_capture_url": "https://github.com/DevingGrosko/TicketPricePredictor-Public/actions/runs/38092150724",
+        "preserved_export_artifact_id": 11773834551,
+        "preserved_export_run_id": 38307874399,
+        "preserved_export_zip_sha256": "e9fd7182239f59f615136e9b27f5e3c1b19f8f0d32686086e80d11e4312eee3e",
+        "repository": "DevingGrosko/TicketPricePredictor-Public"
+      },
+      "public_price_mismatch": {
+        "archived_listing_count": 32,
+        "archived_price": 80,
+        "capture_slot": "2026-10-10T23:00:00+00:00",
+        "hours_before_event": 23.0,
+        "html_sha256": "8181ac06aed5d256f01570300437cea1f30744bbb6dbd34c26a07ea58837d80d",
+        "limitation": "A price mismatch proves different observations. The graph does not supply the canonical full observation digest or listing counts.",
+        "method": "Public exact-section historical graph: raw stored ticket price at the matching hours-before-event point, with no averaging.",
+        "retrieved_at": "2026-10-12T21:41:13.816953+00:00",
+        "section": "Section 212",
+        "stored_price": 83,
+        "url": "https://bunnyjeff.pythonanywhere.com/nhl/graph?team=New+York+Rangers&game=147&section=Section+212"
+      },
+      "reason": "Earlier PythonAnywhere observation reached the immutable half-hour slot after the predecessor checkpoint; the following capture has different prices.",
+      "schedule_id": "2026020085",
+      "section_count": 91,
+      "sha256": "9c72a0fdca1414cf6afad75eb1afa9687120f81d637050d32c30e20d8a47e7b2",
+      "source_id": "7301426",
+      "sport": "nhl"
+    }
+  ],
+  "purpose": "Preserve the two exact historical conflicting originals; this archive is not a destination acknowledgment.",
+  "version": 1
+}
