@@ -246,7 +246,7 @@ class CanaryTests(unittest.TestCase):
             class StockWebKit(Browser):
                 def __init__(self):
                     super().__init__()
-                    self._webkit_session=SimpleNamespace(configure_normal_navigation=Mock())
+                    self._webkit_session=SimpleNamespace(configure_normal_navigation=Mock(),configure_blocker_diagnostics=Mock())
                     self.driver=SimpleNamespace()  # The adapter has no Selenium capabilities.
                 def capture(self, url):
                     if denied:
@@ -255,15 +255,36 @@ class CanaryTests(unittest.TestCase):
             def factory(**kwargs):
                 browser=StockWebKit();sessions.append(browser);return browser
             with tempfile.TemporaryDirectory() as directory, patch('vivid_firefox.configure_normal_navigation') as firefox:
-                report=run_canary(known,directory,engine='webkit',isolated_events=True,factory=factory)
+                report=run_canary(known,directory,engine='webkit',isolated_events=True,factory=factory,blocker_diagnostics=True)
             firefox.assert_not_called()
             self.assertEqual(report['status'],'failed' if denied else 'passed')
             self.assertEqual(len(sessions),1 if denied else 2)
             self.assertTrue(all(browser.closed for browser in sessions))
             self.assertTrue(report['normal_navigation'])
+            self.assertTrue(report['blocker_diagnostics'])
             for browser in sessions:
                 browser._webkit_session.configure_normal_navigation.assert_called_once()
+                browser._webkit_session.configure_blocker_diagnostics.assert_called_once_with(Path(directory))
             if denied:self.assertTrue(report['stopped_after_access_denial'])
+
+    def test_blocker_diagnostics_require_explicit_stock_isolated_webkit_before_startup(self):
+        for engine,isolated,enabled in (('firefox',True,True),('webkit',False,True),('webkit',True,'true')):
+            with tempfile.TemporaryDirectory() as directory,self.assertRaises(ValueError):
+                run_canary([],directory,engine=engine,isolated_events=isolated,blocker_diagnostics=enabled,
+                           factory=lambda **_:self.fail('Invalid diagnostic started a browser'))
+
+    def test_blocker_report_keeps_only_matching_screenshot_proof_and_safe_layout(self):
+        clean=safe_diagnostics({'production_id':'7302299','blocker_diagnostic_status':'captured',
+            'blocker_screenshot_file':'blocker-7302299.png','blocker_screenshot_sha256':'a'*64,
+            'blocker_element':{'hit':{'tag':'IFRAME','id':'ad-frame','classes':['overlay'],
+                'src':'https://private/?token=secret'},'hit_is_iframe':True,'text':'private'}})
+        self.assertEqual(clean['blocker_screenshot_file'],'blocker-7302299.png')
+        self.assertEqual(clean['blocker_screenshot_sha256'],'a'*64)
+        self.assertTrue(clean['blocker_element']['hit_is_iframe'])
+        self.assertNotIn('private',json.dumps(clean));self.assertNotIn('secret',json.dumps(clean))
+        for name in ('../private.png','blocker-6491666.png','https://private'):
+            self.assertNotIn('blocker_screenshot_file',safe_diagnostics({'production_id':'7302299',
+                'blocker_screenshot_file':name,'blocker_screenshot_sha256':'a'*64}))
 
     def test_failure_report_keeps_category_and_safe_native_response_evidence(self):
         from vivid_inventory import VividCaptureError
