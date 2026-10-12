@@ -18,7 +18,7 @@ from Flask_App.collection_cadence import half_hour_capture_slot
 from tests.test_observation_receipt import proof
 from tests.test_shared_capture import acknowledgment, payload
 from tools.shared_capture import MirrorQueue, run_legacy
-from tools.shared_capture_policy import capture_progress, checkpoint, game_value, replay_free_pending, run_owner
+from tools.shared_capture_policy import capture_progress, checkpoint, game_value, replay_free_pending, replay_pa, run_owner
 
 NOW = datetime(2026, 10, 8, 5, tzinfo=timezone.utc)
 
@@ -197,8 +197,8 @@ class SharedCapturePolicyTests(unittest.TestCase):
         self.assertTrue(configured[0][1].attempted)
         self.assertTrue(all(row[0]==self.root/'nfl-blocker-diagnostics' for row in configured))
 
-    def test_imports_old_backlog_once_current_first_fair_twenty_and_original_observation_time(self):
-        games = [self.game('nfl', 'current-1')] + [self.game('nfl', 'older-'+str(i), 10) for i in range(21)]
+    def test_imports_old_backlog_once_current_first_fair_forty_and_original_observation_time(self):
+        games = [self.game('nfl', 'current-1')] + [self.game('nfl', 'older-'+str(i), 10) for i in range(41)]
         legacy = self.root/'free'; legacy.mkdir()
         oldslot = NOW-timedelta(days=1)
         old = {'pending': {g.schedule_id: {'game': game_value(g), 'first_due': oldslot.isoformat()} for g in games[1:]}}
@@ -209,11 +209,11 @@ class SharedCapturePolicyTests(unittest.TestCase):
             self.assertEqual(run_owner('nfl', nfl, self.mirror, 'endpoint', 'token', 45, self.health,
                 self.pending, legacy=legacy, now=lambda: NOW), 1)
         self.assertEqual(calls[0:2], ['resolve:current-1', 'capture:current-1'])
-        self.assertEqual(len(captures), 21)
+        self.assertEqual(len(captures), 41)
         self.assertTrue(all(value['captured_at'] == NOW.isoformat() for value in captures))
         report = json.loads(self.health.read_text())
-        self.assertEqual((report['current_due_selected'], report['recovery_selected']), (1, 20))
-        self.assertEqual((report['scheduled_due'], report['scheduled_selected']), (22, 21))
+        self.assertEqual((report['current_due_selected'], report['recovery_selected']), (1, 40))
+        self.assertEqual((report['scheduled_due'], report['scheduled_selected']), (42, 41))
         self.assertLess(report['coverage_percent'], 100)
         self.assertEqual(report['current_coverage_percent'], 100)
         self.assertEqual(len(report['unfinished_games']), 1)
@@ -228,6 +228,50 @@ class SharedCapturePolicyTests(unittest.TestCase):
                 legacy=legacy, now=lambda: NOW)
         self.assertEqual(len(captures), 1)
         self.assertNotIn('obsolete-new-entry', json.loads(progress.read_text())['pending'])
+
+    def test_larger_capture_recovery_still_defers_at_original_phase_deadline(self):
+        games = [self.game('nfl', 'current-1')] + [self.game('nfl', 'older-'+str(i), 10) for i in range(45)]
+        legacy = self.root/'free'; legacy.mkdir()
+        oldslot = (NOW-timedelta(days=1)).isoformat()
+        (legacy/'nfl-backlog.json').write_text(json.dumps({'pending': {
+            game.schedule_id: {'game': game_value(game), 'first_due': oldslot} for game in games[1:]}}))
+        elapsed = [0]
+        def advance(phase): elapsed[0] += 60
+        state, calls, captures = self.controlled(nfl, games, advance=advance)
+        with state:
+            self.assertEqual(run_owner('nfl', nfl, self.mirror, 'endpoint', 'token', 45,
+                self.health, self.pending, legacy=legacy, now=lambda: NOW, clock=lambda: elapsed[0]), 1)
+        report = json.loads(self.health.read_text())
+        self.assertEqual(calls[:2], ['resolve:current-1', 'capture:current-1'])
+        self.assertEqual(report['recovery_selected'], 40)
+        self.assertEqual(report['deadline_seconds'], 24*60)
+        self.assertTrue(report['deadline_reached'])
+        self.assertEqual(elapsed[0], 21*60)
+        self.assertEqual(len(captures), 10)
+        self.assertEqual(report['current_coverage_percent'], 100)
+        self.assertEqual(len(report['deferred_games']), 36)
+        pending = json.loads((self.mirror.root/'recovery/state.json').read_text())['pending']
+        self.assertEqual(set(pending), set(report['deferred_games']))
+
+    def test_browser_recovery_increase_does_not_expand_either_delivery_replay(self):
+        values = [payload(pid=str(6500000+i), captured=NOW-timedelta(days=10)) for i in range(21)]
+        for index, value in enumerate(values):
+            (self.pending/f'{index:02}.json').write_text(json.dumps(value))
+        with patch.object(nfl, 'post_snapshot_with_retry', side_effect=lambda endpoint, token, value, **kw: proof(value)) as post:
+            count, errors, deferred = replay_pa(nfl, 'endpoint', 'token', self.pending, clock=lambda: 0)
+        self.assertEqual((count, errors, deferred, post.call_count), (20, [], 1, 20))
+        self.assertEqual(json.loads((self.pending/'20.json').read_text()), values[20])
+        storage = ModuleType('tools.free_refresh_capture')
+        storage.parse_payload = lambda sport, value, now=None: collector.snapshot_from_payload(value)
+        pending = self.root/'free/pending'; pending.mkdir(parents=True)
+        for index, value in enumerate(values):
+            (pending/f'{index:02}.json').write_text(json.dumps(value))
+        sender = Mock(side_effect=lambda value: acknowledgment(value, 'tidb'))
+        with patch.dict(sys.modules, {'tools.free_refresh_capture': storage}), patch.dict(os.environ, {}, clear=True):
+            result = replay_free_pending('nfl', pending.parent, sender=sender, now=lambda: NOW, clock=lambda: 0)
+        self.assertEqual((result['delivered'], result['pending'], sender.call_count), (20, 1, 20))
+        self.assertEqual(result['errors'], [])
+        self.assertEqual(json.loads((pending/'20.json').read_text()), values[20])
 
     def test_resolution_deadline_defers_remaining_without_backdating_and_restart_recovers(self):
         games = [self.game('nfl', 'current-'+str(i)) for i in range(3)]

@@ -86,7 +86,7 @@ Stock WebKit follows the ordinary visible Vivid team-page link into its event po
 - Each game receives a deterministic phase so 6-hour and 3-hour captures are spread across scheduled runs instead of arriving in one large batch.
 - NFL games 15–30 days out run every 6 hours, games 8–14 days out run every 3 hours, and games in the final 7 days run every 30 minutes.
 - NHL games 15–30 days out run daily, games 8–14 days out run every 12 hours, games 4–7 days out run every 6 hours, and games in the final 72 hours run every 30 minutes.
-- Current due games are attempted before older unfinished games. Missed captures are recovered as new observations with their actual capture time; prices are never backdated.
+- Current due games are attempted before up to 40 older unfinished games per sport, subject to the existing capture time budget. The existing PythonAnywhere and legacy free-store retry passes remain capped at 20 pending payloads each. Missed captures are recovered as new observations with their actual capture time; prices are never backdated.
 - NFL matchups are matched to Vivid's NFL feed. A missing feed link is recovered through a targeted Vivid search for the two teams.
 - Feed and search results are candidate links only. The title and kickoff parsed from the individual Vivid event page must match the scheduled matchup before anything is stored.
 - Health reports distinguish current due, already observed, selected recovery, deferred, unresolved, captured, and uploaded games, with per-game resolution details and explicit coverage percentages.
