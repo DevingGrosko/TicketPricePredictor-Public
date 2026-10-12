@@ -1,7 +1,8 @@
 """Offline progress migration, phase budgets, and old-observation delivery checks."""
-from contextlib import ExitStack
+from contextlib import ExitStack, redirect_stdout
 from datetime import datetime, timedelta, timezone
 import json
+from io import StringIO
 import os
 from pathlib import Path
 import sys
@@ -17,7 +18,7 @@ from Flask_App.collection_cadence import half_hour_capture_slot
 from tests.test_observation_receipt import proof
 from tests.test_shared_capture import acknowledgment, payload
 from tools.shared_capture import MirrorQueue, run_legacy
-from tools.shared_capture_policy import checkpoint, game_value, replay_free_pending, run_owner
+from tools.shared_capture_policy import capture_progress, checkpoint, game_value, replay_free_pending, run_owner
 
 NOW = datetime(2026, 10, 8, 5, tzinfo=timezone.utc)
 
@@ -67,6 +68,53 @@ class SharedCapturePolicyTests(unittest.TestCase):
         }.items():
             stack.enter_context(patch.object(module, key, value))
         return stack, calls, captured
+
+    def test_progress_redacts_untrusted_values_and_bounds_native_failure_evidence(self):
+        output=StringIO()
+        diagnostics={'production_id':'7301418','phase':'event-link-ready','timeout_phase':'event-link-ready',
+            'performer_document_status':200,'document_status':True,
+            'event_link_trial_timeout_reason':'pointer-intercepted','event_link_trial_attempts':2,
+            'event_link_click_timeout_reason':'private-token',
+            'event_link_actionability':{'attached':True,'has_box':1,'in_viewport':True,
+                'receives_pointer':False,'obstructed_by_dialog':True,'text':'private'},
+            'responses':[{'status':200,'url':'https://private.example/?token=private'},
+                         {'status':404},{'status':True},{'status':999}]+[{'status':503}]*20,
+            'cookies':'private','exception_text':'private'}
+        with redirect_stdout(output):
+            capture_progress('nhl','2026020088','failed',{'captured':0,'failed':1,'errors':['private']},
+                12.34567,category='provider-inventory-timeout',diagnostics=diagnostics)
+            capture_progress('nfl','private','failed',{'captured':True},float('nan'),
+                category={'private':'private'},source_id='private',diagnostics={'event_link_trial_attempts':999})
+        lines=output.getvalue().splitlines()
+        self.assertTrue(all(line.startswith('SHARED_CAPTURE_PROGRESS ') for line in lines))
+        self.assertNotIn('private',output.getvalue())
+        row=json.loads(lines[0].split(' ',1)[1])
+        self.assertEqual((row['schedule_id'],row['source_id']),('2026020088','7301418'))
+        self.assertEqual(row['elapsed_seconds'],12.346)
+        self.assertEqual(row['category'],'provider-inventory-timeout')
+        self.assertEqual(row['diagnostics'],{
+            'phase':'event-link-ready','timeout_phase':'event-link-ready','performer_document_status':200,
+            'event_link_trial_timeout_reason':'pointer-intercepted','event_link_trial_attempts':2,
+            'event_link_actionability':{'attached':True,'in_viewport':True,
+                'receives_pointer':False,'obstructed_by_dialog':True},
+            'inventory_http_statuses':[200,404]+[503]*6})
+        self.assertEqual(json.loads(lines[1].split(' ',1)[1]),
+            {'sport':'nfl','status':'failed','category':'other-failure'})
+
+    def test_game_progress_emits_start_and_stored_counts_without_changing_captures(self):
+        games=[self.game('nfl','current-1'),self.game('nfl','current-2')]
+        state,calls,captures=self.controlled(nfl,games);output=StringIO()
+        with state,redirect_stdout(output):
+            code=run_owner('nfl',nfl,self.mirror,'endpoint','token',45,self.health,self.pending,now=lambda:NOW)
+        rows=[json.loads(line.split(' ',1)[1]) for line in output.getvalue().splitlines()
+              if line.startswith('SHARED_CAPTURE_PROGRESS ')]
+        self.assertEqual(code,0);self.assertEqual(len(captures),2)
+        self.assertEqual([row['status'] for row in rows],['started','stored','started','stored'])
+        self.assertEqual([row['captured'] for row in rows],[0,1,1,2])
+        self.assertEqual([row['uploaded'] for row in rows],[0,1,1,2])
+        self.assertEqual(rows[-1]['captured_current'],2)
+        self.assertEqual(rows[-1]['source_id'],'6500001')
+        self.assertEqual(calls,['resolve:current-1','capture:current-1','resolve:current-2','capture:current-2'])
 
     def test_imports_old_backlog_once_current_first_fair_twenty_and_original_observation_time(self):
         games = [self.game('nfl', 'current-1')] + [self.game('nfl', 'older-'+str(i), 10) for i in range(21)]
@@ -176,15 +224,20 @@ class SharedCapturePolicyTests(unittest.TestCase):
                         starts.append(1); self.capture_diagnostics = {}
                     def capture(self, url, **kwargs):
                         requests.append(url)
-                        self.capture_diagnostics = {'production_id': url.split('/')[-1], 'responses': []}
+                        self.capture_diagnostics = {'production_id': url.split('/')[-1], 'responses': [],
+                            'phase':'event-link-ready','timeout_phase':'event-link-ready',
+                            'event_link_trial_timeout_reason':'pointer-intercepted','event_link_trial_attempts':2,
+                            'event_link_actionability':{'receives_pointer':False,'private':'secret'},
+                            'exception_text':'private-secret'}
                         if exhausted: elapsed[0] = 350
                         category = 'provider-inventory-timeout' if exhausted else 'provider-inventory-not-found'
                         raise VividCaptureError(category, self.capture_diagnostics, retryable=exhausted)
                     def close(self): pass
                 real_capture = nfl._capture_resolution
                 state, calls, captures = self.controlled(nfl, games)
+                output=StringIO()
                 with state, patch.object(nfl, '_capture_resolution', real_capture), \
-                     patch.object(nfl, 'VividNFLBrowser', Browser):
+                     patch.object(nfl, 'VividNFLBrowser', Browser), redirect_stdout(output):
                     self.assertEqual(run_owner('nfl', nfl, self.mirror, 'endpoint', 'token', 45,
                         self.health, self.pending, now=lambda: NOW, clock=lambda: elapsed[0], deadline_seconds=500), 1)
                 self.assertEqual((len(starts), len(requests)), (1, 1))
@@ -194,6 +247,17 @@ class SharedCapturePolicyTests(unittest.TestCase):
                 else:
                     self.assertEqual(report['capture_failures'][0]['category'], 'provider-inventory-not-found')
                 self.assertEqual(report['unfinished_games'], ['current-native'])
+                rows=[json.loads(line.split(' ',1)[1]) for line in output.getvalue().splitlines()
+                      if line.startswith('SHARED_CAPTURE_PROGRESS ')]
+                self.assertEqual([row['status'] for row in rows],['started','deferred' if exhausted else 'failed'])
+                final=rows[-1]
+                self.assertEqual(final['source_id'],'6500000')
+                self.assertEqual(final['failed'],0 if exhausted else 1)
+                self.assertEqual(final['category'],'capture-deferred-deadline' if exhausted else 'provider-inventory-not-found')
+                self.assertEqual(final['diagnostics']['event_link_trial_timeout_reason'],'pointer-intercepted')
+                self.assertEqual(final['diagnostics']['event_link_trial_attempts'],2)
+                self.assertEqual(final['diagnostics']['event_link_actionability'],{'receives_pointer':False})
+                self.assertNotIn('private',output.getvalue());self.assertNotIn('secret',output.getvalue())
 
     def test_old_free_pending_replays_original_age_independently_and_bounds_remaining(self):
         storage = ModuleType('tools.free_refresh_capture')
