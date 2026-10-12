@@ -83,12 +83,17 @@ class CanaryTests(unittest.TestCase):
                        factory=lambda **_kwargs: self.fail('Browser started for unknown route'))
 
     def test_isolated_events_each_have_one_capture_and_one_closed_session(self):
+        # These captures are mocked. Keep their explicit schedule identities in
+        # the live capture window instead of expiring with the original games.
+        future = datetime.now(timezone.utc) + timedelta(days=1)
         values = [
-            {**EVENTS[0], 'home_team': 'New York Giants', 'event_date': '2026-10-11T17:00:00Z'},
-            {**EVENTS[1], 'home_team': 'Boston Bruins', 'event_date': '2026-10-08T23:00:00Z'},
-            {'sport': 'nfl', 'url': 'https://www.vividseats.com/game/production/6493143', 'home_team': 'New Orleans Saints', 'event_date': '2026-10-11T17:00:00+00:00'},
-            {'sport': 'nhl', 'url': 'https://www.vividseats.com/game/production/7301789', 'home_team': 'Pittsburgh Penguins', 'event_date': '2026-10-10T17:00:00+00:00'},
+            {**EVENTS[0], 'home_team': 'New York Giants'},
+            {**EVENTS[1], 'home_team': 'Boston Bruins'},
+            {'sport': 'nfl', 'url': 'https://www.vividseats.com/game/production/6493143', 'home_team': 'New Orleans Saints'},
+            {'sport': 'nhl', 'url': 'https://www.vividseats.com/game/production/7301789', 'home_team': 'Pittsburgh Penguins'},
         ]
+        for offset, value in enumerate(values):
+            value['event_date'] = (future + timedelta(hours=offset)).isoformat()
         events = events_from_json(json.dumps(values)); sessions = []
         dates = {event['production_id']: datetime.fromisoformat(event['event_date']) for event in events}
         class Scheduled(Browser):

@@ -16,7 +16,10 @@ MIGRATION_KEY = re.compile(r'^ticketsignal-free-v1-state-(nfl|nhl)-shared-(\d+)-
 MIRROR = '.github/workflows/shared-snapshot-mirror.yml'
 QUEUE_LIMIT = 20 * 1024**2
 ARTIFACT = re.compile(r'^shared-observations-(nfl|nhl)-(\d+)$')
-TRANSPORT_LIMIT = 128 * 1024**2
+# Internal transport partition: preserve the historical exports while admitting
+# six bounded uploads plus the peer reserve. The existing whole-repository cap
+# and publisher reserve still constrain every upload independently.
+TRANSPORT_LIMIT = 256 * 1024**2
 TOTAL_ARTIFACT_LIMIT = 450 * 1024**2
 PUBLISHER_RESERVE = 128 * 1024**2
 ARCHIVE_MARGIN = 1024**2

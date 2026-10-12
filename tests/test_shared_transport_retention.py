@@ -178,6 +178,40 @@ class TransportRetentionTests(unittest.TestCase):
         unrelated[0]['size_in_bytes'] += 1
         with self.assertRaises(RuntimeError): artifact_upload_budget(unrelated, new)
 
+    def test_preserved_historical_exports_allow_three_worst_case_serialized_cycles(self):
+        mib = 1024**2
+        # Round the measured 103.875MiB of retained originals up conservatively;
+        # six maximum-size uploads represent NFL+NHL for three half-hour cycles.
+        original = {**artifact(1), 'size_in_bytes':104*mib}
+        rows = [original, dict(name='other-preserved-artifacts', expired=False, size_in_bytes=9*mib)]
+        new = 21*mib
+        for run in range(2, 8):
+            evidence = artifact_upload_budget(rows, new)
+            self.assertEqual(evidence['peer_upload_reserve_bytes'], 21*mib)
+            self.assertEqual(evidence['publisher_reserve_bytes'], 128*mib)
+            self.assertEqual(evidence['maximum_repository_bytes'], 450*mib)
+            rows.append({**artifact(run), 'size_in_bytes':new})
+        self.assertIs(rows[0], original)
+        self.assertEqual(original['size_in_bytes'], 104*mib)
+        # Space remains bounded: a seventh maximum export must wait for verified
+        # retention cleanup; admission never deletes the historical originals.
+        with self.assertRaisesRegex(RuntimeError, 'preserve unconfirmed'):
+            artifact_upload_budget(rows, new)
+        self.assertEqual(len(rows), 8)
+
+    def test_256mib_transport_partition_and_450mib_repository_limit_are_independent(self):
+        mib = 1024**2
+        new = 21*mib
+        rows = [{**artifact(1), 'size_in_bytes':214*mib}]
+        artifact_upload_budget(rows, new)  # 214 + new21 + peer21 = 256MiB.
+        rows[0]['size_in_bytes'] += 1
+        with self.assertRaises(RuntimeError): artifact_upload_budget(rows, new)
+        rows = [{**artifact(1), 'size_in_bytes':104*mib},
+                dict(name='other-preserved-artifacts', expired=False, size_in_bytes=176*mib)]
+        artifact_upload_budget(rows, new)  # 104 + 176 + 21 + 21 + 128 = 450MiB.
+        rows[1]['size_in_bytes'] += 1
+        with self.assertRaises(RuntimeError): artifact_upload_budget(rows, new)
+
     def test_artifact_deletion_failure_aborts_cache_pruning_before_any_cache_delete(self):
         env = dict(GITHUB_REPOSITORY=REPO, GITHUB_REF='refs/heads/main', GITHUB_RUN_ID='99', GH_TOKEN='test')
         def inventory(path, key): return checkpoint_caches(1)+checkpoint_caches(2)+checkpoint_caches(3)
