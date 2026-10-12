@@ -76,19 +76,27 @@ flask --app Flask_App.flask_app run
 
 ## Collection workflows
 
-PythonAnywhere dispatches the legacy GitHub Actions workflow at :08 and :38. The independent free pipeline uses GitHub Actions scheduling and stores its own snapshots in TiDB before publishing GitHub Pages.
+PythonAnywhere requests collection at :08 and :38. The free GitHub backup requests it at :07 and :37. Both use the same per-sport, half-hour owner gate in `collect-ticket-prices.yml`: one browser capture produces the original observation delivered to PythonAnywhere and TiDB. GitHub Pages publishes the TiDB copy after delivery. A backup or follower that skips an already attempted slot is not evidence of a new capture.
+
+Stock WebKit follows the ordinary visible Vivid team-page link into its event popup. Capture waits for the link to become actionable, validates the complete native inventory and event identity, and preserves the original capture time, section prices and listing counts. Provider denials remain errors.
 
 - Baseball collection is paused on every trigger.
 - NFL and NHL evaluate their schedules on both half-hour dispatches.
 - The NFL collector first loads the complete scheduled slate inside the exact 30-day window.
 - Each game receives a deterministic phase so 6-hour and 3-hour captures are spread across scheduled runs instead of arriving in one large batch.
-- Games 15–30 days out run every 6 hours, games 8–14 days out run every 3 hours, and games in the final 7 days run every 30 minutes.
-- Each scheduled matchup is matched to Vivid's NFL feed. A missing feed link is recovered through a targeted Vivid search for the two teams.
+- NFL games 15–30 days out run every 6 hours, games 8–14 days out run every 3 hours, and games in the final 7 days run every 30 minutes.
+- NHL games 15–30 days out run daily, games 8–14 days out run every 12 hours, games 4–7 days out run every 6 hours, and games in the final 72 hours run every 30 minutes.
+- Current due games are attempted before older unfinished games. Missed captures are recovered as new observations with their actual capture time; prices are never backdated.
+- NFL matchups are matched to Vivid's NFL feed. A missing feed link is recovered through a targeted Vivid search for the two teams.
 - Feed and search results are candidate links only. The title and kickoff parsed from the individual Vivid event page must match the scheduled matchup before anything is stored.
-- The health report records the number scheduled, matched from the feed, recovered through search, unresolved, captured, queued, and uploaded, plus an explicit coverage percentage.
-- If the structured schedule source is unavailable, the prior Vivid-only collector still runs so data collection continues, but the workflow is marked degraded instead of silently claiming complete coverage.
-- The actual kickoff parsed from each event page remains authoritative for enforcing the final 720-hour storage window.
-- Baseball and NFL use separate concurrency groups and pending queues.
+- Health reports distinguish current due, already observed, selected recovery, deferred, unresolved, captured, and uploaded games, with per-game resolution details and explicit coverage percentages.
+- If the official schedule cannot be loaded, the shared owner reports degraded coverage and preserves its existing progress for recovery.
+- NFL validates the provider kickoff against the official schedule. NHL validates the teams, venue and event calendar against the official schedule, whose UTC event time is retained when provider metadata gives only the correct event day.
+- Each sport has its own writer lock and pending queues. Delivery can finish after the browser job without blocking the next half-hour owner.
+
+Capture work has a 24-minute soft budget and a 25-minute outer process deadline. The workflow verifies that capture processes have stopped before saving a checkpoint. Original pending payloads remain durable until delivery receipts pass validation; queue or artifact limits fail explicitly instead of discarding pending observations. The two reviewed historical same-slot conflicts are preserved separately with their real, different PythonAnywhere receipts and are never represented as matching acknowledgments.
+
+To verify a cycle, inspect its capture health report, both destination delivery results, and the published per-game capture times. A successful Pages deployment can still fail the freshness check when individual games are overdue or missing. The configured half-hour clocks request collection; job completion and site publication occur afterward.
 
 The NFL smoke test resolves a scheduled matchup and captures one current game without writing to a production database.
 
