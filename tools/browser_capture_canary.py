@@ -83,7 +83,7 @@ def safe_diagnostics(value):
     if type(value.get('document_status')) is int:
         result['document_status'] = value['document_status']
     phases = {'performer-navigation', 'performer-link-scan', 'event-link-ready',
-              'performer-ready-wait', 'event-link-click',
+              'performer-ready-wait', 'performer-overlay-controls', 'event-link-click',
               'event-popup', 'event-domcontentloaded', 'event-reload', 'inventory-wait',
               'inventory-body', 'event-identity', 'complete'}
     for key in ('phase', 'timeout_phase'):
@@ -131,6 +131,9 @@ def safe_diagnostics(value):
     if isinstance(value.get('blocker_element'), dict):
         from vivid_webkit import safe_blocker_element
         result['blocker_element'] = safe_blocker_element(value['blocker_element'])
+    if 'performer_overlay_actions' in value:
+        from vivid_webkit import safe_overlay_actions
+        result['performer_overlay_actions'] = safe_overlay_actions(value['performer_overlay_actions'])
     if value.get('blocker_diagnostic_status') in ('captured', 'unavailable', 'timeout', 'budget-exhausted', 'metadata-only'):
         result['blocker_diagnostic_status'] = value['blocker_diagnostic_status']
     if (re.fullmatch(r'[0-9]{1,12}', pid)

@@ -34,6 +34,20 @@ class Browser:
 
 
 class CanaryTests(unittest.TestCase):
+    def test_overlay_actions_allow_only_bounded_known_controls_and_outcomes(self):
+        clean = safe_diagnostics({'phase': 'performer-overlay-controls', 'performer_overlay_actions': [
+            {'action': 'reject-optional-cookies', 'outcome': 'clicked', 'label': 'private'},
+            {'action': 'close-promotion', 'outcome': 'timeout', 'url': 'https://private/?token=secret'},
+            {'action': 'close-promotion', 'outcome': 'clicked'}]})
+        self.assertEqual(clean['performer_overlay_actions'], [
+            {'action': 'reject-optional-cookies', 'outcome': 'clicked'},
+            {'action': 'close-promotion', 'outcome': 'timeout'}])
+        self.assertEqual(clean['phase'], 'performer-overlay-controls')
+        self.assertNotIn('private', json.dumps(clean))
+        for value in (None, {}, 'private', [{'action': 'accept-all', 'outcome': 'clicked'}],
+                      [{'action': 'close-promotion', 'outcome': 'private'}]):
+            self.assertEqual(safe_diagnostics({'performer_overlay_actions': value})['performer_overlay_actions'], [])
+
     def test_actionability_diagnostics_keep_only_bounded_public_values(self):
         clean=safe_diagnostics({
             'phase':'event-link-ready','timeout_phase':'performer-ready-wait',

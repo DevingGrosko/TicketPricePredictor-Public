@@ -13,7 +13,7 @@ from collector import VividBrowser
 from nfl_collector import VividNFLBrowser
 from vivid_inventory import CurrentInventoryRecovery, VividCaptureError
 from vivid_performer_routes import configure_schedule_navigation
-from vivid_webkit import BLOCKER_ELEMENT_SCRIPT, LINK_ACTIONABILITY_SCRIPT, PUBLIC_PAGE_SCRIPT, BlockerScreenshotBudget, PublicDOMDriver, WebKitInventorySession, click_timeout_reason, public_inventory, safe_blocker_element, verified_event_date
+from vivid_webkit import BLOCKER_ELEMENT_SCRIPT, CONSENT_CONTAINER, CONSENT_REJECT_LABEL, PROMO_CLOSE_SELECTOR, LINK_ACTIONABILITY_SCRIPT, PUBLIC_PAGE_SCRIPT, BlockerScreenshotBudget, PublicDOMDriver, WebKitInventorySession, click_timeout_reason, public_inventory, safe_blocker_element, verified_event_date
 
 AT = datetime(2026, 10, 11, 17, tzinfo=timezone.utc)
 URL = 'https://www.vividseats.com/old-slug-3-5-2027/production/123'
@@ -82,18 +82,47 @@ class Link:
         if options.get('trial'):
             browser = self.page.context.browser
             self.page.context.trials += 1
-            if browser.trial_failures:
-                browser.trial_failures -= 1
+            browser.actions.append('event-trial')
+            if browser.trial_failures or browser.overlays:
+                browser.trial_failures = max(0, browser.trial_failures - 1)
+                browser.overlays.update(browser.late_overlays)
+                browser.late_overlays.clear()
                 self.page.context.clock.advance(options['timeout'])
                 if browser.denial_during_trial:
                     self.page.context.emit(Response(self.page.context, self.page, 403, document=True))
                 raise browser.timeout_error('private-token overlay intercepts pointer events')
             return
         self.page.context.clicks += 1
+        self.page.context.browser.actions.append('event-click')
         if self.page.context.browser.fail_phase == 'event-link-click':
             self.page.context.clock.advance(options['timeout'])
             raise self.page.context.browser.timeout_error('Private timeout message must not enter diagnostics')
         self.page.context.emit_event()
+
+
+class OverlayControls:
+    def __init__(self, page, action): self.page, self.action = page, action
+    def get_by_text(self, text, *, exact):
+        assert self.action == 'reject-optional-cookies' and text == CONSENT_REJECT_LABEL and exact is True
+        return self
+    def count(self):
+        browser = self.page.context.browser
+        return browser.control_counts.get(self.action, int(self.action in browser.overlays))
+    def nth(self, index):
+        assert index == 0
+        return self
+    def is_visible(self): return self.action not in self.page.context.browser.hidden_controls
+    def click(self, **options):
+        browser = self.page.context.browser
+        assert set(options) == {'timeout'}  # No force, JS click, or navigation bypass.
+        browser.actions.append(self.action)
+        browser.control_clicks.append((self.action, options))
+        if browser.control_timeout == self.action:
+            self.page.context.clock.advance(options['timeout'])
+            raise browser.timeout_error('private control timeout')
+        browser.overlays.discard(self.action)
+        if browser.denial_after_control:
+            self.page.context.emit(Response(self.page.context, self.page, 403, document=True))
 
 
 class Page:
@@ -126,6 +155,9 @@ class Page:
                     'event': (self.context.browser.metadata or metadata(self.context.browser.pid)) if self.event else None}
         return 'public-eval'
     def locator(self, _selector):
+        if _selector == CONSENT_CONTAINER: return OverlayControls(self, 'reject-optional-cookies')
+        if _selector == PROMO_CLOSE_SELECTOR: return OverlayControls(self, 'close-promotion')
+        assert _selector.startswith("a[href*='/production/")
         return SimpleNamespace(count=lambda: 1, nth=lambda _index: Link(self))
     def expect_popup(self, **_options):
         context = self.context
@@ -222,6 +254,13 @@ class Browser:
         self.blocker_reads,self.screenshots = 0,[]
         self.screenshot_timeout=options.get('screenshot_timeout',False)
         self.screenshot_bytes=options.get('screenshot_bytes',b'public viewport')
+        self.overlays = set(options.get('overlays', []))
+        self.late_overlays = set(options.get('late_overlays', []))
+        self.control_counts = options.get('control_counts', {})
+        self.hidden_controls = options.get('hidden_controls', set())
+        self.control_timeout = options.get('control_timeout')
+        self.denial_after_control = options.get('denial_after_control', False)
+        self.actions, self.control_clicks = [], []
         self.context = Context(self, clock)
     def new_context(self): return self.context
     def close(self): self.closed = True
@@ -250,6 +289,75 @@ class WebKitTests(unittest.TestCase):
         patch('vivid_webkit._blocked_category',None).start()
         patch('vivid_webkit.time.monotonic', self.clock.monotonic).start()
         patch('vivid_webkit.time.time', self.clock.time).start()
+
+    def test_observed_cookie_and_signup_overlays_use_native_reject_then_close_before_event(self):
+        browser = Browser(self.clock, overlays=['reject-optional-cookies', 'close-promotion'])
+        adapter = session(self.clock, [browser])
+        clean, stamp = adapter.capture(URL)
+        self.assertEqual(stamp, AT); self.assertEqual(len(clean['tickets']), 12)
+        self.assertEqual(browser.actions, ['reject-optional-cookies', 'close-promotion', 'event-trial', 'event-click'])
+        self.assertEqual(browser.control_clicks, [('reject-optional-cookies', {'timeout': 3000}),
+                                                 ('close-promotion', {'timeout': 3000})])
+        self.assertEqual(adapter.owner.capture_diagnostics['performer_overlay_actions'], [
+            {'action': 'reject-optional-cookies', 'outcome': 'clicked'},
+            {'action': 'close-promotion', 'outcome': 'clicked'}])
+        self.assertEqual(browser.context.body_reads, ['123']); adapter.close()
+
+    def test_cookie_banner_appearing_after_first_trial_is_rejected_before_second(self):
+        browser = Browser(self.clock, trial_failures=1, late_overlays=['reject-optional-cookies'])
+        adapter = session(self.clock, [browser]); adapter.timeout = 45
+        adapter.capture(URL)
+        self.assertEqual(browser.actions, ['event-trial', 'reject-optional-cookies', 'event-trial', 'event-click'])
+        self.assertEqual(len(browser.control_clicks), 1); adapter.close()
+
+    def test_unknown_ambiguous_or_hidden_controls_are_not_clicked(self):
+        for options in ({'overlays': ['unknown']},
+                        {'overlays': ['reject-optional-cookies'], 'control_counts': {'reject-optional-cookies': 0}},
+                        {'overlays': ['close-promotion'], 'control_counts': {'close-promotion': 2}},
+                        {'overlays': ['close-promotion'], 'hidden_controls': {'close-promotion'}}):
+            with self.subTest(options=options):
+                browser = Browser(self.clock, **options); adapter = session(self.clock, [browser]); adapter.timeout = 45
+                with self.assertRaises(VividCaptureError): adapter.capture(URL)
+                self.assertEqual(browser.control_clicks, []); self.assertEqual(browser.context.clicks, 0)
+                self.assertEqual(browser.context.trials, 2); self.assertTrue(browser.closed); adapter.close()
+
+    def test_timed_out_control_is_never_reclicked_or_replaced_by_another_consent_choice(self):
+        browser = Browser(self.clock, overlays=['reject-optional-cookies'], control_timeout='reject-optional-cookies')
+        adapter = session(self.clock, [browser]); adapter.timeout = 45
+        with self.assertRaises(VividCaptureError): adapter.capture(URL)
+        self.assertEqual(browser.actions, ['reject-optional-cookies', 'event-trial', 'event-trial'])
+        self.assertEqual(adapter.owner.capture_diagnostics['performer_overlay_actions'], [
+            {'action': 'reject-optional-cookies', 'outcome': 'timeout'}])
+        self.assertEqual(adapter.owner.capture_diagnostics['capture_elapsed_ms'], 23000)
+        self.assertNotIn('private', json.dumps(adapter.owner.capture_diagnostics)); adapter.close()
+
+    def test_native_control_timeout_cannot_extend_remaining_capture_budget(self):
+        browser = Browser(self.clock, overlays=['reject-optional-cookies'],
+                          control_timeout='reject-optional-cookies', performer_delay_ms=7500)
+        adapter = session(self.clock, [browser])
+        with self.assertRaises(VividCaptureError): adapter.capture(URL)
+        self.assertEqual(browser.control_clicks, [('reject-optional-cookies', {'timeout': 500})])
+        self.assertEqual(browser.context.trials, 0); self.assertEqual(browser.context.clicks, 0)
+        self.assertEqual(adapter.owner.capture_diagnostics['capture_elapsed_ms'], 8000)
+        self.assertTrue(browser.closed); adapter.close()
+
+    def test_visible_challenge_or_denial_stops_before_overlay_controls(self):
+        for options in ({'challenge': True}, {'performer_status': 403}):
+            with self.subTest(options=options), patch('vivid_webkit._blocked_category', None):
+                browser = Browser(self.clock, overlays=['reject-optional-cookies'], **options)
+                adapter = session(self.clock, [browser])
+                with self.assertRaises(VividCaptureError) as error: adapter.capture(URL)
+                self.assertEqual(error.exception.category, 'provider-access-denied')
+                self.assertEqual(browser.control_clicks, []); self.assertEqual(browser.context.clicks, 0)
+                self.assertTrue(browser.closed); adapter.close()
+
+    def test_denial_after_cookie_rejection_stops_before_promo_or_event_click(self):
+        browser = Browser(self.clock, overlays=['reject-optional-cookies', 'close-promotion'], denial_after_control=True)
+        adapter = session(self.clock, [browser])
+        with self.assertRaises(VividCaptureError) as error: adapter.capture(URL)
+        self.assertEqual(error.exception.category, 'provider-access-denied')
+        self.assertEqual(browser.actions, ['reject-optional-cookies']); self.assertEqual(browser.context.clicks, 0)
+        self.assertTrue(browser.closed); adapter.close()
 
     def test_native_full_popup_capture_ignores_prefetch_and_redacts_public_fields(self):
         raw=payload();raw['private_token']='private';raw['tickets'][0]['seller_id']='private'
