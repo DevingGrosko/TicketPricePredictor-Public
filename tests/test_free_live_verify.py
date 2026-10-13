@@ -260,3 +260,160 @@ def test_feed_unavailable_preserves_version_true_but_remains_a_failure(monkeypat
     with pytest.raises(RuntimeError, match='coverage unavailable'):
         verifier.verify('expected', report_path=report_path)
     assert json.loads(report_path.read_text())['version_verified'] is True
+
+
+def catalog_reader_fixture(outcomes):
+    import hashlib
+    import io
+    from types import SimpleNamespace
+    elapsed, calls, waits = [0.0], [], []
+    raw = b'{"games":{}}'
+    path = '/native/data-' + hashlib.sha256(raw).hexdigest() + '.json'
+    def open_url(request, timeout):
+        calls.append(timeout)
+        value = outcomes.pop(0) if outcomes else raw
+        if isinstance(value, Exception):
+            raise value
+        return io.BytesIO(value)
+    def sleep(seconds):
+        waits.append(seconds)
+        elapsed[0] += seconds
+    return path, SimpleNamespace(open=open_url), elapsed, calls, waits, sleep
+
+
+def test_catalog_503_recovers_within_one_read_budget(capsys):
+    from urllib.error import HTTPError
+    from tools.free_live_verify import read_public_catalog
+    error = HTTPError('https://example.test/private-detail', 503, 'temporary', {}, None)
+    path, opener, elapsed, calls, waits, sleep = catalog_reader_fixture([error])
+    assert read_public_catalog(path, opener, clock=lambda:elapsed[0], sleep=sleep) == {'games':{}}
+    assert calls == [20, 19]
+    assert waits == [1]
+    output = capsys.readouterr().out
+    assert 'FREE_LIVE_CATALOG_RETRY' in output and '503' in output
+    assert 'private-detail' not in output
+
+
+def test_catalog_repeated_transient_errors_exhaust_three_attempts():
+    import pytest
+    from urllib.error import HTTPError
+    from tools.free_live_verify import read_public_catalog
+    errors = [HTTPError('https://example.test/', 503, 'temporary', {}, None) for _ in range(3)]
+    path, opener, elapsed, calls, waits, sleep = catalog_reader_fixture(errors)
+    with pytest.raises(HTTPError) as failure:
+        read_public_catalog(path, opener, clock=lambda:elapsed[0], sleep=sleep)
+    assert failure.value.code == 503
+    assert calls == [20, 19, 17]
+    assert waits == [1, 2]
+
+
+def test_catalog_does_not_retry_permanent_http_tls_or_content_errors():
+    import hashlib
+    import pytest
+    import ssl
+    from urllib.error import HTTPError, URLError
+    from tools.free_live_verify import read_public_catalog, PUBLIC_METADATA_LIMIT
+    cases = [(HTTPError('https://example.test/', status, 'permanent', {}, None), None)
+             for status in (400, 401, 403, 404, 501, 505)]
+    cases += [(URLError(ssl.SSLCertVerificationError('certificate rejected')), None),
+              (b'not json', hashlib.sha256(b'not json').hexdigest()),
+              (b'{"changed":true}', None), (b'x' * (PUBLIC_METADATA_LIMIT + 1), None)]
+    for outcome, digest in cases:
+        path, opener, elapsed, calls, waits, sleep = catalog_reader_fixture([outcome])
+        if digest:
+            path = '/native/data-' + digest + '.json'
+        with pytest.raises((HTTPError, URLError, ValueError)):
+            read_public_catalog(path, opener, clock=lambda:elapsed[0], sleep=sleep)
+        assert calls == [20] and waits == []
+
+
+def test_catalog_deadline_includes_open_body_and_retry_sleep():
+    import io
+    import pytest
+    from types import SimpleNamespace
+    from urllib.error import HTTPError
+    from tools.free_live_verify import read_public_catalog
+    path, _, elapsed, calls, waits, sleep = catalog_reader_fixture([])
+    socket_budgets = []
+    class Body(io.BytesIO):
+        fp = SimpleNamespace(raw=SimpleNamespace(_sock=SimpleNamespace(settimeout=socket_budgets.append)))
+        def read1(self, size):
+            elapsed[0] += 1
+            raise TimeoutError('body stalled')
+    def open_url(request, timeout):
+        calls.append(timeout)
+        elapsed[0] += 1
+        if len(calls) == 1:
+            raise HTTPError(request.full_url, 503, 'temporary', {}, None)
+        return Body(b'')
+    with pytest.raises(TimeoutError, match='deadline exhausted'):
+        read_public_catalog(path, SimpleNamespace(open=open_url), timeout=4,
+                            clock=lambda:elapsed[0], sleep=sleep)
+    assert calls == [4, 2]
+    assert socket_budgets == [1]
+    assert waits == [1]
+    assert elapsed[0] == 4
+
+
+def test_catalog_timeout_budget_cannot_be_extended_or_disabled():
+    import pytest
+    from tools.free_live_verify import read_public_catalog
+    path, opener, *_ = catalog_reader_fixture([])
+    for timeout in (True, 0, -1, 21, float('inf'), float('nan')):
+        with pytest.raises(ValueError):
+            read_public_catalog(path, opener, timeout=timeout)
+
+
+def test_catalog_retry_preserves_missing_game_failure(monkeypatch, capsys):
+    from types import SimpleNamespace
+    from urllib.error import HTTPError
+    import pytest
+    verifier = mock_published_site(monkeypatch, {'nfl':[scheduled('nfl')], 'nhl':[]})
+    original_open = verifier.build_opener().open
+    calls = []
+    def open_url(request, timeout):
+        if '/native/' in request.full_url:
+            calls.append(request.full_url)
+            if len(calls) == 1:
+                raise HTTPError(request.full_url, 503, 'temporary', {}, None)
+        return original_open(request, timeout)
+    monkeypatch.setattr(verifier, 'build_opener', lambda *args:SimpleNamespace(open=open_url))
+    monkeypatch.setattr(verifier.time, 'sleep', lambda seconds:None)
+    with pytest.raises(RuntimeError, match='missing price captures'):
+        verifier.verify('expected')
+    output = capsys.readouterr().out
+    assert 'FREE_LIVE_CATALOG_RETRY' in output
+    assert 'FREE_LIVE_PUBLICATION' in output
+    assert '"version_verified": true' in output
+
+
+def test_catalog_reader_uses_real_urllib_response_after_503(monkeypatch):
+    import hashlib
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from urllib.request import build_opener
+    from tools import free_live_verify as verifier
+    raw = b'{"games":{}}'
+    path = '/native/data-' + hashlib.sha256(raw).hexdigest() + '.json'
+    requests = []
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            requests.append(self.path)
+            body = b'' if len(requests) == 1 else raw
+            self.send_response(503 if len(requests) == 1 else 200)
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        def log_message(self, *args):
+            pass
+    server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setattr(verifier, 'fixed_url', lambda value:f'http://127.0.0.1:{server.server_port}{value}')
+    try:
+        assert verifier.read_public_catalog(path, build_opener(), sleep=lambda seconds:None) == {'games':{}}
+        assert requests == [path, path]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)

@@ -1,16 +1,85 @@
 """Bounded GET-only verification of the exact freshly deployed public version."""
 import hashlib
+from http.client import IncompleteRead, RemoteDisconnected
 import json
 import os
 from pathlib import Path
+import socket
 import time
 from datetime import datetime, timedelta, timezone
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, build_opener
 from tools.check_public_pages import fixed_url, Redirects
 
 VERSION_WAIT_SECONDS = 600
 VERSION_POLL_SECONDS = 15
+PUBLIC_METADATA_LIMIT = 2 * 1024 * 1024
+CATALOG_READ_ATTEMPTS = 3
+
+
+def transient_read_error(error):
+    """Retry temporary transport failures, never authentication or TLS failures."""
+    if isinstance(error, HTTPError):
+        return error.code in {408, 429, 500, 502, 503, 504}
+    reason = error.reason if isinstance(error, URLError) else error
+    return (isinstance(reason, (TimeoutError, ConnectionError, IncompleteRead, RemoteDisconnected))
+            or isinstance(reason, socket.gaierror) and reason.errno == socket.EAI_AGAIN)
+
+
+def read_public_catalog(path, opener, *, timeout=20, clock=None, sleep=None):
+    """Read a catalog within one budget, including retries, opens and body reads."""
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0 < timeout <= 20:
+        raise ValueError('Public catalog timeout must be at most 20 seconds')
+    clock, sleep = clock or time.monotonic, sleep or time.sleep
+    deadline = clock() + timeout
+
+    def remaining():
+        seconds = deadline - clock()
+        if seconds <= 0:
+            raise TimeoutError('Public catalog read deadline exhausted')
+        return seconds
+
+    for attempt in range(1, CATALOG_READ_ATTEMPTS + 1):
+        try:
+            with opener.open(Request(fixed_url(path), headers={'Cache-Control': 'no-cache'}),
+                             timeout=remaining()) as response:
+                # urllib returns HTTPResponse with BufferedReader -> SocketIO.
+                # Refresh the socket budget after open and before each single read.
+                sock = getattr(getattr(getattr(response, 'fp', None), 'raw', None), '_sock', None)
+                chunks, size = [], 0
+                while True:
+                    seconds = remaining()
+                    if sock is not None:
+                        sock.settimeout(seconds)
+                    chunk = response.read1(min(64 * 1024, PUBLIC_METADATA_LIMIT + 1 - size))
+                    remaining()
+                    if not chunk:
+                        if getattr(response, 'length', None):
+                            raise IncompleteRead(b'', response.length)
+                        break
+                    chunks.append(chunk)
+                    size += len(chunk)
+                    if size > PUBLIC_METADATA_LIMIT:
+                        raise ValueError('Oversized public metadata')
+                    if getattr(response, 'length', None) == 0:
+                        break
+                raw = b''.join(chunks)
+        except (URLError, OSError, IncompleteRead, RemoteDisconnected) as error:
+            if not transient_read_error(error) or attempt == CATALOG_READ_ATTEMPTS:
+                raise
+            if isinstance(error, HTTPError):
+                error.close()
+            delay = min(attempt, remaining())
+            print('FREE_LIVE_CATALOG_RETRY ' + json.dumps(
+                {'attempt': attempt, 'error_type': type(error).__name__,
+                 'http_status': error.code if isinstance(error, HTTPError) else None,
+                 'wait_seconds': delay}), flush=True)
+            sleep(delay)
+            continue
+        # Content and identity failures are permanent and must not be retried.
+        if hashlib.sha256(raw).hexdigest() not in path:
+            raise ValueError('Public data hash mismatch')
+        return json.loads(raw)
 
 
 def write_version_result(result, report_path=None, output_path=None):
@@ -189,7 +258,7 @@ def verify(expected, *, report_path=None, output_path=None, version_timeout=VERS
         return json.loads(raw)
     value, version = wait_for_publication(read, expected, report_path=report_path,
                                            output_path=output_path, timeout=version_timeout)
-    catalogs = {sport: read(path) for sport, path in value['sports'].items()}
+    catalogs = {sport: read_public_catalog(path, opener) for sport, path in value['sports'].items()}
     freshness = {sport: catalog['captured_through'] for sport, catalog in catalogs.items()}
     if set(freshness) != {'mlb', 'nfl', 'nhl'}:
         raise ValueError('Missing sport catalog')
