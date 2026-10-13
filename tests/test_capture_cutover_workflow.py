@@ -11,6 +11,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = 'c0f940ca1199a81306dfa87249912c6cca9e8991'
+PUBLICATION_SOURCE = '62bd250932f1111ce2a0c862e6017318deb5c80e'
 
 
 def workflow(name):
@@ -204,7 +205,7 @@ class CaptureCutoverWorkflowTests(unittest.TestCase):
     def test_publication_tracks_owner_completion_and_preserves_freshness_verification(self):
         publisher = workflow('free-ticket-site')
         self.assertIn('workflows: [Collect ticket prices]', publisher)
-        self.assertIn('FREE_SOURCE_REF: ' + SOURCE, publisher)
+        self.assertIn('FREE_SOURCE_REF: ' + PUBLICATION_SOURCE, publisher)
         ready = job(publisher, 'ready')
         decision = step(ready, 'Publish after a canonical capture or real delivery attempt')
         self.assertIn('OWNER_RUN_ID: ${{ github.event.workflow_run.id || inputs.owner_run_id }}', decision)
