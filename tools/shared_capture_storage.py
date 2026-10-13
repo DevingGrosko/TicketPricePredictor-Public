@@ -3,13 +3,15 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+from http.client import IncompleteRead
 import json
 import os
 from pathlib import Path
 import re
+import time
 from urllib.error import HTTPError
 
-from tools.single_capture_owner import OWNER, REPO, api, check_scope, utc_time
+from tools.single_capture_owner import API, OWNER, REPO, check_scope, utc_time
 
 KEY = re.compile(r'^shared-capture-v1-(nfl|nhl)-(capture|tidb)-(\d+)-(\d+)$')
 MIGRATION_KEY = re.compile(r'^ticketsignal-free-v1-state-(nfl|nhl)-shared-(\d+)-(\d+)$')
@@ -25,6 +27,10 @@ PUBLISHER_RESERVE = 128 * 1024**2
 ARCHIVE_MARGIN = 1024**2
 PEER_UPLOAD_RESERVE = QUEUE_LIMIT + ARCHIVE_MARGIN
 PROVENANCE_RUN_LIMIT = 40
+STORAGE_RETRY_STATUSES = frozenset((408, 500, 502, 503, 504))
+STORAGE_ATTEMPTS = 3
+STORAGE_REQUEST_SECONDS = 20
+STORAGE_RESPONSE_LIMIT = 2 * 1024**2
 
 
 def queue_budget(directory):
@@ -189,17 +195,81 @@ def _inventory(path, key):
     raise RuntimeError('Storage inventory exceeds bounded pagination; no destructive cleanup')
 
 
-def _delete(path):
+def _storage_request(path, method):
+    """Retry only scoped idempotent storage requests within one total budget."""
     from urllib.request import Request, urlopen
-    from tools.single_capture_owner import API
+    check_scope()
+    allowed = (method == 'DELETE' and re.fullmatch(r'/actions/(?:artifacts|caches)/[1-9][0-9]*', path)
+               or method == 'GET' and re.fullmatch(
+                   r'/actions/(?:(?:artifacts|caches)\?per_page=100&page=[1-9][0-9]*'
+                   r'|runs/[1-9][0-9]*(?:/attempts/[1-9][0-9]*/jobs\?per_page=100)?)', path))
+    if not allowed:
+        raise ValueError('Storage request requires one scoped inventory, provenance, or removable ID')
     headers = {'Authorization':'Bearer ' + os.environ['GH_TOKEN'], 'Accept':'application/vnd.github+json',
                'X-GitHub-Api-Version':'2022-11-28'}
-    try:
-        with urlopen(Request(API + path, method='DELETE', headers=headers), timeout=20):
-            pass
-    except HTTPError as exc:
-        if exc.code != 404:
-            raise
+    deadline = time.monotonic() + STORAGE_REQUEST_SECONDS
+
+    def remaining():
+        seconds = deadline - time.monotonic()
+        if seconds <= 0:
+            raise TimeoutError('Storage request retry budget exhausted')
+        return seconds
+
+    for attempt in range(1, STORAGE_ATTEMPTS + 1):
+        try:
+            with urlopen(Request(API + path, method=method, headers=headers), timeout=remaining()) as response:
+                if response.status != (204 if method == 'DELETE' else 200):
+                    raise RuntimeError('Storage request was not acknowledged')
+                if method == 'DELETE':
+                    return
+                # urllib HTTPResponse uses BufferedReader -> SocketIO. Refresh
+                # its timeout before each bounded read so the body shares the
+                # same budget as opening, retries, and backoff.
+                sock = getattr(getattr(getattr(response, 'fp', None), 'raw', None), '_sock', None)
+                chunks, size = [], 0
+                while True:
+                    seconds = remaining()
+                    if sock is not None:
+                        sock.settimeout(seconds)
+                    chunk = response.read1(min(64 * 1024, STORAGE_RESPONSE_LIMIT + 1 - size))
+                    remaining()
+                    if not chunk:
+                        if getattr(response, 'length', None):
+                            raise IncompleteRead(b'', response.length)
+                        break
+                    chunks.append(chunk)
+                    size += len(chunk)
+                    if size > STORAGE_RESPONSE_LIMIT:
+                        raise ValueError('Oversized storage metadata')
+                    if getattr(response, 'length', None) == 0:
+                        break
+                return json.loads(b''.join(chunks))
+        except HTTPError as exc:
+            exc.close()  # Never read or log response bodies or request credentials.
+            if method == 'DELETE' and exc.code == 404:
+                return
+            delay = 0.5 * 2 ** (attempt - 1)
+            # Rate limits (including 429/Retry-After), auth, and permanent errors
+            # remain strict rather than retrying before the server permits it.
+            if (exc.code not in STORAGE_RETRY_STATUSES or attempt == STORAGE_ATTEMPTS
+                    or exc.headers is not None and exc.headers.get('Retry-After') is not None
+                    or deadline - time.monotonic() <= delay):
+                raise
+            time.sleep(delay)
+
+
+def api(path):
+    """Storage-only GET wrapper; owner dispatch POST behavior is untouched."""
+    return _storage_request(path, 'GET')
+
+
+def _delete(path):
+    """Delete one already-proven candidate, retrying only that exact scoped ID.
+
+    Both callers validate removable IDs first. A 404 means an uncertain DELETE
+    or another normal cleanup already removed it; selection is never broadened.
+    """
+    return _storage_request(path, 'DELETE')
 
 
 def prune_transport_artifacts(*, rows=None, caches=None, runs_for=None):
