@@ -24,6 +24,20 @@ NOW = datetime(2026, 10, 8, 5, tzinfo=timezone.utc)
 
 
 class SharedCapturePolicyTests(unittest.TestCase):
+    def test_progress_overlay_actions_exclude_page_text_unknown_controls_and_extra_rows(self):
+        output = StringIO()
+        with redirect_stdout(output):
+            capture_progress('nhl', '2026020090', 'stored', {}, 1, diagnostics={
+                'phase': 'performer-overlay-controls', 'performer_overlay_actions': [
+                    {'action': 'reject-optional-cookies', 'outcome': 'clicked', 'private': 'private'},
+                    {'action': 'close-promotion', 'outcome': 'clicked'},
+                    {'action': 'accept-all', 'outcome': 'private'}]})
+        row = json.loads(output.getvalue().split(' ', 1)[1])
+        self.assertEqual(row['diagnostics'], {'phase': 'performer-overlay-controls', 'performer_overlay_actions': [
+            {'action': 'reject-optional-cookies', 'outcome': 'clicked'},
+            {'action': 'close-promotion', 'outcome': 'clicked'}]})
+        self.assertNotIn('private', output.getvalue())
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name); self.mirror = MirrorQueue(self.root/'mirror', 'nfl')

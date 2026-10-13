@@ -26,7 +26,7 @@ PHASE_RESERVE_SECONDS = 180
 def capture_progress(sport, schedule_id, status, report, elapsed, *, category=None, diagnostics=None, source_id=None):
     """Emit a bounded operational record; never serialize page or exception text."""
     phases = {'performer-navigation', 'performer-link-scan', 'event-link-ready', 'performer-ready-wait',
-              'event-link-click', 'event-popup', 'event-domcontentloaded', 'event-reload',
+              'performer-overlay-controls', 'event-link-click', 'event-popup', 'event-domcontentloaded', 'event-reload',
               'inventory-wait', 'inventory-body', 'event-identity', 'complete'}
     reasons = {'pointer-intercepted', 'element-not-stable', 'outside-viewport', 'element-not-visible',
                'element-not-enabled', 'element-detached', 'navigation-wait', 'unclassified'}
@@ -78,6 +78,9 @@ def capture_progress(sport, schedule_id, status, report, elapsed, *, category=No
     if isinstance(diagnostics.get('blocker_element'), dict):
         from vivid_webkit import safe_blocker_element
         clean['blocker_element'] = safe_blocker_element(diagnostics['blocker_element'])
+    if 'performer_overlay_actions' in diagnostics:
+        from vivid_webkit import safe_overlay_actions
+        clean['performer_overlay_actions'] = safe_overlay_actions(diagnostics['performer_overlay_actions'])
     if diagnostics.get('blocker_diagnostic_status') in ('captured', 'unavailable', 'timeout', 'budget-exhausted', 'metadata-only'):
         clean['blocker_diagnostic_status'] = diagnostics['blocker_diagnostic_status']
     if clean:

@@ -27,6 +27,20 @@ DENIALS = {401, 403, 429}
 _blocked_category = None
 SAFE_QUERY = {"productionId", "includeIpAddress", "currency", "localizeCurrency", "priceGroupId",
               "quantity", "recommended", "sf", "offset", "page", "sort", "scarcity"}
+CONSENT_CONTAINER = '#truste-consent-track'
+CONSENT_REJECT_LABEL = 'Reject Non-Essential Cookies'
+PROMO_CLOSE_SELECTOR = '.ab-in-app-message button.ab-close-button[aria-label="Close Message"]'
+
+
+def safe_overlay_actions(value):
+    """Keep only the two observed public controls and fixed native-click outcomes."""
+    if not isinstance(value, list):
+        return []
+    return [{key: row[key] for key in ('action', 'outcome')} for row in value[:2]
+            if isinstance(row, dict) and row.get('action') in ('reject-optional-cookies', 'close-promotion')
+            and row.get('outcome') in ('clicked', 'timeout')]
+
+
 PUBLIC_PAGE_SCRIPT = """() => {
  const text = document.body?.innerText || '';
  let event = null;
@@ -403,6 +417,7 @@ class WebKitInventorySession:
         deadline = capture_started + self.timeout
         retain_for_recovery = False
         performer_page = [None]
+        overlay_attempted = set()
         phase_started = [capture_started]
         diagnostics["phase_times_ms"] = {}
 
@@ -539,11 +554,40 @@ class WebKitInventorySession:
                 if owned and diagnostics['blocker_diagnostic_status'] != 'captured':
                     screenshot.unlink(missing_ok=True)
 
+        def dismiss_known_overlays(page):
+            # These controls were observed covering production event links. Use
+            # the site's normal rejection/dismissal actions, never alter its DOM.
+            controls = (
+                ('reject-optional-cookies', page.locator(CONSENT_CONTAINER).get_by_text(CONSENT_REJECT_LABEL, exact=True)),
+                ('close-promotion', page.locator(PROMO_CLOSE_SELECTOR)),
+            )
+            for action, matches in controls:
+                if action in overlay_attempted or matches.count() != 1:
+                    continue
+                control = matches.nth(0)
+                if not control.is_visible():
+                    continue
+                check(page)
+                phase('performer-overlay-controls')
+                overlay_attempted.add(action)
+                result = {'action': action, 'outcome': 'timeout'}
+                diagnostics.setdefault('performer_overlay_actions', []).append(result)
+                try:
+                    control.click(timeout=bounded_timeout(3000))
+                    result['outcome'] = 'clicked'
+                except self.timeout_error:
+                    # The click may already have been dispatched. Do not repeat
+                    # it or choose another consent option when its outcome is unknown.
+                    check(page)
+                    return
+                check(page)
+
         def ready_link(page, link):
             # A trial scrolls and waits for ordinary actionability without clicking.
             # Keep this outside expect_popup so layout readiness cannot consume the
             # popup's deadline. Never repeat a real click whose outcome is unknown.
             for attempt in (1, 2):
+                dismiss_known_overlays(page)
                 phase("event-link-ready")
                 diagnostics["event_link_trial_attempts"] = attempt
                 check(page)
