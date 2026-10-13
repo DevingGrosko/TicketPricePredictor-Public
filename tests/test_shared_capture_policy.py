@@ -38,6 +38,16 @@ class SharedCapturePolicyTests(unittest.TestCase):
             {'action': 'close-promotion', 'outcome': 'clicked'}]})
         self.assertNotIn('private', output.getvalue())
 
+    def test_progress_reports_only_native_iframe_escape_outcome(self):
+        output = StringIO()
+        with redirect_stdout(output):
+            capture_progress('nfl', '401872997', 'failed', {}, 1, diagnostics={
+                'performer_overlay_actions': [{'action': 'dismiss-html-promotion',
+                    'outcome': 'escape-sent', 'frame_url': 'https://private/?token=secret'}]})
+        self.assertEqual(json.loads(output.getvalue().split(' ', 1)[1])['diagnostics'], {
+            'performer_overlay_actions': [{'action': 'dismiss-html-promotion', 'outcome': 'escape-sent'}]})
+        self.assertNotIn('private', output.getvalue())
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name); self.mirror = MirrorQueue(self.root/'mirror', 'nfl')

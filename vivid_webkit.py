@@ -30,15 +30,23 @@ SAFE_QUERY = {"productionId", "includeIpAddress", "currency", "localizeCurrency"
 CONSENT_CONTAINER = '#truste-consent-track'
 CONSENT_REJECT_LABEL = 'Reject Non-Essential Cookies'
 PROMO_CLOSE_SELECTOR = '.ab-in-app-message button.ab-close-button[aria-label="Close Message"]'
+PROMO_HTML_IFRAME_SELECTOR = '.ab-iam-root iframe.ab-in-app-message.ab-html-message.ab-modal-interactions'
 
 
 def safe_overlay_actions(value):
-    """Keep only the two observed public controls and fixed native-click outcomes."""
+    """Keep only observed public controls and fixed native-action outcomes."""
     if not isinstance(value, list):
         return []
-    return [{key: row[key] for key in ('action', 'outcome')} for row in value[:2]
-            if isinstance(row, dict) and row.get('action') in ('reject-optional-cookies', 'close-promotion')
-            and row.get('outcome') in ('clicked', 'timeout')]
+    result = []
+    for row in value[:3]:
+        if not isinstance(row, dict):
+            continue
+        action, outcome = row.get('action'), row.get('outcome')
+        if ((action in ('reject-optional-cookies', 'close-promotion') and outcome in ('clicked', 'timeout'))
+                or (action == 'dismiss-html-promotion' and outcome in ('escape-sent', 'timeout'))):
+            if not any(previous['action'] == action for previous in result):
+                result.append({'action': action, 'outcome': outcome})
+    return result
 
 
 PUBLIC_PAGE_SCRIPT = """() => {
@@ -560,6 +568,7 @@ class WebKitInventorySession:
             controls = (
                 ('reject-optional-cookies', page.locator(CONSENT_CONTAINER).get_by_text(CONSENT_REJECT_LABEL, exact=True)),
                 ('close-promotion', page.locator(PROMO_CLOSE_SELECTOR)),
+                ('dismiss-html-promotion', page.locator(PROMO_HTML_IFRAME_SELECTOR)),
             )
             for action, matches in controls:
                 if action in overlay_attempted or matches.count() != 1:
@@ -573,11 +582,19 @@ class WebKitInventorySession:
                 result = {'action': action, 'outcome': 'timeout'}
                 diagnostics.setdefault('performer_overlay_actions', []).append(result)
                 try:
-                    control.click(timeout=bounded_timeout(3000))
-                    result['outcome'] = 'clicked'
+                    if action == 'dismiss-html-promotion':
+                        # Braze's observed HTML-message iframe supports native
+                        # Escape unless its explicit-dismissal setting disables
+                        # it. Let the SDK decide; never invoke its hidden bridge.
+                        page.frame_locator(PROMO_HTML_IFRAME_SELECTOR).locator('body').press(
+                            'Escape', timeout=bounded_timeout(3000))
+                        result['outcome'] = 'escape-sent'
+                    else:
+                        control.click(timeout=bounded_timeout(3000))
+                        result['outcome'] = 'clicked'
                 except self.timeout_error:
-                    # The click may already have been dispatched. Do not repeat
-                    # it or choose another consent option when its outcome is unknown.
+                    # A native action may already have been dispatched. Do not
+                    # repeat it or choose another consent option on a timeout.
                     check(page)
                     return
                 check(page)

@@ -48,6 +48,17 @@ class CanaryTests(unittest.TestCase):
                       [{'action': 'close-promotion', 'outcome': 'private'}]):
             self.assertEqual(safe_diagnostics({'performer_overlay_actions': value})['performer_overlay_actions'], [])
 
+    def test_html_escape_diagnostic_is_bounded_and_does_not_claim_dismissal(self):
+        actions = [{'action': 'reject-optional-cookies', 'outcome': 'clicked'},
+                   {'action': 'close-promotion', 'outcome': 'clicked'},
+                   {'action': 'dismiss-html-promotion', 'outcome': 'escape-sent', 'private': 'private'}]
+        clean = safe_diagnostics({'performer_overlay_actions': actions + [{'action': 'accept-all', 'outcome': 'clicked'}]})
+        self.assertEqual(clean['performer_overlay_actions'], actions[:2] + [
+            {'action': 'dismiss-html-promotion', 'outcome': 'escape-sent'}])
+        self.assertNotIn('private', json.dumps(clean))
+        self.assertEqual(safe_diagnostics({'performer_overlay_actions': [
+            {'action': 'dismiss-html-promotion', 'outcome': 'clicked'}]})['performer_overlay_actions'], [])
+
     def test_actionability_diagnostics_keep_only_bounded_public_values(self):
         clean=safe_diagnostics({
             'phase':'event-link-ready','timeout_phase':'performer-ready-wait',

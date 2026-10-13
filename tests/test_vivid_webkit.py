@@ -13,7 +13,7 @@ from collector import VividBrowser
 from nfl_collector import VividNFLBrowser
 from vivid_inventory import CurrentInventoryRecovery, VividCaptureError
 from vivid_performer_routes import configure_schedule_navigation
-from vivid_webkit import BLOCKER_ELEMENT_SCRIPT, CONSENT_CONTAINER, CONSENT_REJECT_LABEL, PROMO_CLOSE_SELECTOR, LINK_ACTIONABILITY_SCRIPT, PUBLIC_PAGE_SCRIPT, BlockerScreenshotBudget, PublicDOMDriver, WebKitInventorySession, click_timeout_reason, public_inventory, safe_blocker_element, verified_event_date
+from vivid_webkit import BLOCKER_ELEMENT_SCRIPT, CONSENT_CONTAINER, CONSENT_REJECT_LABEL, PROMO_CLOSE_SELECTOR, PROMO_HTML_IFRAME_SELECTOR, LINK_ACTIONABILITY_SCRIPT, PUBLIC_PAGE_SCRIPT, BlockerScreenshotBudget, PublicDOMDriver, WebKitInventorySession, click_timeout_reason, public_inventory, safe_blocker_element, verified_event_date
 
 AT = datetime(2026, 10, 11, 17, tzinfo=timezone.utc)
 URL = 'https://www.vividseats.com/old-slug-3-5-2027/production/123'
@@ -112,6 +112,14 @@ class OverlayControls:
         assert index == 0
         return self
     def is_visible(self): return self.action not in self.page.context.browser.hidden_controls
+    def locator(self, selector):
+        assert self.action == 'dismiss-html-promotion' and selector == 'body'
+        return self
+    def press(self, key, **options):
+        assert self.action == 'dismiss-html-promotion' and key == 'Escape'
+        self.click(**options)
+        if self.page.context.browser.html_dismissal_disabled:
+            self.page.context.browser.overlays.add(self.action)
     def click(self, **options):
         browser = self.page.context.browser
         assert set(options) == {'timeout'}  # No force, JS click, or navigation bypass.
@@ -157,8 +165,12 @@ class Page:
     def locator(self, _selector):
         if _selector == CONSENT_CONTAINER: return OverlayControls(self, 'reject-optional-cookies')
         if _selector == PROMO_CLOSE_SELECTOR: return OverlayControls(self, 'close-promotion')
+        if _selector == PROMO_HTML_IFRAME_SELECTOR: return OverlayControls(self, 'dismiss-html-promotion')
         assert _selector.startswith("a[href*='/production/")
         return SimpleNamespace(count=lambda: 1, nth=lambda _index: Link(self))
+    def frame_locator(self, selector):
+        assert selector == PROMO_HTML_IFRAME_SELECTOR
+        return OverlayControls(self, 'dismiss-html-promotion')
     def expect_popup(self, **_options):
         context = self.context
         class Popup:
@@ -260,6 +272,7 @@ class Browser:
         self.hidden_controls = options.get('hidden_controls', set())
         self.control_timeout = options.get('control_timeout')
         self.denial_after_control = options.get('denial_after_control', False)
+        self.html_dismissal_disabled = options.get('html_dismissal_disabled', False)
         self.actions, self.control_clicks = [], []
         self.context = Context(self, clock)
     def new_context(self): return self.context
@@ -302,6 +315,45 @@ class WebKitTests(unittest.TestCase):
             {'action': 'reject-optional-cookies', 'outcome': 'clicked'},
             {'action': 'close-promotion', 'outcome': 'clicked'}])
         self.assertEqual(browser.context.body_reads, ['123']); adapter.close()
+
+    def test_observed_html_promotion_uses_one_native_escape_after_cookie_rejection(self):
+        browser = Browser(self.clock, overlays=['reject-optional-cookies', 'dismiss-html-promotion'])
+        adapter = session(self.clock, [browser]); adapter.capture(URL)
+        self.assertEqual(browser.actions, ['reject-optional-cookies', 'dismiss-html-promotion', 'event-trial', 'event-click'])
+        self.assertEqual(adapter.owner.capture_diagnostics['performer_overlay_actions'], [
+            {'action': 'reject-optional-cookies', 'outcome': 'clicked'},
+            {'action': 'dismiss-html-promotion', 'outcome': 'escape-sent'}])
+        adapter.close()
+
+    def test_explicit_html_dismissal_disabled_still_fails_without_second_escape(self):
+        browser = Browser(self.clock, overlays=['dismiss-html-promotion'], html_dismissal_disabled=True)
+        adapter = session(self.clock, [browser]); adapter.timeout = 45
+        with self.assertRaises(VividCaptureError): adapter.capture(URL)
+        self.assertEqual(browser.actions, ['dismiss-html-promotion', 'event-trial', 'event-trial'])
+        self.assertEqual(browser.context.clicks, 0); self.assertEqual(browser.context.body_reads, [])
+        self.assertTrue(browser.closed); adapter.close()
+
+    def test_hidden_or_ambiguous_html_frames_never_receive_escape(self):
+        for options in ({'hidden_controls': {'dismiss-html-promotion'}},
+                        {'control_counts': {'dismiss-html-promotion': 2}}):
+            with self.subTest(options=options):
+                browser = Browser(self.clock, overlays=['dismiss-html-promotion'], **options)
+                adapter = session(self.clock, [browser]); adapter.timeout = 45
+                with self.assertRaises(VividCaptureError): adapter.capture(URL)
+                self.assertEqual(browser.control_clicks, []); self.assertEqual(browser.context.clicks, 0)
+                adapter.close()
+
+    def test_html_escape_timeout_is_clipped_to_capture_deadline_and_not_repeated(self):
+        browser = Browser(self.clock, overlays=['dismiss-html-promotion'],
+                          control_timeout='dismiss-html-promotion', performer_delay_ms=7500)
+        adapter = session(self.clock, [browser])
+        with self.assertRaises(VividCaptureError): adapter.capture(URL)
+        self.assertEqual(browser.control_clicks, [('dismiss-html-promotion', {'timeout': 500})])
+        self.assertEqual(adapter.owner.capture_diagnostics['performer_overlay_actions'], [
+            {'action': 'dismiss-html-promotion', 'outcome': 'timeout'}])
+        self.assertEqual(browser.context.trials, 0); self.assertEqual(browser.context.clicks, 0)
+        self.assertEqual(adapter.owner.capture_diagnostics['capture_elapsed_ms'], 8000)
+        self.assertTrue(browser.closed); adapter.close()
 
     def test_cookie_banner_appearing_after_first_trial_is_rejected_before_second(self):
         browser = Browser(self.clock, trial_failures=1, late_overlays=['reject-optional-cookies'])
