@@ -9,6 +9,7 @@ import json
 import os
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 import vivid_webkit
 
@@ -20,7 +21,7 @@ INVENTORY = 'https://www.vividseats.com/hermes/api/v1/listings?productionId=123'
 AT = datetime(2026, 11, 1, 18, tzinfo=timezone.utc)
 
 
-def performer_fixture(*, overlays, iframe_kind=None, explicit_dismissal=False):
+def performer_fixture(*, overlays, iframe_kind=None, explicit_dismissal=False, late_overlay=False):
     promotion = '''
       <div class="ab-iam-root"><div class="ab-in-app-message" role="dialog">
         <p>Sign up for offers</p>
@@ -57,10 +58,12 @@ def performer_fixture(*, overlays, iframe_kind=None, explicit_dismissal=False):
                padding: 0 !important; border: 0; width: 100%; height: 100%; }
       button { padding: 15px; }
       .ab-pause-scrolling { overflow: hidden; }
-    </style></head><body>''' + controls + f'''
+    </style></head><body>''' + ('' if late_overlay else controls) + f'''
       <a id="ordinary-event" target="_blank" href="{EVENT}">Open fixture game</a>
       <script>
         window.fixtureClicks = [];
+        window.fixtureTrialCompleted = false;
+        window.fixtureLateOverlay = null;
         function record(action, event) {{ fixtureClicks.push({{action, trusted: event.isTrusted}}); }}
         window.fixtureEscape = e => {{
           record('escape', e);
@@ -73,6 +76,7 @@ def performer_fixture(*, overlays, iframe_kind=None, explicit_dismissal=False):
           if (e.key === 'Escape' && document.querySelector('iframe')) fixtureEscape(e);
         }});
         document.querySelector('#ordinary-event').addEventListener('click', e => record('game', e));
+        function installControls() {{
         const reject = document.querySelector('#reject');
         if (reject) {{
           document.body.classList.add('ab-pause-scrolling');
@@ -88,6 +92,16 @@ def performer_fixture(*, overlays, iframe_kind=None, explicit_dismissal=False):
               document.body.classList.remove('ab-pause-scrolling');
             }});
         }}
+        }}
+        installControls();
+        if ({json.dumps(late_overlay)}) {{
+          document.querySelector('#ordinary-event').addEventListener('pointerenter', e => {{
+            if (!fixtureTrialCompleted || fixtureLateOverlay) return;
+            fixtureLateOverlay = {{trusted: e.isTrusted, trialCompleted: fixtureTrialCompleted}};
+            document.body.insertAdjacentHTML('beforeend', {json.dumps(controls)});
+            installControls();
+          }});
+        }}
       </script></body></html>'''
 
 
@@ -101,16 +115,44 @@ def event_fixture():
 
 
 class FixtureSession(vivid_webkit.WebKitInventorySession):
-    def __init__(self, *, overlays, iframe_kind=None, explicit_dismissal=False, capture_budget=30):
+    def __init__(self, *, overlays, iframe_kind=None, explicit_dismissal=False, capture_budget=30,
+                 late_overlay=False):
         self.overlays = overlays
         self.iframe_kind = iframe_kind
         self.explicit_dismissal = explicit_dismissal
         self.capture_budget = capture_budget
+        self.late_overlay = late_overlay
+        self.real_event_click_calls = 0
+        self.successful_event_trials = 0
         self.last_performer_state = None
         self.requests = []
         self.unexpected_requests = []
         super().__init__(SimpleNamespace(), headless=True, timeout=30)
         self.configure_normal_navigation({PID: PERFORMER}, {PID: AT})
+
+    def capture(self, *args, **kwargs):
+        if not self.late_overlay:
+            return super().capture(*args, **kwargs)
+        from playwright.sync_api import Locator
+        real_click = Locator.click
+
+        def track_event_click(locator, *click_args, **click_kwargs):
+            is_event = locator.evaluate("node => node.id === 'ordinary-event'")
+            if is_event and not click_kwargs.get('trial'):
+                self.real_event_click_calls += 1
+            result = real_click(locator, *click_args, **click_kwargs)
+            if is_event and click_kwargs.get('trial'):
+                self.successful_event_trials += 1
+                # WebKit's trial may move the pointer. Re-arm a later trusted
+                # entry, so the page's own handler runs during the actual click.
+                locator.page.mouse.move(0, 0)
+                locator.page.evaluate('window.fixtureTrialCompleted = true')
+            return result
+
+        # Observe the unmodified production capture's native click calls. The
+        # overlay itself appears only on the fixture's trusted pointer event.
+        with patch.object(Locator, 'click', track_event_click):
+            return super().capture(*args, **kwargs)
 
     def new_browser(self):
         browser, context = super().new_browser()
@@ -120,7 +162,8 @@ class FixtureSession(vivid_webkit.WebKitInventorySession):
             self.requests.append(url)
             if url == PERFORMER:
                 route.fulfill(status=200, content_type='text/html', body=performer_fixture(
-                    overlays=self.overlays, iframe_kind=self.iframe_kind, explicit_dismissal=self.explicit_dismissal))
+                    overlays=self.overlays, iframe_kind=self.iframe_kind, explicit_dismissal=self.explicit_dismissal,
+                    late_overlay=self.late_overlay))
             elif url == EVENT:
                 route.fulfill(status=200, content_type='text/html', body=event_fixture())
             elif url == INVENTORY:
@@ -147,7 +190,8 @@ class FixtureSession(vivid_webkit.WebKitInventorySession):
                     self.last_performer_state = page.evaluate('''() => ({
                       clicks: window.fixtureClicks,
                       framePresent: !!document.querySelector('iframe'),
-                      scrollLocked: document.body.classList.contains('ab-pause-scrolling')
+                      scrollLocked: document.body.classList.contains('ab-pause-scrolling'),
+                      lateOverlay: window.fixtureLateOverlay
                     })''')
         super().close_event()
 
@@ -157,8 +201,8 @@ class NativeOverlayFixtureTests(unittest.TestCase):
     def setUp(self):
         vivid_webkit._blocked_category = None
 
-    def check_capture(self, *, overlays, iframe_kind=None):
-        adapter = FixtureSession(overlays=overlays, iframe_kind=iframe_kind)
+    def check_capture(self, *, overlays, iframe_kind=None, late_overlay=False):
+        adapter = FixtureSession(overlays=overlays, iframe_kind=iframe_kind, late_overlay=late_overlay)
         self.addCleanup(adapter.close)
         payload, stamp = adapter.capture(EVENT)
         self.assertEqual(stamp, AT)
@@ -180,6 +224,11 @@ class NativeOverlayFixtureTests(unittest.TestCase):
             [{'action': 'reject-optional-cookies', 'outcome': 'clicked'},
              {'action': 'dismiss-html-promotion', 'outcome': 'escape-sent'} if iframe_kind else
              {'action': 'close-promotion', 'outcome': 'clicked'}] if overlays else [])
+        if late_overlay:
+            self.assertEqual(adapter.successful_event_trials, 1)
+            self.assertEqual(adapter.real_event_click_calls, 1)
+            self.assertEqual(performer.evaluate('window.fixtureLateOverlay'),
+                             {'trusted': True, 'trialCompleted': True})
 
     def test_native_reject_then_promo_close_unblocks_full_capture(self):
         self.check_capture(overlays=True)
@@ -190,9 +239,16 @@ class NativeOverlayFixtureTests(unittest.TestCase):
     def test_native_escape_in_html_promotion_frame_unblocks_full_capture(self):
         self.check_capture(overlays=True, iframe_kind='braze')
 
-    def check_closed_failure(self, *, iframe_kind, explicit_dismissal):
+    def test_late_cookie_and_standard_promotion_after_trial_unblock_one_actual_click(self):
+        self.check_capture(overlays=True, late_overlay=True)
+
+    def test_late_cookie_and_html_promotion_after_trial_unblock_one_actual_click(self):
+        self.check_capture(overlays=True, iframe_kind='braze', late_overlay=True)
+
+    def check_closed_failure(self, *, iframe_kind, explicit_dismissal, late_overlay=False):
         adapter = FixtureSession(overlays=True, iframe_kind=iframe_kind,
-                                 explicit_dismissal=explicit_dismissal, capture_budget=4)
+                                 explicit_dismissal=explicit_dismissal, capture_budget=4,
+                                 late_overlay=late_overlay)
         self.addCleanup(adapter.close)
         with self.assertRaises(vivid_webkit.VividCaptureError) as error:
             adapter.capture(EVENT)
@@ -202,7 +258,8 @@ class NativeOverlayFixtureTests(unittest.TestCase):
         expected = ['reject', 'escape'] if iframe_kind == 'braze' else ['reject']
         self.assertEqual(adapter.last_performer_state, {
             'clicks': [{'action': action, 'trusted': True} for action in expected],
-            'framePresent': True, 'scrollLocked': True})
+            'framePresent': True, 'scrollLocked': True,
+            'lateOverlay': {'trusted': True, 'trialCompleted': True} if late_overlay else None})
         diagnostics = adapter.owner.capture_diagnostics
         self.assertNotIn('visible_event_link_clicked', diagnostics)
         self.assertNotIn('event_opened_native_popup', diagnostics)
@@ -210,12 +267,21 @@ class NativeOverlayFixtureTests(unittest.TestCase):
             [{'action': 'reject-optional-cookies', 'outcome': 'clicked'}] +
             ([{'action': 'dismiss-html-promotion', 'outcome': 'escape-sent'}]
              if iframe_kind == 'braze' else []))
+        if late_overlay:
+            self.assertEqual(adapter.successful_event_trials, 1)
+            self.assertEqual(adapter.real_event_click_calls, 1)
 
     def test_explicit_dismissal_setting_keeps_html_frame_and_fails_closed(self):
         self.check_closed_failure(iframe_kind='braze', explicit_dismissal=True)
 
     def test_unknown_frame_receives_no_escape_and_fails_closed(self):
         self.check_closed_failure(iframe_kind='unknown', explicit_dismissal=False)
+
+    def test_late_explicit_dismissal_frame_fails_closed_without_repeating_actual_click(self):
+        self.check_closed_failure(iframe_kind='braze', explicit_dismissal=True, late_overlay=True)
+
+    def test_late_unknown_frame_receives_no_escape_and_fails_closed(self):
+        self.check_closed_failure(iframe_kind='unknown', explicit_dismissal=False, late_overlay=True)
 
 
 if __name__ == '__main__':

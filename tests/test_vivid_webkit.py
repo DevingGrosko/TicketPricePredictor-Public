@@ -82,6 +82,7 @@ class Link:
         if options.get('trial'):
             browser = self.page.context.browser
             self.page.context.trials += 1
+            self.page.run_handlers(options['timeout'])
             browser.actions.append('event-trial')
             if browser.trial_failures or browser.overlays:
                 browser.trial_failures = max(0, browser.trial_failures - 1)
@@ -92,6 +93,9 @@ class Link:
                     self.page.context.emit(Response(self.page.context, self.page, 403, document=True))
                 raise browser.timeout_error('private-token overlay intercepts pointer events')
             return
+        self.page.context.browser.overlays.update(self.page.context.browser.before_click_overlays)
+        self.page.context.browser.before_click_overlays.clear()
+        self.page.run_handlers(options['timeout'])
         self.page.context.clicks += 1
         self.page.context.browser.actions.append('event-click')
         if self.page.context.browser.fail_phase == 'event-link-click':
@@ -111,6 +115,8 @@ class OverlayControls:
     def nth(self, index):
         assert index == 0
         return self
+    @property
+    def first(self): return self
     def is_visible(self): return self.action not in self.page.context.browser.hidden_controls
     def locator(self, selector):
         assert self.action == 'dismiss-html-promotion' and selector == 'body'
@@ -138,6 +144,8 @@ class Page:
         self.context, self.url, self.event = context, url, event
         self.main_frame = SimpleNamespace(page=self)
         self.reloads = 0
+        self.handlers = []
+        self.handler_running = False
     def goto(self, url, **options):
         self.url = url
         self.context.navigations.append(url)
@@ -171,6 +179,24 @@ class Page:
     def frame_locator(self, selector):
         assert selector == PROMO_HTML_IFRAME_SELECTOR
         return OverlayControls(self, 'dismiss-html-promotion')
+    def add_locator_handler(self, locator, handler, **options):
+        assert options == {'times': 1}  # Keep the default wait for the overlay to disappear.
+        self.handlers.append([locator, handler, options['times']])
+        self.context.browser.handler_registrations.append(locator.action)
+    def run_handlers(self, timeout):
+        if self.handler_running: return
+        started = self.context.clock.monotonic()
+        for row in self.handlers:
+            locator, handler, remaining = row
+            if remaining and locator.count() and locator.is_visible():
+                row[2] -= 1
+                self.handler_running = True
+                try: handler(locator)
+                finally: self.handler_running = False
+                if locator.count() and locator.is_visible():
+                    elapsed = (self.context.clock.monotonic() - started) * 1000
+                    self.context.clock.advance(max(0, timeout - elapsed))
+                    raise self.context.browser.timeout_error('overlay intercepts pointer events')
     def expect_popup(self, **_options):
         context = self.context
         class Popup:
@@ -268,6 +294,8 @@ class Browser:
         self.screenshot_bytes=options.get('screenshot_bytes',b'public viewport')
         self.overlays = set(options.get('overlays', []))
         self.late_overlays = set(options.get('late_overlays', []))
+        self.before_click_overlays = set(options.get('before_click_overlays', []))
+        self.handler_registrations = []
         self.control_counts = options.get('control_counts', {})
         self.hidden_controls = options.get('hidden_controls', set())
         self.control_timeout = options.get('control_timeout')
@@ -329,7 +357,7 @@ class WebKitTests(unittest.TestCase):
         browser = Browser(self.clock, overlays=['dismiss-html-promotion'], html_dismissal_disabled=True)
         adapter = session(self.clock, [browser]); adapter.timeout = 45
         with self.assertRaises(VividCaptureError): adapter.capture(URL)
-        self.assertEqual(browser.actions, ['dismiss-html-promotion', 'event-trial', 'event-trial'])
+        self.assertEqual(browser.actions, ['dismiss-html-promotion', 'event-trial'])
         self.assertEqual(browser.context.clicks, 0); self.assertEqual(browser.context.body_reads, [])
         self.assertTrue(browser.closed); adapter.close()
 
@@ -351,9 +379,42 @@ class WebKitTests(unittest.TestCase):
         self.assertEqual(browser.control_clicks, [('dismiss-html-promotion', {'timeout': 500})])
         self.assertEqual(adapter.owner.capture_diagnostics['performer_overlay_actions'], [
             {'action': 'dismiss-html-promotion', 'outcome': 'timeout'}])
-        self.assertEqual(browser.context.trials, 0); self.assertEqual(browser.context.clicks, 0)
+        self.assertEqual(browser.context.trials, 1); self.assertEqual(browser.context.clicks, 0)
         self.assertEqual(adapter.owner.capture_diagnostics['capture_elapsed_ms'], 8000)
         self.assertTrue(browser.closed); adapter.close()
+
+    def test_handler_dismisses_cookie_and_html_overlay_arriving_during_only_actual_click(self):
+        browser = Browser(self.clock, before_click_overlays=[
+            'reject-optional-cookies', 'dismiss-html-promotion'])
+        adapter = session(self.clock, [browser]); adapter.timeout = 45
+        clean, stamp = adapter.capture(URL)
+        self.assertEqual(stamp, AT); self.assertEqual(len(clean['tickets']), 12)
+        self.assertEqual(browser.context.trials, 1); self.assertEqual(browser.context.clicks, 1)
+        self.assertEqual(browser.actions, ['event-trial', 'reject-optional-cookies',
+                                         'dismiss-html-promotion', 'event-click'])
+        self.assertEqual(browser.handler_registrations, ['reject-optional-cookies',
+                         'close-promotion', 'dismiss-html-promotion'])
+        diagnostic = adapter.owner.capture_diagnostics
+        self.assertEqual(diagnostic['phase'], 'complete')
+        self.assertNotIn('event_link_trial_timeout_reason', diagnostic)
+        self.assertEqual(diagnostic['performer_overlay_actions'], [
+            {'action': 'reject-optional-cookies', 'outcome': 'clicked'},
+            {'action': 'dismiss-html-promotion', 'outcome': 'escape-sent'}])
+        self.assertEqual(browser.context.body_reads, ['123']); adapter.close()
+
+    def test_handler_cannot_extend_click_budget_or_repeat_ambiguous_real_click(self):
+        browser = Browser(self.clock, before_click_overlays=['reject-optional-cookies'],
+                          control_timeout='reject-optional-cookies', performer_delay_ms=7500)
+        adapter = session(self.clock, [browser])
+        with self.assertRaises(VividCaptureError): adapter.capture(URL)
+        self.assertEqual(browser.context.trials, 1); self.assertEqual(browser.context.clicks, 0)
+        self.assertEqual(browser.control_clicks, [('reject-optional-cookies', {'timeout': 500})])
+        diagnostic = adapter.owner.capture_diagnostics
+        self.assertEqual(diagnostic['capture_elapsed_ms'], 8000)
+        self.assertEqual(diagnostic['timeout_phase'], 'event-link-click')
+        self.assertEqual(diagnostic['event_link_click_timeout_reason'], 'pointer-intercepted')
+        self.assertEqual(browser.context.body_reads, []); self.assertTrue(browser.closed)
+        adapter.close()
 
     def test_cookie_banner_appearing_after_first_trial_is_rejected_before_second(self):
         browser = Browser(self.clock, trial_failures=1, late_overlays=['reject-optional-cookies'])
@@ -377,10 +438,10 @@ class WebKitTests(unittest.TestCase):
         browser = Browser(self.clock, overlays=['reject-optional-cookies'], control_timeout='reject-optional-cookies')
         adapter = session(self.clock, [browser]); adapter.timeout = 45
         with self.assertRaises(VividCaptureError): adapter.capture(URL)
-        self.assertEqual(browser.actions, ['reject-optional-cookies', 'event-trial', 'event-trial'])
+        self.assertEqual(browser.actions, ['reject-optional-cookies', 'event-trial'])
         self.assertEqual(adapter.owner.capture_diagnostics['performer_overlay_actions'], [
             {'action': 'reject-optional-cookies', 'outcome': 'timeout'}])
-        self.assertEqual(adapter.owner.capture_diagnostics['capture_elapsed_ms'], 23000)
+        self.assertEqual(adapter.owner.capture_diagnostics['capture_elapsed_ms'], 20000)
         self.assertNotIn('private', json.dumps(adapter.owner.capture_diagnostics)); adapter.close()
 
     def test_native_control_timeout_cannot_extend_remaining_capture_budget(self):
@@ -389,7 +450,7 @@ class WebKitTests(unittest.TestCase):
         adapter = session(self.clock, [browser])
         with self.assertRaises(VividCaptureError): adapter.capture(URL)
         self.assertEqual(browser.control_clicks, [('reject-optional-cookies', {'timeout': 500})])
-        self.assertEqual(browser.context.trials, 0); self.assertEqual(browser.context.clicks, 0)
+        self.assertEqual(browser.context.trials, 1); self.assertEqual(browser.context.clicks, 0)
         self.assertEqual(adapter.owner.capture_diagnostics['capture_elapsed_ms'], 8000)
         self.assertTrue(browser.closed); adapter.close()
 

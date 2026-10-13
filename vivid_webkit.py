@@ -562,15 +562,17 @@ class WebKitInventorySession:
                 if owned and diagnostics['blocker_diagnostic_status'] != 'captured':
                     screenshot.unlink(missing_ok=True)
 
-        def dismiss_known_overlays(page):
-            # These controls were observed covering production event links. Use
-            # the site's normal rejection/dismissal actions, never alter its DOM.
-            controls = (
+        def overlay_controls(page):
+            return (
                 ('reject-optional-cookies', page.locator(CONSENT_CONTAINER).get_by_text(CONSENT_REJECT_LABEL, exact=True)),
                 ('close-promotion', page.locator(PROMO_CLOSE_SELECTOR)),
                 ('dismiss-html-promotion', page.locator(PROMO_HTML_IFRAME_SELECTOR)),
             )
-            for action, matches in controls:
+
+        def dismiss_known_overlays(page):
+            # These controls were observed covering production event links. Use
+            # the site's normal rejection/dismissal actions, never alter its DOM.
+            for action, matches in overlay_controls(page):
                 if action in overlay_attempted or matches.count() != 1:
                     continue
                 control = matches.nth(0)
@@ -599,12 +601,27 @@ class WebKitInventorySession:
                     return
                 check(page)
 
+        def install_overlay_handlers(page):
+            def handle_overlay(_locator):
+                previous = diagnostics.get('phase')
+                try:
+                    dismiss_known_overlays(page)
+                finally:
+                    if previous is not None:
+                        phase(previous)
+            # Native actionability checks invoke these again when an overlay
+            # arrives during a trial or click. Handler time is part of that
+            # action's timeout, and the default wait requires it to disappear.
+            # The helper still requires a unique visible control and never
+            # repeats an action, even if another handler later encounters it.
+            for _action, matches in overlay_controls(page):
+                page.add_locator_handler(matches.first, handle_overlay, times=1)
+
         def ready_link(page, link):
             # A trial scrolls and waits for ordinary actionability without clicking.
             # Keep this outside expect_popup so layout readiness cannot consume the
             # popup's deadline. Never repeat a real click whose outcome is unknown.
             for attempt in (1, 2):
-                dismiss_known_overlays(page)
                 phase("event-link-ready")
                 diagnostics["event_link_trial_attempts"] = attempt
                 check(page)
@@ -637,6 +654,7 @@ class WebKitInventorySession:
             else:
                 page = context.new_page()
                 performer_page[0] = page
+                install_overlay_handlers(page)
                 phase("performer-navigation")
                 # Full load can wait for ancillary resources after the exact
                 # visible event link is usable. Keep its ordinary native click.
