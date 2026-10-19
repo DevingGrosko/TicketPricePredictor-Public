@@ -5,6 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 from nhl_collector import ordered_matchup_from_title
 from tests.test_vivid_webkit import Browser, Clock, payload, session
@@ -73,9 +74,13 @@ class OfficialNHLIdentityTests(unittest.TestCase):
 
     def test_one_hour_difference_crossing_venue_calendar_date_is_rejected(self):
         pid, _, context, metadata, body = capture_fields(FIXTURE['games'][0])
-        expected = datetime(2026, 11, 6, 5, 30, tzinfo=timezone.utc)  # Winnipeg Nov 5, 23:30.
+        venue_zone = ZoneInfo(context['venue_timezone'])
+        # Express the midnight boundary locally, independent of tzdata's UTC offset.
+        expected = datetime(2026, 11, 5, 23, 30, tzinfo=venue_zone).astimezone(timezone.utc)
         context['event_date'] = expected.isoformat()
         metadata['utc_date'] = (expected + timedelta(hours=1)).isoformat()  # Nov 6, 00:30.
+        self.assertNotEqual(expected.astimezone(venue_zone).date(),
+                            (expected + timedelta(hours=1)).astimezone(venue_zone).date())
         with self.assertRaises(VividCaptureError) as error:
             verified_event_date(metadata, body, pid, expected, official_game=context)
         self.assertEqual(error.exception.category, 'event-metadata-time-mismatch')

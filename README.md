@@ -86,13 +86,14 @@ Stock WebKit follows the ordinary visible Vivid team-page link into its event po
 - Each game receives a deterministic phase so 6-hour and 3-hour captures are spread across scheduled runs instead of arriving in one large batch.
 - NFL games 15–30 days out run every 6 hours, games 8–14 days out run every 3 hours, and games in the final 7 days run every 30 minutes.
 - NHL games 15–30 days out run daily, games 8–14 days out run every 12 hours, games 4–7 days out run every 6 hours, and games in the final 72 hours run every 30 minutes.
-- Current due games are attempted before up to 40 older unfinished games per sport, subject to the existing capture time budget. The existing PythonAnywhere and legacy free-store retry passes remain capped at 20 pending payloads each. Missed captures are recovered as new observations with their actual capture time; prices are never backdated.
+- Only games due in the current scheduled slot are scraped. Each game has at most two browser capture attempts across candidate links and reloads, subject to the existing safe retry rules and time budget. Failed, unresolved, or deferred scrapes are reported but are not carried into a later catch-up queue; the game becomes eligible again at its next normal scheduled time. Restored scrape backlogs are ignored and cleared from the active checkpoint.
+- Successfully collected observations remain durable until both destinations acknowledge them. PythonAnywhere and legacy free-store delivery retry passes remain capped at 20 pending payloads each. These retries resend the original prices and timestamps without scraping again; prices are never backdated.
 - NFL matchups are matched to Vivid's NFL feed. A missing feed link is recovered through a targeted Vivid search for the two teams.
 - Feed and search results are candidate links only. The title and kickoff parsed from the individual Vivid event page must match the scheduled matchup before anything is stored.
-- Health reports distinguish current due, already observed, selected recovery, deferred, unresolved, captured, and uploaded games, with per-game resolution details and explicit coverage percentages.
-- If the official schedule cannot be loaded, the shared owner reports degraded coverage and preserves its existing progress for recovery.
+- Health reports distinguish current due, already observed, deferred, unresolved, captured, and uploaded games, with per-game resolution details and explicit coverage percentages. Scrape recovery selection is always zero; missed captures still make the run degraded.
+- If the official schedule cannot be loaded, the shared owner reports degraded coverage and waits for the next scheduled run.
 - NFL validates the provider kickoff against the official schedule. NHL validates the teams, venue and event calendar against the official schedule, whose UTC event time is retained when provider metadata gives only the correct event day.
-- Each sport has its own writer lock and pending queues. Delivery can finish after the browser job without blocking the next half-hour owner.
+- Each sport has its own writer lock and delivery queues. Delivery can finish after the browser job without blocking the next half-hour owner.
 
 Capture work has a 24-minute soft budget and a 25-minute outer process deadline. The workflow verifies that capture processes have stopped before saving a checkpoint. Original pending payloads remain durable until delivery receipts pass validation; queue or artifact limits fail explicitly instead of discarding pending observations. The two reviewed historical same-slot conflicts are preserved separately with their real, different PythonAnywhere receipts and are never represented as matching acknowledgments.
 
