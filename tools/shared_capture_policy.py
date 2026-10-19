@@ -1,4 +1,4 @@
-"""Bounded single-owner recovery and delivery-only migration of public free state."""
+"""Scheduled-only browser capture and durable delivery of collected observations."""
 from __future__ import annotations
 
 from contextlib import ExitStack
@@ -17,7 +17,7 @@ from Flask_App.collection_cadence import half_hour_capture_slot
 from tools.historical_capture_conflicts import ArchivedCaptureConflict, preserve_pending
 
 STATE_LIMIT = 1024**2
-CAPTURE_RECOVERY_LIMIT = 40
+CAPTURE_ATTEMPT_LIMIT = 2
 DELIVERY_RECOVERY_LIMIT = 20
 DEADLINE_SECONDS = 24 * 60
 PHASE_RESERVE_SECONDS = 180
@@ -37,7 +37,7 @@ def capture_progress(sport, schedule_id, status, report, elapsed, *, category=No
         'invalid-inventory-ticket', 'filtered-inventory-only', 'event-metadata-identity-mismatch',
         'event-metadata-time-mismatch', 'event-metadata-timeout', 'event-route-not-configured',
         'reload-event-identity-mismatch', 'event-navigation-identity-mismatch', 'event-link-not-found',
-        'delivery-failed', 'archived-observation-conflict'}
+        'delivery-failed', 'archived-observation-conflict', 'capture-attempt-limit'}
     row = {'sport': sport if sport in ('nfl', 'nhl') else 'unknown',
            'status': status if status in ('started', 'stored', 'duplicate', 'failed', 'unresolved',
                'provider-gap', 'deferred', 'delivery-failed', 'archived-conflict', 'interrupted') else 'failed'}
@@ -93,6 +93,11 @@ class CaptureDeadlineReached(RuntimeError):
     retryable = False
 
 
+class CaptureAttemptLimitReached(RuntimeError):
+    category = 'capture-attempt-limit'
+    retryable = False
+
+
 def read_state(path):
     path = Path(path)
     if not path.exists():
@@ -126,40 +131,6 @@ def checkpoint(path, value, mirror):
 def game_value(game):
     result = asdict(game); result['event_date'] = game.event_date.isoformat()
     return result
-
-
-def game_from(module, sport, row):
-    value = dict(row); value['event_date'] = datetime.fromisoformat(value['event_date'])
-    if value['event_date'].tzinfo is None:
-        raise ValueError('Recovered official game requires an aware event date')
-    return getattr(module, 'Scheduled'+sport.upper()+'Game')(**value)
-
-
-def migrate_progress(state, legacy, sport):
-    """Import identities once; files and original captured payloads stay untouched."""
-    if state.get('legacy_migrated') or legacy is None:
-        return
-    root = Path(legacy)
-    old = read_state(root / ('nfl-backlog.json' if sport == 'nfl' else 'nhl-progress.json'))
-    for identity, entry in old.get('pending', {}).items():
-        state['pending'].setdefault(str(identity), entry)
-    prior = read_state(root / ('nfl-committed.json' if sport == 'nfl' else 'completed-slot.json'))
-    state.setdefault('last_slot', old.get('last_slot') or prior.get('slot'))
-    if old or prior:
-        state['legacy_migrated'] = True
-
-
-def due_since(schedule, slot, previous, select_due):
-    start = slot
-    if previous:
-        previous = half_hour_capture_slot(datetime.fromisoformat(previous))
-        start = min(slot, max(slot - timedelta(hours=23, minutes=30), previous + timedelta(minutes=30)))
-    selected = {}
-    while start <= slot:
-        for game in select_due(schedule, start):
-            selected[str(game.schedule_id)] = game
-        start += timedelta(minutes=30)
-    return list(selected.values())
 
 
 def excluded_nhl(game):
@@ -200,7 +171,7 @@ def replay_pa(module, endpoint, token, pending, *, clock=time.monotonic, budget=
 def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pending,
               *, legacy=None, now=None, clock=time.monotonic, deadline_seconds=DEADLINE_SECONDS,
               blocker_diagnostics=False, stop_after_first_failure=False):
-    """Reuse trusted collection functions; resolve/capture current games before older work."""
+    """Capture only games due now; a failed scrape never becomes later catch-up work."""
     if type(blocker_diagnostics) is not bool or type(stop_after_first_failure) is not bool:
         raise ValueError('Diagnostic options must be boolean')
     if stop_after_first_failure and not blocker_diagnostics:
@@ -215,7 +186,8 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
         duplicates=0, failed=0, replayed=0, pending=0, uploads=[], errors=[], captured_current=0,
         capture_slot=slot.isoformat(), started_at=started.isoformat(), deferred_games=[],
         deadline_seconds=deadline_seconds, deadline_reached=False, unresolved=[], provider_gaps=[], excluded_games=[],
-        capture_failures=[], blocker_diagnostics=blocker_diagnostics, diagnostic_stopped=False)
+        capture_failures=[], blocker_diagnostics=blocker_diagnostics, diagnostic_stopped=False,
+        capture_policy='scheduled-only', capture_attempt_limit=CAPTURE_ATTEMPT_LIMIT)
     def save():
         report['pending'] = len(list(pending.glob('*.json'))) + len(list(pending.glob('*.rejected')))
         report['archived_pythonanywhere_conflicts'] = len(list(pending.glob('*.archived-conflict')))
@@ -224,7 +196,9 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
         health_output.parent.mkdir(parents=True, exist_ok=True)
         health_output.write_text(json.dumps(report, indent=2) + '\n')
         if state_writable:
-            checkpoint(path, state, mirror)
+            # Keep unfinished games in this run's health report, never in a retry
+            # backlog. Original observations and delivery receipts live separately.
+            checkpoint(path, {**state, 'pending': {}}, mirror)
     def room():
         return deadline - clock() > PHASE_RESERVE_SECONDS
     try:
@@ -239,8 +213,10 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
         if restored and (restored.get('version') != 1 or restored.get('sport') != sport
                          or not isinstance(restored.get('pending'), dict)):
             raise ValueError('Recovered progress identifies a different sport')
-        state = restored or state
-        migrate_progress(state, legacy, sport)
+        report['discarded_capture_backlog'] = len(restored.get('pending', {}))
+        # Ignore old browser backlog/last-slot catch-up, including legacy imports.
+        # Delivery replay below still preserves and sends every collected payload.
+        state = {'version': 1, 'sport': sport, 'pending': {}, 'capture_policy': 'scheduled-only'}
         state_writable = True
         save()
         report['replayed'], replay_errors, report['deferred_uploads'] = replay_pa(
@@ -255,7 +231,6 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
             for game in excluded:
                 state['pending'].pop(str(game.schedule_id), None)
             schedule = [game for game in schedule if game not in excluded]
-        official = {str(game.schedule_id): game for game in schedule}
         is_due = getattr(module, sport+'_capture_is_due')
         in_window = getattr(module, sport+'_is_within_capture_window')
         covered = {(row['schedule_id'], row['capture_slot'], datetime.fromisoformat(row['event_date']))
@@ -263,35 +238,21 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
         def observed(game):
             return (str(game.schedule_id), slot.isoformat(), game.event_date) in covered
         raw_due = [game for game in schedule if is_due(game.event_date, slot, game.schedule_id)]
-        for game in due_since(schedule, slot, state.get('last_slot'), module.schedule_games_due):
-            if not observed(game):
-                identity = str(game.schedule_id); old = state['pending'].get(identity, {})
-                state['pending'][identity] = {**old, 'first_due': old.get('first_due', slot.isoformat()),
-                                            'game': game_value(game)}
-        active = []
         report['no_longer_collectible'] = []
-        for identity, entry in list(state['pending'].items()):
-            game = official.get(identity) or game_from(module, sport, entry['game'])
-            if sport == 'nhl' and excluded_nhl(game):
-                report['excluded_games'].append(game_value(game)); del state['pending'][identity]
-            elif not in_window(game.event_date, started):
-                report['no_longer_collectible'].append(identity); del state['pending'][identity]
-            elif observed(game):
-                del state['pending'][identity]
-            else:
-                entry['game'] = game_value(game); active.append(game)
-        current = [game for game in active if is_due(game.event_date, slot, game.schedule_id)]
-        older = [game for game in active if game not in current]
+        current = []
+        for game in raw_due:
+            if not observed(game):
+                if not in_window(game.event_date, started):
+                    report['no_longer_collectible'].append(str(game.schedule_id))
+                    continue
+                current.append(game)
+                state['pending'][str(game.schedule_id)] = {'first_due': slot.isoformat(), 'game': game_value(game)}
         current.sort(key=lambda game: (game.event_date, str(game.schedule_id)))
-        older.sort(key=lambda game: (state['pending'][str(game.schedule_id)].get('last_attempt') or '',
-            state['pending'][str(game.schedule_id)]['first_due'], game.event_date, str(game.schedule_id)))
-        recovery, unselected = older[:CAPTURE_RECOVERY_LIMIT], older[CAPTURE_RECOVERY_LIMIT:]
-        work = current + recovery
-        report.update(scheduled_in_window=raw_schedule_count, scheduled_in_scope=len(schedule), scheduled_due=len(active),
+        work = current
+        report.update(scheduled_in_window=raw_schedule_count, scheduled_in_scope=len(schedule), scheduled_due=len(current),
             scheduled_selected=len(work),
             current_due=len(raw_due), already_observed_current=sum(observed(game) for game in raw_due),
-            current_due_selected=len(current), recovery_selected=len(recovery),
-            deferred_games=[str(game.schedule_id) for game in unselected], schedule_source=source)
+            current_due_selected=len(current), recovery_selected=0, schedule_source=source)
         state['last_slot'] = slot.isoformat(); save()
         feed = []
         if work and room():
@@ -302,6 +263,7 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
                 break
             identity = str(game.schedule_id)
             attempts = []
+            capture_calls = 0
             if not room():
                 report['deadline_reached'] = True
                 report['deferred_games'].extend(str(row.schedule_id) for row in work[index:]); break
@@ -332,15 +294,21 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
                         attempts.append(dict(category=CaptureDeadlineReached.category,
                             error_type='CaptureDeadlineReached', capture_diagnostics={}))
                         raise CaptureDeadlineReached('No further browser starts inside this capture budget')
+                    if capture_calls >= CAPTURE_ATTEMPT_LIMIT:
+                        raise CaptureAttemptLimitReached('No further browser starts for this scheduled game')
                     result = native_init(browser, *args, **kwargs)
                     if blocker_diagnostics and getattr(browser, '_webkit_session', None) is not None:
                         browser._webkit_session.configure_blocker_diagnostics(
                             diagnostic_directory, screenshot_budget=screenshot_budget)
                     return result
                 def traced_capture(browser, *args, **kwargs):
+                    nonlocal capture_calls
                     try:
                         if not room():
                             raise CaptureDeadlineReached('No further provider requests inside this capture budget')
+                        if capture_calls >= CAPTURE_ATTEMPT_LIMIT:
+                            raise CaptureAttemptLimitReached('No further capture requests for this scheduled game')
+                        capture_calls += 1
                         return native_capture(browser, *args, **kwargs)
                     except Exception as exc:
                         attempts.append(dict(category=getattr(exc, 'category', None), error_type=type(exc).__name__,
