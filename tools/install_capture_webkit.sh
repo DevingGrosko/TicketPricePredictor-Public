@@ -6,9 +6,10 @@ source /etc/os-release
 
 # The Azure HTTP mirror has taken 45+ minutes to serve this dependency set.
 # Use Ubuntu's official HTTPS mirror; leave other configured repositories alone.
-for source_file in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+# Current hosted images may refer to mirror+file:/etc/apt/apt-mirrors.txt.
+for source_file in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources /etc/apt/apt-mirrors.txt; do
   if [[ -f "$source_file" ]]; then
-    sudo sed -i -E 's@https?://azure.archive.ubuntu.com/ubuntu@https://archive.ubuntu.com/ubuntu@g' "$source_file"
+    sudo sed -i -E 's@https?://(azure\.)?archive\.ubuntu\.com/ubuntu@https://archive.ubuntu.com/ubuntu@g' "$source_file"
   fi
 done
 sudo tee /etc/apt/apt.conf.d/99-ticket-capture-timeouts >/dev/null <<'APT'
