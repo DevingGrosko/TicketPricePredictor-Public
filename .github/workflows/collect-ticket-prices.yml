@@ -46,6 +46,10 @@ on:
         type: boolean
         required: false
         default: false
+      nhl_repair_schedule_ids:
+        description: Optional comma-separated official NHL IDs (up to three); requires explicit manual repair
+        required: false
+        default: ''
       manual_repair:
         description: Explicit manual repair may attempt a slot already attempted by the owner
         type: boolean
@@ -128,7 +132,7 @@ jobs:
     concurrency:
       group: nfl-ticket-price-collector
       cancel-in-progress: false
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       # The gate is standard-library only and runs inside the existing writer lock.
@@ -144,7 +148,12 @@ jobs:
           MANUAL_REPAIR: ${{ inputs.manual_repair }}
           DELIVERY_ONLY: ${{ inputs.delivery_only }}
           STOP_AFTER_FIRST_FAILURE: ${{ inputs.stop_after_first_failure }}
+          NHL_REPAIR_SCHEDULE_IDS: ${{ inputs.nhl_repair_schedule_ids }}
         run: |
+          if [[ -n "$NHL_REPAIR_SCHEDULE_IDS" ]] && [[ "$EVENT_NAME" != 'workflow_dispatch' || "$MANUAL_REPAIR" != 'true' || "$DELIVERY_ONLY" == 'true' || "$SHARED_CAPTURE" != 'true' ]]; then
+            echo "Targeted refresh requires an explicit live shared manual repair."
+            exit 2
+          fi
           if [[ "$STOP_AFTER_FIRST_FAILURE" == 'true' ]] && [[ "$EVENT_NAME" != 'workflow_dispatch' || "$MANUAL_REPAIR" != 'true' || "$DELIVERY_ONLY" == 'true' || "$SHARED_CAPTURE" != 'true' || "$TICKETSIGNAL_BROWSER_ENGINE" != 'webkit' ]]; then
             echo "Early diagnostic stop requires an explicit shared WebKit manual repair capture."
             exit 2
@@ -184,10 +193,9 @@ jobs:
         run: python -m pip install -r requirements-collector.txt
 
       - name: Install stock WebKit for the shared capture owner
+        timeout-minutes: 5
         if: steps.cadence.outputs.run == 'true' && env.TICKETSIGNAL_BROWSER_ENGINE == 'webkit' && !inputs.delivery_only
-        run: |
-          python -m pip install -r requirements-webkit-collector.txt
-          python -m playwright install --with-deps webkit
+        run: bash tools/install_capture_webkit.sh
 
       - name: Verify stock Firefox and geckodriver for a requested Firefox capture
         if: steps.cadence.outputs.run == 'true' && env.TICKETSIGNAL_BROWSER_ENGINE == 'firefox' && !inputs.delivery_only
@@ -228,8 +236,21 @@ jobs:
           key: shared-capture-v1-nfl-tidb-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: shared-capture-v1-nfl-tidb-
 
+      - name: Recheck the NFL slot after browser setup
+        id: ready
+        if: steps.cadence.outputs.run == 'true' && !inputs.delivery_only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANUAL_REPAIR: ${{ inputs.manual_repair }}
+        run: |
+          repair=()
+          if [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' && "$MANUAL_REPAIR" == 'true' ]]; then
+            repair=(--manual-repair)
+          fi
+          python -m tools.single_capture_owner slot-gate --sport nfl "${repair[@]}"
+
       - name: Collect due NFL games across the adaptive 30-day window
-        if: steps.cadence.outputs.run == 'true' && env.SHARED_CAPTURE != 'true' && !inputs.delivery_only
+        if: steps.ready.outputs.run == 'true' && env.SHARED_CAPTURE != 'true' && !inputs.delivery_only
         env:
           COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
         run: |
@@ -242,9 +263,10 @@ jobs:
       - name: Attempt shared NFL capture for the half-hour
         id: shared-capture
         timeout-minutes: 26
-        if: steps.cadence.outputs.run == 'true' && env.SHARED_CAPTURE == 'true' && !inputs.delivery_only
+        if: steps.ready.outputs.run == 'true' && env.SHARED_CAPTURE == 'true' && !inputs.delivery_only
         env:
           STOP_AFTER_FIRST_FAILURE: ${{ inputs.stop_after_first_failure }}
+          SELECTED_CAPTURE_SLOT: ${{ steps.ready.outputs.capture_slot }}
           COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
         run: |
           diagnostic=()
@@ -259,6 +281,7 @@ jobs:
             --sport nfl --directory shared-capture/nfl --acknowledgments shared-acknowledgments/nfl \
             --pending-dir nfl_pending --health-output nfl_remote_health.json \
             --legacy-free-state free-capture/nfl --timeout 45 \
+            --selected-slot "$SELECTED_CAPTURE_SLOT" \
             --blocker-diagnostics "${diagnostic[@]}"
 
       - name: Deliver saved NFL observations to both stores
@@ -276,7 +299,7 @@ jobs:
 
       - name: Confirm shared NFL capture writers stopped before checkpointing
         id: shared-stopped
-        if: always() && steps.cadence.outputs.run == 'true' && env.SHARED_CAPTURE == 'true' && !inputs.delivery_only
+        if: always() && steps.shared-capture.outputs.attempted == 'true'
         run: python -m tools.run_bounded_capture verify --marker "$RUNNER_TEMP/nfl-capture-stopped.json"
 
       - name: Bound the NFL shared queue without discarding observations
@@ -350,7 +373,7 @@ jobs:
     concurrency:
       group: nhl-ticket-price-collector
       cancel-in-progress: false
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       # The gate is standard-library only and runs inside the existing writer lock.
@@ -366,7 +389,12 @@ jobs:
           MANUAL_REPAIR: ${{ inputs.manual_repair }}
           DELIVERY_ONLY: ${{ inputs.delivery_only }}
           STOP_AFTER_FIRST_FAILURE: ${{ inputs.stop_after_first_failure }}
+          NHL_REPAIR_SCHEDULE_IDS: ${{ inputs.nhl_repair_schedule_ids }}
         run: |
+          if [[ -n "$NHL_REPAIR_SCHEDULE_IDS" ]] && [[ "$EVENT_NAME" != 'workflow_dispatch' || "$MANUAL_REPAIR" != 'true' || "$DELIVERY_ONLY" == 'true' || "$SHARED_CAPTURE" != 'true' ]]; then
+            echo "Targeted refresh requires an explicit live shared manual repair."
+            exit 2
+          fi
           if [[ "$STOP_AFTER_FIRST_FAILURE" == 'true' ]] && [[ "$EVENT_NAME" != 'workflow_dispatch' || "$MANUAL_REPAIR" != 'true' || "$DELIVERY_ONLY" == 'true' || "$SHARED_CAPTURE" != 'true' || "$TICKETSIGNAL_BROWSER_ENGINE" != 'webkit' ]]; then
             echo "Early diagnostic stop requires an explicit shared WebKit manual repair capture."
             exit 2
@@ -406,10 +434,9 @@ jobs:
         run: python -m pip install -r requirements-collector.txt
 
       - name: Install stock WebKit for the shared capture owner
+        timeout-minutes: 5
         if: steps.cadence.outputs.run == 'true' && env.TICKETSIGNAL_BROWSER_ENGINE == 'webkit' && !inputs.delivery_only
-        run: |
-          python -m pip install -r requirements-webkit-collector.txt
-          python -m playwright install --with-deps webkit
+        run: bash tools/install_capture_webkit.sh
 
       - name: Verify stock Firefox and geckodriver for a requested Firefox capture
         if: steps.cadence.outputs.run == 'true' && env.TICKETSIGNAL_BROWSER_ENGINE == 'firefox' && !inputs.delivery_only
@@ -450,8 +477,21 @@ jobs:
           key: shared-capture-v1-nhl-tidb-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: shared-capture-v1-nhl-tidb-
 
+      - name: Recheck the NHL slot after browser setup
+        id: ready
+        if: steps.cadence.outputs.run == 'true' && !inputs.delivery_only
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANUAL_REPAIR: ${{ inputs.manual_repair }}
+        run: |
+          repair=()
+          if [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' && "$MANUAL_REPAIR" == 'true' ]]; then
+            repair=(--manual-repair)
+          fi
+          python -m tools.single_capture_owner slot-gate --sport nhl "${repair[@]}"
+
       - name: Collect due NHL games across the adaptive 30-day window
-        if: steps.cadence.outputs.run == 'true' && env.SHARED_CAPTURE != 'true' && !inputs.delivery_only
+        if: steps.ready.outputs.run == 'true' && env.SHARED_CAPTURE != 'true' && !inputs.delivery_only
         env:
           COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
         run: |
@@ -464,9 +504,11 @@ jobs:
       - name: Attempt shared NHL capture for the half-hour
         id: shared-capture
         timeout-minutes: 26
-        if: steps.cadence.outputs.run == 'true' && env.SHARED_CAPTURE == 'true' && !inputs.delivery_only
+        if: steps.ready.outputs.run == 'true' && env.SHARED_CAPTURE == 'true' && !inputs.delivery_only
         env:
           STOP_AFTER_FIRST_FAILURE: ${{ inputs.stop_after_first_failure }}
+          SELECTED_CAPTURE_SLOT: ${{ steps.ready.outputs.capture_slot }}
+          NHL_REPAIR_SCHEDULE_IDS: ${{ inputs.nhl_repair_schedule_ids }}
           COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
         run: |
           diagnostic=()
@@ -481,6 +523,8 @@ jobs:
             --sport nhl --directory shared-capture/nhl --acknowledgments shared-acknowledgments/nhl \
             --pending-dir nhl_pending --health-output nhl_remote_health.json \
             --legacy-free-state free-capture/nhl --timeout 45 \
+            --selected-slot "$SELECTED_CAPTURE_SLOT" \
+            --repair-schedule-ids "$NHL_REPAIR_SCHEDULE_IDS" \
             --blocker-diagnostics "${diagnostic[@]}"
 
       - name: Deliver saved NHL observations to both stores
@@ -498,7 +542,7 @@ jobs:
 
       - name: Confirm shared NHL capture writers stopped before checkpointing
         id: shared-stopped
-        if: always() && steps.cadence.outputs.run == 'true' && env.SHARED_CAPTURE == 'true' && !inputs.delivery_only
+        if: always() && steps.shared-capture.outputs.attempted == 'true'
         run: python -m tools.run_bounded_capture verify --marker "$RUNNER_TEMP/nhl-capture-stopped.json"
 
       - name: Bound the NHL shared queue without discarding observations

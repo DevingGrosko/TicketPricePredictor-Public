@@ -17,6 +17,56 @@ from tools.shared_capture import (MirrorQueue, encoded, export_observations, run
 
 
 class HistoricalCaptureConflictTests(unittest.TestCase):
+    def test_oct22_all_seventeen_preserve_exact_payloads_and_require_known_stored_hash(self):
+        manifest = json.loads((historical.PROJECT/historical.OCT22_MANIFEST).read_text())
+        entries = {v['source_id']:v for v in manifest['observations']}
+        self.assertEqual(len(entries), 17)
+        queue = self.queue('oct22', 'nhl')
+        for source, entry in entries.items():
+            original = json.loads((historical.PROJECT/entry['file']).read_bytes())
+            response = {**proof(original, status='duplicate'),
+                        'stored_section_count':entry['canonical_section_count'],
+                        'stored_observation_sha256':entry['canonical_observation_sha256']}
+            self.assertFalse(queue.archive_conflict(original, {**response, 'stored_observation_sha256':'b'*64}))
+            changed = json.loads(json.dumps(original)); changed['sections'][0]['price'] += 1
+            other = self.queue('changed-'+source, 'nhl')
+            self.assertFalse(other.archive_conflict(changed, response))
+            self.assertTrue(queue.archive_conflict(original, response))
+            queue.acknowledge(original, 'tidb', acknowledgment(original, 'tidb'))
+            stored = queue.read(queue.enqueue(original))
+            self.assertEqual(stored['payload'], original)
+            self.assertIsNone(stored['acknowledged']['pythonanywhere'])
+            self.assertEqual(stored['payload_sha256'],entry['sha256'])
+        self.assertEqual(queue.retryable_pending('pythonanywhere'), [])
+        self.assertEqual(queue.retryable_pending('tidb'), [])
+        self.assertEqual(len(queue.pending('pythonanywhere')), 17)
+
+    def test_oct22_replay_reconciles_seventeen_once_then_keeps_archive_without_repeat_posts(self):
+        entries = json.loads((historical.PROJECT/historical.OCT22_MANIFEST).read_text())['observations']
+        originals = [json.loads((historical.PROJECT/e['file']).read_bytes()) for e in entries]
+        index = {e['source_id']:e for e in entries}
+        def receipt(_endpoint, _token, value, **kwargs):
+            entry = index[value['source_id']]
+            return {**proof(value, status='duplicate'),
+                    'stored_section_count':entry['canonical_section_count'],
+                    'stored_observation_sha256':entry['canonical_observation_sha256']}
+        pending = self.root/'pending-oct22'; health = self.root/'oct22-health.json'
+        queue = self.queue('oct22', 'nhl'); sender = Mock(side_effect=receipt)
+        for original in originals:
+            path = collector.queue_snapshot(original, pending)
+            path.rename(path.with_suffix('.rejected'))
+        with patch.dict(os.environ, {'COLLECTOR_INGEST_TOKEN':'test'}, clear=True), \
+             patch.object(collector, 'post_snapshot_with_retry', sender), patch('sys.stdout', StringIO()):
+            self.assertEqual(run_legacy('nhl', queue.root, pending, health, saved=[]), 0)
+            self.assertEqual(sender.call_count, 17)
+            sender.reset_mock()
+            self.assertEqual(run_legacy('nhl', queue.root, pending, health, saved=[]), 0)
+            sender.assert_not_called()
+        self.assertEqual(len(list(pending.glob('*.archived-conflict'))),17)
+        self.assertEqual(len(list(pending.glob('*.rejected'))),0)
+        for original in originals:
+            self.assertEqual(queue.read(queue.enqueue(original))['payload'],original)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name)

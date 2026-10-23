@@ -170,7 +170,8 @@ def replay_pa(module, endpoint, token, pending, *, clock=time.monotonic, budget=
 
 def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pending,
               *, legacy=None, now=None, clock=time.monotonic, deadline_seconds=DEADLINE_SECONDS,
-              blocker_diagnostics=False, stop_after_first_failure=False):
+              blocker_diagnostics=False, stop_after_first_failure=False,
+              selected_slot=None, repair_schedule_ids=()):
     """Capture only games due now; a failed scrape never becomes later catch-up work."""
     if type(blocker_diagnostics) is not bool or type(stop_after_first_failure) is not bool:
         raise ValueError('Diagnostic options must be boolean')
@@ -178,6 +179,16 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
         raise ValueError('Stopping after a failure requires explicit blocker diagnostics')
     now = now or (lambda: datetime.now(timezone.utc))
     started = now(); slot = half_hour_capture_slot(started); began = clock()
+    if selected_slot is not None and selected_slot != slot.isoformat():
+        raise ValueError('Capture slot changed after the final owner gate; do not scrape a different slot')
+    if (not isinstance(repair_schedule_ids, (tuple, list)) or len(repair_schedule_ids) > 3
+            or len(set(repair_schedule_ids)) != len(repair_schedule_ids)
+            or any(not isinstance(v, str) or not v.isascii() or not v.isdigit() or len(v) != 10
+                   for v in repair_schedule_ids) or repair_schedule_ids and sport != 'nhl'):
+        raise ValueError('Manual NHL refresh requires up to three distinct official schedule IDs')
+    # Finish browser work within the slot admitted by the final gate. The usual
+    # phase reserve also leaves time for a capture already in progress to finish.
+    deadline_seconds = min(deadline_seconds, max(0, (slot + timedelta(minutes=30) - started).total_seconds()))
     deadline = began + deadline_seconds
     path = mirror.root / 'recovery' / 'state.json'
     state = {'version': 1, 'sport': sport, 'pending': {}}
@@ -188,6 +199,7 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
         deadline_seconds=deadline_seconds, deadline_reached=False, unresolved=[], provider_gaps=[], excluded_games=[],
         capture_failures=[], blocker_diagnostics=blocker_diagnostics, diagnostic_stopped=False,
         capture_policy='scheduled-only', capture_attempt_limit=CAPTURE_ATTEMPT_LIMIT)
+    report['manual_refresh_schedule_ids'] = list(repair_schedule_ids)
     def save():
         report['pending'] = len(list(pending.glob('*.json'))) + len(list(pending.glob('*.rejected')))
         report['archived_pythonanywhere_conflicts'] = len(list(pending.glob('*.archived-conflict')))
@@ -237,7 +249,10 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
                    for _, row in mirror.records()}
         def observed(game):
             return (str(game.schedule_id), slot.isoformat(), game.event_date) in covered
-        raw_due = [game for game in schedule if is_due(game.event_date, slot, game.schedule_id)]
+        if set(repair_schedule_ids) - {str(game.schedule_id) for game in schedule}:
+            raise ValueError('Manual refresh game is not in the current official schedule window')
+        raw_due = [game for game in schedule if is_due(game.event_date, slot, game.schedule_id)
+                   or str(game.schedule_id) in repair_schedule_ids]
         report['no_longer_collectible'] = []
         current = []
         for game in raw_due:

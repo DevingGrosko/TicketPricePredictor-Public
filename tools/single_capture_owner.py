@@ -289,6 +289,8 @@ def run(kind, *, sport=None, manual_repair=False, owner_run_id=None):
     if os.environ.get('GITHUB_OUTPUT'):
         with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
             output.write('run=' + str(decision).lower() + '\n')
+            if kind == 'slot-gate':
+                output.write('capture_slot=' + evidence['slot'] + '\n')
     print('SINGLE_CAPTURE_OWNER ' + json.dumps(report), flush=True)
     return report
 

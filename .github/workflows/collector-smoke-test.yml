@@ -8,6 +8,9 @@ on:
       - "collector.py"
       - "models.py"
       - "tests/**"
+      - "tools/install_capture_webkit.sh"
+      - "requirements-webkit-collector.txt"
+      - ".github/workflows/collect-ticket-prices.yml"
       - ".github/workflows/collector-smoke-test.yml"
   workflow_dispatch:
     inputs:
@@ -20,6 +23,25 @@ permissions:
   contents: read
 
 jobs:
+  webkit-runtime:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+      - name: Install the production WebKit runtime within five minutes
+        timeout-minutes: 5
+        run: bash tools/install_capture_webkit.sh
+      - name: Verify ordinary browser actions against local fixtures
+        env:
+          RUN_WEBKIT_OVERLAY_FIXTURE: '1'
+        run: |
+          python -m pip install -r requirements-collector.txt
+          xvfb-run --auto-servernum python -m unittest tests.test_vivid_webkit_native_overlays -v
+
   capture:
     # MLB collection is paused; retain the explicitly requested manual canary.
     if: github.event_name == 'workflow_dispatch'

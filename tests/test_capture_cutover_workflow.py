@@ -29,6 +29,34 @@ def step(text, name):
 
 
 class CaptureCutoverWorkflowTests(unittest.TestCase):
+    def test_bounded_browser_setup_precedes_final_slot_check_and_capture_uses_that_slot(self):
+        owner = workflow('collect-ticket-prices')
+        for sport in ('nfl', 'nhl'):
+            collect = job(owner, 'collect-'+sport)
+            install = step(collect, 'Install stock WebKit for the shared capture owner')
+            capture = step(collect, 'Attempt shared '+sport.upper()+' capture for the half-hour')
+            stopped = step(collect, 'Confirm shared '+sport.upper()+' capture writers stopped before checkpointing')
+            self.assertIn('runs-on: ubuntu-24.04', collect)
+            self.assertIn('timeout-minutes: 5', install)
+            self.assertIn('bash tools/install_capture_webkit.sh', install)
+            self.assertLess(collect.index('Install stock WebKit'),collect.index('id: ready'))
+            self.assertLess(collect.index('id: ready'),collect.index('id: shared-capture'))
+            self.assertIn("steps.ready.outputs.run == 'true'",capture)
+            self.assertIn('SELECTED_CAPTURE_SLOT: ${{ steps.ready.outputs.capture_slot }}',capture)
+            self.assertIn('--selected-slot "$SELECTED_CAPTURE_SLOT"',capture)
+            self.assertIn("steps.shared-capture.outputs.attempted == 'true'",stopped)
+
+    def test_targeted_refresh_cannot_be_enabled_by_a_timer_or_saved_delivery(self):
+        gate = step(job(workflow('collect-ticket-prices'),'collect-nhl'),'Select the half-hour NHL slot')
+        script = textwrap.dedent(gate.split('        run: |\n',1)[1])
+        for event, repair, delivery in [('schedule','true','false'),
+                                       ('workflow_dispatch','false','false'),
+                                       ('workflow_dispatch','true','true')]:
+            env={**os.environ,'EVENT_NAME':event,'MANUAL_REPAIR':repair,'DELIVERY_ONLY':delivery,
+                 'SHARED_CAPTURE':'true','NHL_REPAIR_SCHEDULE_IDS':'2026020327'}
+            result=subprocess.run(['bash','-e','-c',script],env=env,capture_output=True,timeout=5)
+            self.assertEqual(result.returncode,2)
+
     def test_recurring_defaults_retain_manual_engines_mlb_pause_and_existing_clocks(self):
         owner = workflow('collect-ticket-prices')
         header = owner.split('\njobs:\n', 1)[0]

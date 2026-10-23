@@ -1,0 +1,517 @@
+{
+  "version": 1,
+  "capture_slot": "2026-10-22T18:30:00+00:00",
+  "purpose": "Preserve 17 exact NHL originals already stored in TiDB and the identity of the different observations retained on PythonAnywhere. This archive is not an acknowledgment.",
+  "observations": [
+    {
+      "sport": "nhl",
+      "source_id": "7300237",
+      "captured_at": "2026-10-22T18:42:41.268178+00:00",
+      "capture_slot": "2026-10-22T18:30:00+00:00",
+      "event_date": "2026-10-24T00:00:00+00:00",
+      "schedule_id": "2026020166",
+      "section_count": 91,
+      "observation_sha256": "f6cdbd4afb2c45403ca59dc5b8af7035c2e7a75aa01369dfdf2b5bd8fca5f648",
+      "file": "docs/shared-observations/conflicts/snapshot-nhl-7300237-20261022-1830.json",
+      "sha256": "91ac23a0c3b48b1b9378aee180478ff0aaf2c638bcd5ebedb0a2c024217bdaa3",
+      "canonical_section_count": 91,
+      "canonical_observation_sha256": "ad8715a509c9166eb201ae18871e6ac4f0c9b12996fe686c34ca4553920ab5a1",
+      "provenance": {
+        "repository": "DevingGrosko/TicketPricePredictor-Public",
+        "branch": "main",
+        "original_capture_run_id": 39833086439,
+        "preserved_export_run_id": 40011940132,
+        "conflict_log_sha256": "009487686637cb0876b395750f85c48ef0c6b15da30f1371a328e28ff958fcf8",
+        "tidb_acknowledgment": {
+          "captured_at": "2026-10-22T18:30:00+00:00",
+          "event_id": 180204,
+          "event_type": "nhl",
+          "iteration_id": 20221950,
+          "sections": 91,
+          "status": "stored"
+        }
+      },
+      "reason": "PythonAnywhere already holds a different immutable observation for this slot. Preserve that observation and this exact later original; never acknowledge one as the other."
+    },
+    {
+      "sport": "nhl",
+      "source_id": "7300243",
+      "captured_at": "2026-10-22T18:42:05.268214+00:00",
+      "capture_slot": "2026-10-22T18:30:00+00:00",
+      "event_date": "2026-10-23T01:00:00+00:00",
+      "schedule_id": "2026020163",
+      "section_count": 72,
+      "observation_sha256": "b66a9aa428bcb7d55a6b01ce501eef83c4925c482ca3af95f960dc429a2f38e7",
+      "file": "docs/shared-observations/conflicts/snapshot-nhl-7300243-20261022-1830.json",
+      "sha256": "e7436668ec322d0f0efeb3c22c5e5648e2f2a40b9d55ebc08086b51b509dd6e0",
+      "canonical_section_count": 72,
+      "canonical_observation_sha256": "1a3688370177603365f43564b14fdcba7dfda00c3cdbb77bb8104e9590d0dc62",
+      "provenance": {
+        "repository": "DevingGrosko/TicketPricePredictor-Public",
+        "branch": "main",
+        "original_capture_run_id": 39833086439,
+        "preserved_export_run_id": 40011940132,
+        "conflict_log_sha256": "009487686637cb0876b395750f85c48ef0c6b15da30f1371a328e28ff958fcf8",
+        "tidb_acknowledgment": {
+          "captured_at": "2026-10-22T18:30:00+00:00",
+          "event_id": 30204,
+          "event_type": "nhl",
+          "iteration_id": 20221953,
+          "sections": 72,
+          "status": "stored"
+        }
+      },
+      "reason": "PythonAnywhere already holds a different immutable observation for this slot. Preserve that observation and this exact later original; never acknowledge one as the other."
+    },
+    {
+      "sport": "nhl",
+      "source_id": "7300247",
+      "captured_at": "2026-10-22T18:45:02.705622+00:00",
+      "capture_slot": "2026-10-22T18:30:00+00:00",
+      "event_date": "2026-10-24T23:00:00+00:00",
+      "schedule_id": "2026020175",
+      "section_count": 82,
+      "observation_sha256": "be012a1b68c9aba37833fd2e8fbef4a4afb4e3e39e5595fe4d236da98ca266ab",
+      "file": "docs/shared-observations/conflicts/snapshot-nhl-7300247-20261022-1830.json",
+      "sha256": "63ab5d24b4a26d205b12742a5457112085861b4a2995d74dcd7d585c7a579811",
+      "canonical_section_count": 82,
+      "canonical_observation_sha256": "0dc3edd2c11b7c087f310597f6eaf2b26301c4985337d9640fd1ed96d5f31209",
+      "provenance": {
+        "repository": "DevingGrosko/TicketPricePredictor-Public",
+        "branch": "main",
+        "original_capture_run_id": 39833086439,
+        "preserved_export_run_id": 40011940132,
+        "conflict_log_sha256": "009487686637cb0876b395750f85c48ef0c6b15da30f1371a328e28ff958fcf8",
+        "tidb_acknowledgment": {
+          "captured_at": "2026-10-22T18:30:00+00:00",
+          "event_id": 150211,
+          "event_type": "nhl",
+          "iteration_id": 20221941,
+          "sections": 82,
+          "status": "stored"
+        }
+      },
+      "reason": "PythonAnywhere already holds a different immutable observation for this slot. Preserve that observation and this exact later original; never acknowledge one as the other."
+    },
+    {
+      "sport": "nhl",
+      "source_id": "7300419",
+      "captured_at": "2026-10-22T18:42:52.376551+00:00",
+      "capture_slot": "2026-10-22T18:30:00+00:00",
+      "event_date": "2026-10-24T01:00:00+00:00",
+      "schedule_id": "2026020167",
+      "section_count": 118,
+      "observation_sha256": "72c4fb24fcaad2b9afa5d20efc953ac997408aa8c39bada2d3e8e95e8d1683c0",
+      "file": "docs/shared-observations/conflicts/snapshot-nhl-7300419-20261022-1830.json",
+      "sha256": "4a868d36982f23f4526b52cad412a1c818e11a776a691ee8659105c927998afb",
+      "canonical_section_count": 118,
+      "canonical_observation_sha256": "30a7c2ead32095273f1614bb75f5131ed425a82367a3124bfb4b17b119ec1c2f",
+      "provenance": {
+        "repository": "DevingGrosko/TicketPricePredictor-Public",
+        "branch": "main",
+        "original_capture_run_id": 39833086439,
+        "preserved_export_run_id": 40011940132,
+        "conflict_log_sha256": "009487686637cb0876b395750f85c48ef0c6b15da30f1371a328e28ff958fcf8",
+        "tidb_acknowledgment": {
+          "captured_at": "2026-10-22T18:30:00+00:00",
+          "event_id": 210206,
+          "event_type": "nhl",
+          "iteration_id": 20221949,
+          "sections": 118,
+          "status": "stored"
+        }
+      },
+      "reason": "PythonAnywhere already holds a different immutable observation for this slot. Preserve that observation and this exact later original; never acknowledge one as the other."
+    },
+    {
+      "sport": "nhl",
+      "source_id": "7300805",
+      "captured_at": "2026-10-22T18:42:30.198355+00:00",
+      "capture_slot": "2026-10-22T18:30:00+00:00",
+      "event_date": "2026-10-23T02:00:00+00:00",
+      "schedule_id": "2026020165",
+      "section_count": 51,
+      "observation_sha256": "e112b9bf479ccb8b913875414cb78e111ab7c4d9642e8b3773258154309f930e",
+      "file": "docs/shared-observations/conflicts/snapshot-nhl-7300805-20261022-1830.json",
+      "sha256": "3cb3dca0f13c1255943b1ddb6b1bbc6fa5a964cd36fb6d611c833ea9a310f0b7",
+      "canonical_section_count": 51,
+      "canonical_observation_sha256": "f9bb8c211fdb4d6ff91d4ace434e38e572d6f3fe277f284493b1aefa934df739",
+      "provenance": {
+        "repository": "DevingGrosko/TicketPricePredictor-Public",
+        "branch": "main",
+        "original_capture_run_id": 39833086439,
+        "preserved_export_run_id": 40011940132,
+        "conflict_log_sha256": "009487686637cb0876b395750f85c48ef0c6b15da30f1371a328e28ff958fcf8",
+        "tidb_acknowledgment": {
+          "captured_at": "2026-10-22T18:30:00+00:00",
+          "event_id": 300206,
+          "event_type": "nhl",
+          "iteration_id": 20221951,
+          "sections": 51,
+          "status": "stored"
+        }
+      },
+      "reason": "PythonAnywhere already holds a different immutable observation for this slot. Preserve that observation and this exact later original; never acknowledge one as the other."
+    },
+    {
+      "sport": "nhl",
+      "source_id": "7300807",
+      "captured_at": "2026-10-22T18:45:50.886895+00:00",
+      "capture_slot": "2026-10-22T18:30:00+00:00",
+      "event_date": "2026-10-25T02:00:00+00:00",
+      "schedule_id": "2026020178",
+      "section_count": 69,
+      "observation_sha256": "d9a1450a3162ce654b81757ce052a455b50e7520891228dcf92e601a2de5793b",
+      "file": "docs/shared-observations/conflicts/snapshot-nhl-7300807-20261022-1830.json",
+      "sha256": "ae6de007633bd7b7b82c4e9117248085d59d283044842cde677506f4f9a96b9c",
+      "canonical_section_count": 69,
+      "canonical_observation_sha256": "9f32f28d3cb2364e50bc1ff63f3a2a20b03e0e7b52d893ca7390066949f68259",
+      "provenance": {
+        "repository": "DevingGrosko/TicketPricePredictor-Public",
+        "branch": "main",
+        "original_capture_run_id": 39833086439,
+        "preserved_export_run_id": 40011940132,
+        "conflict_log_sha256": "009487686637cb0876b395750f85c48ef0c6b15da30f1371a328e28ff958fcf8",
+        "tidb_acknowledgment": {
+          "captured_at": "2026-10-22T18:30:00+00:00",
+          "event_id": 240210,
+          "event_type": "nhl",
+          "iteration_id": 20221938,
+          "sections": 69,
+          "status": "stored"
+        }
+      },
+      "reason": "PythonAnywhere already holds a different immutable observation for this slot. Preserve that observation and this exact later original; never acknowledge one as the other."
+    },
+    {
+      "sport": "nhl",
+      "source_id": "7300931",
+      "captured_at": "2026-10-22T18:43:17.843049+00:00",
+      "capture_slot": "2026-10-22T18:30:00+00:00",
+      "event_date": "2026-10-24T19:30:00+00:00",
+      "schedule_id": "2026020169",
+      "section_count": 124,
+      "observation_sha256": "f5d3ea6a4aa6eb711eb24bb54547203d6a333e422ba244f9abb72affe5780307",
+      "file": "docs/shared-observations/conflicts/snapshot-nhl-7300931-20261022-1830.json",
+      "sha256": "2af6350b6c4d6079cc1d9fae8964fb279aaad6ac6b2595131dc2ad5a3fc7928b",
+      "canonical_section_count": 124,
+      "canonical_observation_sha256": "eed13b1388013ca9baf6a0ff6eceaf9f0a005014926262f16dfd50eb2d17ba33",
+      "provenance": {
+        "repository": "DevingGrosko/TicketPricePredictor-Public",
+        "branch": "main",
+        "original_capture_run_id": 39833086439,
+        "preserved_export_run_id": 40011940132,
+        "conflict_log_sha256": "009487686637cb0876b395750f85c48ef0c6b15da30f1371a328e28ff958fcf8",
+        "tidb_acknowledgment": {
+          "captured_at": "2026-10-22T18:30:00+00:00",
+          "event_id": 150210,
+          "event_type": "nhl",
+          "iteration_id": 20221947,
+          "sections": 124,
+          "status": "stored"
+        }
+      },
+      "reason": "PythonAnywhere already holds a different immutable observation for this slot. Preserve that observation and this exact later original; never acknowledge one as the other."
+    },
+    {
+      "sport": "nhl",
+      "source_id": "7300933",
+      "captured_at": "2026-10-22T18:45:14.575659+00:00",
+      "capture_slot": "2026-10-22T18:30:00+00:00",
+      "event_date": "2026-10-24T23:00:00+00:00",
+      "schedule_id": "2026020176",
+      "section_count": 66,
+      "observation_sha256": "e6e17c027e0dbe1b1289a5247df5d40ee26a00a6279f67392577188f2428ff1b",
+      "file": "docs/shared-observations/conflicts/snapshot-nhl-7300933-20261022-1830.json",
+      "sha256": "fe8d78a839e2782fc625f1a28c327c2bcd5df0fa1134d2ae03891a3c2bd77c8c",
+      "canonical_section_count": 67,
+      "canonical_observation_sha256": "882abf3f3042321f180e6f9aca5c04c09dc8a48ec002477f8293d1ad224a6ee3",
+      "provenance": {
+        "repository": "DevingGrosko/TicketPricePredictor-Public",
+        "branch": "main",
+        "original_capture_run_id": 39833086439,
+        "preserved_export_run_id": 40011940132,
+        "conflict_log_sha256": "009487686637cb0876b395750f85c48ef0c6b15da30f1371a328e28ff958fcf8",
+        "tidb_acknowledgment": {
+          "captured_at": "2026-10-22T18:30:00+00:00",
+          "event_id": 240209,
+          "event_type": "nhl",
+          "iteration_id": 20221940,
+          "sections": 66,
+          "status": "stored"
+        }
+      },
+      "reason": "PythonAnywhere already holds a different immutable observation for this slot. Preserve that observation and this exact later original; never acknowledge one as the other."
+    },
+    {
+      "sport": "nhl",
+      "source_id": "7301293",
+      "captured_at": "2026-10-22T18:44:09.591791+00:00",
+      "capture_slot": "2026-10-22T18:30:00+00:00",
+      "event_date": "2026-10-24T23:00:00+00:00",
+      "schedule_id": "2026020172",
+      "section_count": 59,
+      "observation_sha256": "022b5f7cd01937a627e37eccf771c2d2a975d5a0fecbf634dd6455fcd3d28b07",
+      "file": "docs/shared-observations/conflicts/snapshot-nhl-7301293-20261022-1830.json",
+      "sha256": "ceb155aadf2812b9157042b0eb1a83dfabbe15b2bfe9f1dca53bf16e3fe9e746",
+      "canonical_section_count": 59,
+      "canonical_observation_sha256": "bd449717ee7e23aa4ba00019e967b97ff114445cdbe05d38d56d19c7b8e72985",
+      "provenance": {
+        "repository": "DevingGrosko/TicketPricePredictor-Public",
+        "branch": "main",
+        "original_capture_run_id": 39833086439,
+        "preserved_export_run_id": 40011940132,
+        "conflict_log_sha256": "009487686637cb0876b395750f85c48ef0c6b15da30f1371a328e28ff958fcf8",
+        "tidb_acknowledgment": {
+          "captured_at": "2026-10-22T18:30:00+00:00",
+          "event_id": 300207,
+          "event_type": "nhl",
+          "iteration_id": 20221944,
+          "sections": 59,
+          "status": "stored"
+        }
+      },
+      "reason": "PythonAnywhere already holds a different immutable observation for this slot. Preserve that observation and this exact later original; never acknowledge one as the other."
+    },
+    {
+      "sport": "nhl",
+      "source_id": "7301455",
+      "captured_at": "2026-10-22T18:43:57.071833+00:00",
+      "capture_slot": "2026-10-22T18:30:00+00:00",
+      "event_date": "2026-10-24T23:00:00+00:00",
+      "schedule_id": "2026020171",
+      "section_count": 67,
+      "observation_sha256": "6fd4f799e190243ac6f9eec145cbf0e491eb6e49687adffbcbd57a938878d259",
+      "file": "docs/shared-observations/conflicts/snapshot-nhl-7301455-20261022-1830.json",
+      "sha256": "06bb601fe7323f7169c152169f96692cb00befcb80c4d1fe733cd4ab0a0c147d",
+      "canonical_section_count": 67,
+      "canonical_observation_sha256": "b088efd8a3384e0b570bff06ed0a5657e7cbce4e1370400322aa188cf150501d",
+      "provenance": {
+        "repository": "DevingGrosko/TicketPricePredictor-Public",
+        "branch": "main",
+        "original_capture_run_id": 39833086439,
+        "preserved_export_run_id": 40011940132,
+        "conflict_log_sha256": "009487686637cb0876b395750f85c48ef0c6b15da30f1371a328e28ff958fcf8",
+        "tidb_acknowledgment": {
+          "captured_at": "2026-10-22T18:30:00+00:00",
+          "event_id": 90204,
+          "event_type": "nhl",
+          "iteration_id": 20221945,
+          "sections": 67,
+          "status": "stored"
+        }
+      },
+      "reason": "PythonAnywhere already holds a different immutable observation for this slot. Preserve that observation and this exact later original; never acknowledge one as the other."
+    },
+    {
+      "sport": "nhl",
+      "source_id": "7301795",
+      "captured_at": "2026-10-22T18:43:05.733705+00:00",
+      "capture_slot": "2026-10-22T18:30:00+00:00",
+      "event_date": "2026-10-24T17:00:00+00:00",
+      "schedule_id": "2026020168",
+      "section_count": 85,
+      "observation_sha256": "75936fd70cc9d2a019b624bf8ed83c4854b74b3bbf1f466ac67db2f3a578368c",
+      "file": "docs/shared-observations/conflicts/snapshot-nhl-7301795-20261022-1830.json",
+      "sha256": "1ce7c4394c2e74507ea050235794a6bb0d4935c14d0ed53af6fe3d535cf06a6c",
+      "canonical_section_count": 85,
+      "canonical_observation_sha256": "7614093db88cba049394ef98b12247cef7fc94f6c0c27d4594504b42535ec5ac",
+      "provenance": {
+        "repository": "DevingGrosko/TicketPricePredictor-Public",
+        "branch": "main",
+        "original_capture_run_id": 39833086439,
+        "preserved_export_run_id": 40011940132,
+        "conflict_log_sha256": "009487686637cb0876b395750f85c48ef0c6b15da30f1371a328e28ff958fcf8",
+        "tidb_acknowledgment": {
+          "captured_at": "2026-10-22T18:30:00+00:00",
+          "event_id": 330208,
+          "event_type": "nhl",
+          "iteration_id": 20221948,
+          "sections": 85,
+          "status": "stored"
+        }
+      },
+      "reason": "PythonAnywhere already holds a different immutable observation for this slot. Preserve that observation and this exact later original; never acknowledge one as the other."
+    },
+    {
+      "sport": "nhl",
+      "source_id": "7301899",
+      "captured_at": "2026-10-22T18:43:37.831495+00:00",
+      "capture_slot": "2026-10-22T18:30:00+00:00",
+      "event_date": "2026-10-24T23:00:00+00:00",
+      "schedule_id": "2026020170",
+      "section_count": 64,
+      "observation_sha256": "a10d02d63f884906a19c357b1dfb2d130fe981e4e156e3b22e982df317326fff",
+      "file": "docs/shared-observations/conflicts/snapshot-nhl-7301899-20261022-1830.json",
+      "sha256": "b4c77648c5214e3f711e712c2fb527f4868efdda437874f3e34debadd99a5459",
+      "canonical_section_count": 64,
+      "canonical_observation_sha256": "ed8f382203b72cf7906fb34acba9e042e6490e916015c1adbea77c4d15f0d7a5",
+      "provenance": {
+        "repository": "DevingGrosko/TicketPricePredictor-Public",
+        "branch": "main",
+        "original_capture_run_id": 39833086439,
+        "preserved_export_run_id": 40011940132,
+        "conflict_log_sha256": "009487686637cb0876b395750f85c48ef0c6b15da30f1371a328e28ff958fcf8",
+        "tidb_acknowledgment": {
+          "captured_at": "2026-10-22T18:30:00+00:00",
+          "event_id": 240208,
+          "event_type": "nhl",
+          "iteration_id": 20221946,
+          "sections": 64,
+          "status": "stored"
+        }
+      },
+      "reason": "PythonAnywhere already holds a different immutable observation for this slot. Preserve that observation and this exact later original; never acknowledge one as the other."
+    },
+    {
+      "sport": "nhl",
+      "source_id": "7302119",
+      "captured_at": "2026-10-22T18:45:34.652287+00:00",
+      "capture_slot": "2026-10-22T18:30:00+00:00",
+      "event_date": "2026-10-25T01:00:00+00:00",
+      "schedule_id": "2026020177",
+      "section_count": 63,
+      "observation_sha256": "a56606766dba41ad1ab8cc755c346264ac0c3b7de35ae6f4a8edd0febc822ee1",
+      "file": "docs/shared-observations/conflicts/snapshot-nhl-7302119-20261022-1830.json",
+      "sha256": "4783f34eba194933c93a3469c5f967cafeb93819a302ba6d46d595cefeb7d9cc",
+      "canonical_section_count": 63,
+      "canonical_observation_sha256": "0d86a55e6ff94cd0940852f6a3f2a00833a680dd129b66fe656e510d54aa3815",
+      "provenance": {
+        "repository": "DevingGrosko/TicketPricePredictor-Public",
+        "branch": "main",
+        "original_capture_run_id": 39833086439,
+        "preserved_export_run_id": 40011940132,
+        "conflict_log_sha256": "009487686637cb0876b395750f85c48ef0c6b15da30f1371a328e28ff958fcf8",
+        "tidb_acknowledgment": {
+          "captured_at": "2026-10-22T18:30:00+00:00",
+          "event_id": 120204,
+          "event_type": "nhl",
+          "iteration_id": 20221939,
+          "sections": 63,
+          "status": "stored"
+        }
+      },
+      "reason": "PythonAnywhere already holds a different immutable observation for this slot. Preserve that observation and this exact later original; never acknowledge one as the other."
+    },
+    {
+      "sport": "nhl",
+      "source_id": "7302297",
+      "captured_at": "2026-10-22T18:44:48.920565+00:00",
+      "capture_slot": "2026-10-22T18:30:00+00:00",
+      "event_date": "2026-10-24T23:00:00+00:00",
+      "schedule_id": "2026020174",
+      "section_count": 70,
+      "observation_sha256": "11a7c7c6cbb7ca649123fd13003415a84e6ac3ea39acdf67e2162246cc480e1a",
+      "file": "docs/shared-observations/conflicts/snapshot-nhl-7302297-20261022-1830.json",
+      "sha256": "889fff98eca6cd5d46198aab7d39ab1adb96d82f0fd73316a747ca1e287fa3cb",
+      "canonical_section_count": 70,
+      "canonical_observation_sha256": "5615936286252a4a6aa90b891babccd2947b909a5f91711db31ab313c9b708e6",
+      "provenance": {
+        "repository": "DevingGrosko/TicketPricePredictor-Public",
+        "branch": "main",
+        "original_capture_run_id": 39833086439,
+        "preserved_export_run_id": 40011940132,
+        "conflict_log_sha256": "009487686637cb0876b395750f85c48ef0c6b15da30f1371a328e28ff958fcf8",
+        "tidb_acknowledgment": {
+          "captured_at": "2026-10-22T18:30:00+00:00",
+          "event_id": 390205,
+          "event_type": "nhl",
+          "iteration_id": 20221942,
+          "sections": 70,
+          "status": "stored"
+        }
+      },
+      "reason": "PythonAnywhere already holds a different immutable observation for this slot. Preserve that observation and this exact later original; never acknowledge one as the other."
+    },
+    {
+      "sport": "nhl",
+      "source_id": "7302307",
+      "captured_at": "2026-10-22T18:46:08.341781+00:00",
+      "capture_slot": "2026-10-22T18:30:00+00:00",
+      "event_date": "2026-10-25T02:00:00+00:00",
+      "schedule_id": "2026020179",
+      "section_count": 70,
+      "observation_sha256": "6c0d7a36ef95306a1df342a91b42ce5260296ee406d8cfed98d1a7d78af02849",
+      "file": "docs/shared-observations/conflicts/snapshot-nhl-7302307-20261022-1830.json",
+      "sha256": "9888316aa4e1a0f57bbda0a239181cb1ce60db01b3ed0de176e59113077681a9",
+      "canonical_section_count": 70,
+      "canonical_observation_sha256": "bc19c8c4bb7eba56eeb02af453f380461c6b524a9e45916bf185563434c4d704",
+      "provenance": {
+        "repository": "DevingGrosko/TicketPricePredictor-Public",
+        "branch": "main",
+        "original_capture_run_id": 39833086439,
+        "preserved_export_run_id": 40011940132,
+        "conflict_log_sha256": "009487686637cb0876b395750f85c48ef0c6b15da30f1371a328e28ff958fcf8",
+        "tidb_acknowledgment": {
+          "captured_at": "2026-10-22T18:30:00+00:00",
+          "event_id": 150212,
+          "event_type": "nhl",
+          "iteration_id": 20221937,
+          "sections": 70,
+          "status": "stored"
+        }
+      },
+      "reason": "PythonAnywhere already holds a different immutable observation for this slot. Preserve that observation and this exact later original; never acknowledge one as the other."
+    },
+    {
+      "sport": "nhl",
+      "source_id": "7302403",
+      "captured_at": "2026-10-22T18:42:17.393285+00:00",
+      "capture_slot": "2026-10-22T18:30:00+00:00",
+      "event_date": "2026-10-23T02:00:00+00:00",
+      "schedule_id": "2026020164",
+      "section_count": 61,
+      "observation_sha256": "9f7256c9282b616dea2fe710a86aaf5d9fb71d981cdbc123faf074530a9123d2",
+      "file": "docs/shared-observations/conflicts/snapshot-nhl-7302403-20261022-1830.json",
+      "sha256": "b55aa7f5ad466cb4ba1192adf5ed602655a4caaa27dd06a74c1c689a6036cc5f",
+      "canonical_section_count": 61,
+      "canonical_observation_sha256": "415d64a228ddb2e34f82b4a7d9098bdc7517791b844f37d63ca6ef6ced493df9",
+      "provenance": {
+        "repository": "DevingGrosko/TicketPricePredictor-Public",
+        "branch": "main",
+        "original_capture_run_id": 39833086439,
+        "preserved_export_run_id": 40011940132,
+        "conflict_log_sha256": "009487686637cb0876b395750f85c48ef0c6b15da30f1371a328e28ff958fcf8",
+        "tidb_acknowledgment": {
+          "captured_at": "2026-10-22T18:30:00+00:00",
+          "event_id": 270205,
+          "event_type": "nhl",
+          "iteration_id": 20221952,
+          "sections": 61,
+          "status": "stored"
+        }
+      },
+      "reason": "PythonAnywhere already holds a different immutable observation for this slot. Preserve that observation and this exact later original; never acknowledge one as the other."
+    },
+    {
+      "sport": "nhl",
+      "source_id": "7302417",
+      "captured_at": "2026-10-22T18:44:29.826395+00:00",
+      "capture_slot": "2026-10-22T18:30:00+00:00",
+      "event_date": "2026-10-24T23:00:00+00:00",
+      "schedule_id": "2026020173",
+      "section_count": 80,
+      "observation_sha256": "2f9bfc32a7772d73ef0b8f14d311a3ded5a624f9af7b39ec56a0bf88fabae37f",
+      "file": "docs/shared-observations/conflicts/snapshot-nhl-7302417-20261022-1830.json",
+      "sha256": "127ff998e8a1375d87c549398b382fdab0d43d19cb0438d83babfe8b2cdb5fc9",
+      "canonical_section_count": 80,
+      "canonical_observation_sha256": "3a250b2ee4dde509f3d89c1d9783c15e53a936d61cdbf39426605d1c0576eb09",
+      "provenance": {
+        "repository": "DevingGrosko/TicketPricePredictor-Public",
+        "branch": "main",
+        "original_capture_run_id": 39833086439,
+        "preserved_export_run_id": 40011940132,
+        "conflict_log_sha256": "009487686637cb0876b395750f85c48ef0c6b15da30f1371a328e28ff958fcf8",
+        "tidb_acknowledgment": {
+          "captured_at": "2026-10-22T18:30:00+00:00",
+          "event_id": 270206,
+          "event_type": "nhl",
+          "iteration_id": 20221943,
+          "sections": 80,
+          "status": "stored"
+        }
+      },
+      "reason": "PythonAnywhere already holds a different immutable observation for this slot. Preserve that observation and this exact later original; never acknowledge one as the other."
+    }
+  ]
+}

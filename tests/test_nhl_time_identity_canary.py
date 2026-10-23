@@ -115,7 +115,9 @@ class NHLTimeCanaryTests(unittest.TestCase):
         def factory(**_options):
             browser=FakeProductionBrowser();created.append(browser);return browser
         fetch=Mock(return_value=(official_games(DALLAS_FIXTURE['games']),['official-source']))
-        with TemporaryDirectory() as directory:
+        # Saved October fixtures must not age out of the observation window.
+        with TemporaryDirectory() as directory, patch('tools.nhl_time_identity_canary.datetime') as clock:
+            clock.now.return_value = AT
             report=run(directory,fetcher=fetch,factory=factory,now=AT,cohort='dallas')
             self.assertEqual(report['status'],'passed');self.assertEqual(report['cohort'],'dallas')
             self.assertEqual([row['source_id'] for row in report['observations']],[t[1] for t in DALLAS_TARGETS])
