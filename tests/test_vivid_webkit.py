@@ -838,7 +838,9 @@ class WebKitTests(unittest.TestCase):
         for sport in ('nfl','nhl'):
             step=next(s for s in workflow['jobs']['collect-'+sport]['steps'] if s.get('name')=='Install stock WebKit for the shared capture owner')
             self.assertIn("env.TICKETSIGNAL_BROWSER_ENGINE == 'webkit'",step['if'])
-            self.assertIn('python -m playwright install --with-deps webkit',step['run'])
+            self.assertEqual(step['run'], 'bash tools/install_capture_webkit.sh')
+            self.assertIn('python -m playwright install --with-deps webkit',
+                          (root/'tools/install_capture_webkit.sh').read_text())
 
 
 if __name__=='__main__':unittest.main()

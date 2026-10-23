@@ -24,6 +24,51 @@ NOW = datetime(2026, 10, 8, 5, tzinfo=timezone.utc)
 
 
 class SharedCapturePolicyTests(unittest.TestCase):
+    def test_final_gate_slot_cannot_drift_during_bootstrap(self):
+        game = self.game('nfl', '401873001')
+        stack, calls, captured = self.controlled(nfl, [game])
+        with stack, self.assertRaisesRegex(ValueError, 'slot changed'):
+            run_owner('nfl', nfl, self.mirror, 'endpoint', 'token', 45, self.health, self.pending,
+                      now=lambda: NOW + timedelta(minutes=31), selected_slot=NOW.isoformat())
+        self.assertEqual((calls, captured), ([], []))
+
+    def test_late_slot_keeps_original_delivery_but_starts_no_browser_work(self):
+        game = self.game('nfl', '401873001')
+        stack, calls, captured = self.controlled(nfl, [game])
+        original = payload('nfl', '6500000', NOW-timedelta(minutes=30))
+        self.mirror.enqueue(original); collector.queue_snapshot(original, self.pending)
+        with stack, patch.object(nfl, 'nfl_capture_is_due', return_value=True):
+            run_owner('nfl', nfl, self.mirror, 'endpoint', 'token', 45, self.health, self.pending,
+                      now=lambda: NOW + timedelta(minutes=28), selected_slot=NOW.isoformat())
+        health = json.loads(self.health.read_text())
+        self.assertEqual((health['deadline_seconds'], health['replayed']), (120, 1))
+        self.assertEqual(health['deferred_games'], ['401873001'])
+        self.assertEqual((calls, captured), ([], []))
+        self.assertEqual(json.loads((self.mirror.root/'recovery/state.json').read_text())['pending'], {})
+
+    def test_explicit_refresh_only_adds_named_official_games_and_never_persists(self):
+        self.mirror = MirrorQueue(self.root/'nhl-mirror', 'nhl')
+        games = [self.game('nhl', str(2026020327+i), days=20) for i in range(2)]
+        stack, calls, captured = self.controlled(nhl, games)
+        with stack, patch.object(nhl, 'nhl_capture_is_due', return_value=False):
+            self.assertEqual(run_owner('nhl', nhl, self.mirror, 'endpoint', 'token', 45,
+                self.health, self.pending, now=lambda: NOW, repair_schedule_ids=('2026020327',)), 0)
+            self.assertEqual(len(captured), 1)
+            calls.clear()
+            self.assertEqual(run_owner('nhl', nhl, self.mirror, 'endpoint', 'token', 45,
+                self.health, self.pending, now=lambda: NOW+timedelta(minutes=30)), 0)
+        self.assertEqual(calls, [])
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(json.loads((self.mirror.root/'recovery/state.json').read_text())['pending'], {})
+
+    def test_manual_refresh_rejects_unknown_official_identity_without_scraping(self):
+        self.mirror = MirrorQueue(self.root/'nhl-mirror', 'nhl')
+        stack, calls, captured = self.controlled(nhl, [self.game('nhl', '2026020327')])
+        with stack:
+            self.assertEqual(run_owner('nhl', nhl, self.mirror, 'endpoint', 'token', 45,
+                self.health, self.pending, now=lambda: NOW, repair_schedule_ids=('2026020999',)), 1)
+        self.assertEqual((calls, captured), ([], []))
+
     def test_progress_overlay_actions_exclude_page_text_unknown_controls_and_extra_rows(self):
         output = StringIO()
         with redirect_stdout(output):
