@@ -5,6 +5,7 @@ import argparse
 from datetime import datetime, timezone
 import json
 import os
+import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -162,6 +163,10 @@ def publication_needed(owner, jobs):
     return False, 'both-captures-skipped-and-no-delivery-attempt'
 
 
+class CaptureMetadataUnavailable(RuntimeError):
+    """GitHub has marked a capture complete but has not returned its steps yet."""
+
+
 def publication_handoff_needed(jobs):
     """An owner end-job can publish after completed attempts while the run is active."""
     attempted = []
@@ -172,7 +177,7 @@ def publication_handoff_needed(jobs):
         for job in captures:
             steps = [step for step in job.get('steps') or [] if step.get('name') in CAPTURE_STEPS[sport] | DELIVERY_STEPS]
             if not steps and job.get('conclusion') != 'skipped':
-                raise RuntimeError('Publication handoff capture outcome is unavailable')
+                raise CaptureMetadataUnavailable('Publication handoff capture outcome is unavailable')
             for step in steps:
                 if step.get('status') != 'completed':
                     raise RuntimeError('Publication handoff capture outcome is still active')
@@ -248,7 +253,20 @@ def run(kind, *, sport=None, manual_repair=False, owner_run_id=None):
             raise RuntimeError('Publication handoff is restricted to its own backup-dispatched owner')
         owner = api('/actions/runs/'+str(current))
         validate_publication_handoff_owner(owner, current)
-        decision, reason = publication_handoff_needed(jobs(current))
+        # The jobs API can briefly omit steps for a completed capture. Re-read
+        # only that missing metadata; never retry a publication dispatch.
+        for attempt, delay in enumerate((0, 5, 10, 20)):
+            if delay:
+                time.sleep(delay)
+            try:
+                decision, reason = publication_handoff_needed(jobs(current))
+                break
+            except CaptureMetadataUnavailable:
+                if attempt == 3:
+                    raise
+                print('SINGLE_CAPTURE_OWNER_METADATA_WAIT ' + json.dumps({
+                    'owner_run_id': current, 'attempt': attempt + 1,
+                }), flush=True)
         evidence = {'owner_run_id':current, 'owner_status':owner.get('status')}
     elif kind == 'publication-gate':
         if type(owner_run_id) is not int or owner_run_id <= 0:

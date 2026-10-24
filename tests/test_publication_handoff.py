@@ -31,6 +31,30 @@ ENV = dict(GITHUB_REPOSITORY=REPO, GITHUB_REF='refs/heads/main', GITHUB_RUN_ID='
 
 
 class PublicationHandoffTests(unittest.TestCase):
+    def test_completed_capture_with_delayed_steps_is_reread_before_one_dispatch(self):
+        complete=[capture('nfl'),capture('nhl'),mirror('nfl'),mirror('nhl')]
+        incomplete=[{**complete[0],'steps':[]},*complete[1:]]
+        with patch.dict(os.environ,ENV,clear=True), \
+             patch('tools.single_capture_owner.api',side_effect=[owner(),
+                 {'total_count':4,'jobs':incomplete}, {'total_count':4,'jobs':complete}, None]) as api, \
+             patch('tools.single_capture_owner.time.sleep') as sleep, patch('sys.stdout',StringIO()):
+            report=run('publication-handoff')
+        self.assertTrue(report['dispatched'])
+        sleep.assert_called_once_with(5)
+        self.assertEqual(api.call_count,4)
+        self.assertEqual(sum('payload' in call.kwargs for call in api.call_args_list),1)
+
+    def test_missing_step_metadata_remains_a_visible_failure_after_bounded_wait(self):
+        jobs=[{**capture('nfl'),'steps':[]},capture('nhl'),mirror('nfl'),mirror('nhl')]
+        with patch.dict(os.environ,ENV,clear=True), \
+             patch('tools.single_capture_owner.api',side_effect=[owner()]+[{'total_count':4,'jobs':jobs}]*4) as api, \
+             patch('tools.single_capture_owner.time.sleep') as sleep, patch('sys.stdout',StringIO()), \
+             self.assertRaisesRegex(RuntimeError,'capture outcome is unavailable'):
+            run('publication-handoff')
+        self.assertEqual([call.args[0] for call in sleep.call_args_list],[5,10,20])
+        self.assertEqual(api.call_count,5)
+        self.assertFalse(any('payload' in call.kwargs for call in api.call_args_list))
+
     def test_aggregate_queued_status_does_not_hide_completed_capture_and_mirror_jobs(self):
         jobs=[capture('nfl'),capture('nhl'),mirror('nfl'),mirror('nhl')]
         for status in ('queued','waiting','pending','requested','in_progress','completed'):
