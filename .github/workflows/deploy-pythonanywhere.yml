@@ -15,8 +15,8 @@ on:
       - "nhl_collector.py"
       - "nhl_schedule_collector.py"
       - "requirements.txt"
-      - "tests/**"
       - ".github/workflows/deploy-pythonanywhere.yml"
+  # Test-only changes validate below without reloading the live web app.
   pull_request:
     branches:
       - main
