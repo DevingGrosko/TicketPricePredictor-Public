@@ -141,6 +141,8 @@ def build(output,cache_directory,*,scheduled=False):
         report = original_build(output)
     validate(output)
     mount_pages(output,scheduled=scheduled)
+    from tools.free_refresh_cache import compress_source_cache
+    compress_source_cache(cache)
     from tools.free_public_assets import retain_public_assets
     retention = retain_public_assets(output, cache)
     report.update(validate_mounted(output), **retention, source_reads=reader.metrics,deployed=False)

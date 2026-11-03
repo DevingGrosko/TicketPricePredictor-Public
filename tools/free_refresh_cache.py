@@ -9,7 +9,9 @@ capture metadata fails closed. No cache or credentials enter the public site.
 from __future__ import annotations
 
 from collections import defaultdict
+from contextlib import contextmanager
 from datetime import datetime, timezone
+import gzip
 import json
 import os
 from pathlib import Path
@@ -20,6 +22,51 @@ from types import SimpleNamespace
 from tools import build_static_preview as source
 
 VERSION = 'free-refresh-raw-v1'
+RAW_CACHE_LIMIT = 3 * 1024**3
+
+
+@contextmanager
+def cache_source(target):
+    """Read legacy SQLite or its losslessly compressed replacement."""
+    compressed = target.with_suffix('.sqlite.gz')
+    if target.is_symlink() or compressed.is_symlink():
+        raise source.BuildError('Cache symlink rejected')
+    if target.is_file() or not compressed.is_file():
+        yield target
+        return
+    with tempfile.TemporaryDirectory(prefix='ticketsignal-source-') as directory:
+        restored = Path(directory) / target.name
+        total = 0
+        with gzip.open(compressed, 'rb') as incoming, restored.open('wb') as outgoing:
+            while chunk := incoming.read(1024**2):
+                total += len(chunk)
+                if total > RAW_CACHE_LIMIT:
+                    raise source.BuildError('Cache exceeds the bounded local storage budget')
+                outgoing.write(chunk)
+        yield restored
+
+
+def compress_source_cache(directory):
+    """Store every source row; replace raw cache files only after gzip completes."""
+    for sport in source.SPORTS:
+        target = Path(directory) / (sport + '.sqlite')
+        compressed = target.with_suffix('.sqlite.gz')
+        if target.is_symlink() or compressed.is_symlink():
+            raise source.BuildError('Cache symlink rejected')
+        if not target.is_file():
+            continue
+        if target.stat().st_size > RAW_CACHE_LIMIT:
+            raise source.BuildError('Cache exceeds the bounded local storage budget')
+        fd, name = tempfile.mkstemp(prefix=sport+'.', suffix='.gz.tmp', dir=target.parent)
+        os.close(fd)
+        try:
+            with target.open('rb') as incoming, gzip.open(name, 'wb', compresslevel=6) as outgoing:
+                while chunk := incoming.read(1024**2):
+                    outgoing.write(chunk)
+            os.replace(name, compressed)
+            target.unlink()
+        finally:
+            Path(name).unlink(missing_ok=True)
 
 
 def encode(value):
@@ -69,7 +116,7 @@ def save_cache(spool, target):
     try:
         with sqlite3.connect(name) as out:
             spool.backup(out)
-        if Path(name).stat().st_size > 3 * 1024**3:
+        if Path(name).stat().st_size > RAW_CACHE_LIMIT:
             raise source.BuildError('Cache exceeds the bounded local storage budget')
         os.replace(name, target)
     finally:
@@ -85,16 +132,15 @@ class SnapshotCache:
         if not include_maps or sport not in source.SPORTS:
             raise source.BuildError('Free refresh cache requires the original sports builder')
         target = self.directory/(sport+'.sqlite')
-        seeded = target.is_file()
-        if seeded:
-            if target.is_symlink():
-                raise source.BuildError('Cache symlink rejected')
-            with sqlite3.connect(target.as_uri()+'?mode=ro', uri=True) as cached:
-                if dict(cached.execute('SELECT key,value FROM cache_meta')) != {'version':VERSION,'sport':sport}:
-                    raise source.BuildError('Unexpected cache identity')
-                cached.backup(spool)
-        else:
-            initialize(spool, sport)
+        with cache_source(target) as restored:
+            seeded = restored.is_file()
+            if seeded:
+                with sqlite3.connect(restored.as_uri()+'?mode=ro', uri=True) as cached:
+                    if dict(cached.execute('SELECT key,value FROM cache_meta')) != {'version':VERSION,'sport':sport}:
+                        raise source.BuildError('Unexpected cache identity')
+                    cached.backup(spool)
+            else:
+                initialize(spool, sport)
         previous_events = {eid: json.loads(body) for eid, body in spool.execute('SELECT id,body FROM events')}
         known = {iid: (eid, captured) for iid, eid, captured in spool.execute('SELECT id,event_id,captured FROM captures')}
         tables = source.SPORTS[sport]

@@ -8,8 +8,9 @@ import sqlite3
 import subprocess
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from tools.free_refresh_cache import SnapshotCache, capture_diff
+from tools.free_refresh_cache import SnapshotCache, capture_diff, compress_source_cache
 from tools.free_refresh_publish import mount_pages, PREFIX
 from tools.build_static_preview import BuildError
 
@@ -90,6 +91,52 @@ class DeltaTests(unittest.TestCase):
         self.read(); path=Path(self.tmp.name)/'mlb.sqlite'
         with sqlite3.connect(path) as db:db.execute("UPDATE cache_meta SET value='nfl' WHERE key='sport'")
         with self.assertRaises(BuildError):self.read()
+
+    def test_compressed_migration_preserves_history_and_incremental_late_commits(self):
+        before,_ = self.read()
+        original = list(before.execute('SELECT * FROM raw ORDER BY id'))
+        raw = Path(self.tmp.name)/'mlb.sqlite'
+        compressed = raw.with_suffix('.sqlite.gz')
+        compress_source_cache(self.tmp.name)
+        self.assertFalse(raw.exists())
+        self.assertTrue(compressed.is_file())
+        restored,_ = self.read()
+        self.assertEqual(list(restored.execute('SELECT * FROM raw ORDER BY id')),original)
+        self.assertEqual(len(self.source.reads),1)
+        compress_source_cache(self.tmp.name)
+        self.source.captures.append((5,1,datetime(2026,9,27,12,30)))
+        self.source.tickets.extend([(3,5,'101',45),(4,5,'102',55)])
+        updated,_ = self.read()
+        self.assertEqual(self.source.reads[-1][1],(5,))
+        self.assertEqual(updated.execute('SELECT COUNT(*) FROM raw').fetchone()[0],4)
+        compress_source_cache(self.tmp.name)
+        final,_ = self.read()
+        self.assertEqual(list(final.execute('SELECT * FROM raw ORDER BY id')),
+                         list(updated.execute('SELECT * FROM raw ORDER BY id')))
+
+    def test_failed_compression_keeps_both_previous_cache_and_new_raw_rows(self):
+        self.read();compress_source_cache(self.tmp.name)
+        raw = Path(self.tmp.name)/'mlb.sqlite'
+        compressed = raw.with_suffix('.sqlite.gz')
+        previous = compressed.read_bytes()
+        self.source.captures.append((5,1,datetime(2026,9,27,12,30)))
+        self.source.tickets.append((3,5,'101',45))
+        self.read(); latest = raw.read_bytes()
+        with patch('tools.free_refresh_cache.gzip.open',side_effect=OSError('disk full')):
+            with self.assertRaises(OSError):compress_source_cache(self.tmp.name)
+        self.assertEqual(compressed.read_bytes(),previous)
+        self.assertEqual(raw.read_bytes(),latest)
+        self.assertFalse(list(Path(self.tmp.name).glob('*.tmp')))
+
+    def test_corrupt_or_oversized_compressed_cache_fails_before_source_reads(self):
+        self.read();compress_source_cache(self.tmp.name)
+        compressed = Path(self.tmp.name)/'mlb.sqlite.gz'
+        previous = compressed.read_bytes()
+        with patch('tools.free_refresh_cache.RAW_CACHE_LIMIT',1):
+            with self.assertRaises(BuildError):self.read()
+        compressed.write_bytes(previous[:-8])
+        with self.assertRaises(EOFError):self.read()
+        self.assertEqual(len(self.source.reads),1)
 
 
 class PagesTests(unittest.TestCase):
