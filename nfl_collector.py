@@ -109,6 +109,7 @@ NFL_TEAM_NAMES = frozenset(
 NON_GAME_MARKERS = (
     "parking",
     "tailgate",
+    "rally pass",
     "season ticket",
     "season tickets",
     "training camp",
