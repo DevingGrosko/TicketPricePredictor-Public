@@ -155,7 +155,13 @@ class MirrorQueue:
     def read(self, path):
         if path.is_symlink() or not path.is_file() or path.stat().st_size > FILE_LIMIT:
             raise ValueError('Invalid shared state file')
-        value = json.loads(path.read_bytes())
+        return self.decode(path.name, path.read_bytes())
+
+    def decode(self, name, data):
+        # The same validation applies to disk checkpoints and bounded ZIP records.
+        if len(data) > FILE_LIMIT:
+            raise ValueError('Invalid shared state file')
+        value = json.loads(data)
         if (value.get('version') != 1 or value.get('sport') != self.sport
                 or set(value.get('acknowledged', {})) != set(DESTINATIONS)):
             raise ValueError('Wrong shared state format')
@@ -165,7 +171,7 @@ class MirrorQueue:
             raise ValueError('Invalid original shared observation metadata')
         public_only(value)
         expected = hashlib.sha256(f"{self.sport}\0{value['source_id']}\0{value['capture_slot']}".encode()).hexdigest()
-        if path.name != expected + '.json' or not re.fullmatch('[0-9a-f]{64}', value['payload_sha256']):
+        if name != expected + '.json' or not re.fullmatch('[0-9a-f]{64}', value['payload_sha256']):
             raise ValueError('Shared snapshot identity mismatch')
         if 'payload' in value:
             payload = value['payload']

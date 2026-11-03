@@ -2,12 +2,17 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 from datetime import datetime, timezone
 from http.client import IncompleteRead
 import json
 import os
 from pathlib import Path
 import re
+import stat
+import subprocess
+import tempfile
+import zipfile
 import time
 from urllib.error import HTTPError
 
@@ -127,7 +132,7 @@ def _success(job, name):
                and step.get('conclusion') == 'success' for step in job.get('steps') or [])
 
 
-def removable_transport_artifacts(rows, caches, runs_for, jobs_for, *, current_run):
+def removable_transport_artifacts(rows, caches, runs_for, jobs_for, *, current_run, records_for=None):
     """Delete only checkpoint duplicates; unknown/active/sole artifacts are retained."""
     ordered, seen = [], set()
     for row in rows:
@@ -182,7 +187,96 @@ def removable_transport_artifacts(rows, caches, runs_for, jobs_for, *, current_r
                     and any(_success(job, 'Verify current export in the delivery checkpoint')
                             and _success(job, 'Preserve independent delivery acknowledgments and failures') for job in consumers)):
                 remove.append(row)
+    # Old exact caches can expire even though later exports carry the same
+    # originals. Under pressure, prove coverage in BOTH retained exports instead.
+    # Never use age, job success alone, or a newer timestamp as data-loss proof.
+    remaining = sum(row['size_in_bytes'] for row in rows
+                    if ARTIFACT.fullmatch(row.get('name', '')) and not row.get('expired')
+                    and row not in remove)
+    if records_for is not None and remaining > TRANSPORT_LIMIT - 3 * PEER_UPLOAD_RESERVE:
+        loaded = {}
+        proof_deadline = time.monotonic() + 90
+        def records(row):
+            if row['id'] not in loaded:
+                if len(loaded) >= 16 or time.monotonic() >= proof_deadline:
+                    return None
+                loaded[row['id']] = None
+                try:
+                    loaded[row['id']] = records_for(row)
+                except Exception as exc:
+                    # Any unknown content is preserved; exact proof still works.
+                    print('SHARED_TRANSPORT_PROOF_SKIPPED ' + json.dumps(
+                        dict(artifact_id=row['id'], error_type=type(exc).__name__)), flush=True)
+            return loaded[row['id']]
+        candidates = [(item[0], group[:2]) for group in groups.values() for item in group[2:]
+                      if item[0] not in remove]
+        for row, copies in sorted(candidates, key=lambda item: item[0]['size_in_bytes'], reverse=True):
+            retained = [records(item[0]) for item in copies]
+            if any(copy is None for copy in retained):
+                continue
+            old = records(row)
+            if old is not None and all(export_covers(old, copy) for copy in retained):
+                remove.append(row)
     return remove
+
+
+def export_covers(original, retained):
+    """Inputs must be validated exports. Preserve every unconfirmed original."""
+    for name, value in original.items():
+        if 'payload' not in value and all(value['acknowledged'].values()):
+            continue  # Both databases already confirmed this receipt-only record.
+        newer = retained.get(name)
+        if (newer is None or any(newer.get(key) != value.get(key) for key in
+                ('payload_sha256', 'observation_sha256', 'source_id', 'capture_slot',
+                 'captured_at', 'section_count'))
+                or ('archived_conflicts' in value
+                    and newer.get('archived_conflicts') != value['archived_conflicts'])
+                or ('payload' not in newer and not all(newer['acknowledged'].values()))):
+            return False
+    return True
+
+
+def read_transport_archive(archive, sport):
+    """Validate ZIP records in memory with the same schema and export manifest."""
+    from tools.shared_capture import (EXPORT_MANIFEST, FILE_LIMIT, MirrorQueue,
+                                      _export_digest, _export_manifest)
+    with tempfile.TemporaryDirectory(prefix='shared-proof-') as directory:
+        mirror = MirrorQueue(directory, sport)
+        with zipfile.ZipFile(archive) as zipped:
+            entries = zipped.infolist()
+            if (sum(entry.file_size for entry in entries) > QUEUE_LIMIT
+                    or len({entry.filename for entry in entries}) != len(entries)
+                    or any((entry.filename != EXPORT_MANIFEST
+                            and not re.fullmatch(r'[0-9a-f]{64}\.json', entry.filename))
+                           or entry.file_size > (256 if entry.filename == EXPORT_MANIFEST else FILE_LIMIT)
+                           or stat.S_ISLNK(entry.external_attr >> 16) for entry in entries)):
+                raise ValueError('Invalid or oversized transport ZIP')
+            records, digest, manifest = {}, hashlib.sha256(), None
+            for entry in sorted(entries, key=lambda entry: entry.filename):
+                data = zipped.read(entry)
+                if entry.filename == EXPORT_MANIFEST:
+                    manifest = data
+                else:
+                    records[entry.filename] = mirror.decode(entry.filename, data)
+                    _export_digest(digest, entry.filename, data)
+            if manifest != _export_manifest(sport, len(records), digest.hexdigest()):
+                raise ValueError('Shared observation export is incomplete or changed')
+            return records
+
+
+def transport_records(row):
+    if not 0 < row['size_in_bytes'] <= QUEUE_LIMIT + ARCHIVE_MARGIN:
+        raise ValueError('Transport archive exceeds bounded proof download')
+    sport = ARTIFACT.fullmatch(row['name'])[1]
+    with tempfile.TemporaryFile() as archive:
+        # gh handles GitHub's signed storage redirect without forwarding the
+        # repository credential to the artifact blob host.
+        subprocess.run(['gh', 'api', f"repos/{REPO}/actions/artifacts/{row['id']}/zip"],
+                       stdout=archive, stderr=subprocess.PIPE, check=True, timeout=30)
+        if archive.tell() > QUEUE_LIMIT + ARCHIVE_MARGIN:
+            raise ValueError('Oversized transport archive')
+        archive.seek(0)
+        return read_transport_archive(archive, sport)
 
 
 def _inventory(path, key):
@@ -283,7 +377,7 @@ def prune_transport_artifacts(*, rows=None, caches=None, runs_for=None):
         return value['jobs']
     runs_for = runs_for or (lambda run: api('/actions/runs/'+str(run)))
     remove = removable_transport_artifacts(rows, caches, runs_for, jobs,
-                                          current_run=int(os.environ['GITHUB_RUN_ID']))
+                                          current_run=int(os.environ['GITHUB_RUN_ID']), records_for=transport_records)
     for row in remove:
         _delete('/actions/artifacts/'+str(row['id']))
     total = sum(bool(ARTIFACT.fullmatch(row.get('name', ''))) and not row.get('expired') for row in rows)
