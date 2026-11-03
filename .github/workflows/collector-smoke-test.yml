@@ -10,7 +10,7 @@ jobs:
     steps:
       - uses: actions/cache/restore@v5
         with:
-          path: shared-observations/nfl
+          path: shared-capture/nfl
           key: shared-capture-v1-nfl-capture-41550615493-1
           fail-on-cache-miss: true
       - uses: actions/cache/restore@v5
@@ -20,7 +20,7 @@ jobs:
           fail-on-cache-miss: true
       - uses: actions/cache/restore@v5
         with:
-          path: shared-observations/nhl
+          path: shared-capture/nhl
           key: shared-capture-v1-nhl-capture-41550615493-1
           fail-on-cache-miss: true
       - uses: actions/cache/restore@v5
@@ -29,7 +29,7 @@ jobs:
           key: shared-capture-v1-nhl-tidb-41550615493-1
           fail-on-cache-miss: true
       - name: Archive the four restored checkpoints without modifying them
-        run: tar -czf recovery-checkpoints.tgz shared-observations shared-acknowledgments
+        run: tar -czf recovery-checkpoints.tgz shared-capture shared-acknowledgments
       - uses: actions/upload-artifact@v7
         with:
           name: recovery-checkpoints-nov02
