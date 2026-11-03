@@ -529,7 +529,13 @@ def run_legacy(sport, directory, pending_dir, health_output, *, timeout=45, runn
             raise RuntimeError('COLLECTOR_INGEST_TOKEN is required')
         progress('merge-acknowledgments')
         mirror = MirrorQueue(directory, sport)
+        # Expired receipts contain no original payload and both destinations
+        # already confirmed them. Reclaim them before budget-checked writes,
+        # including the independent checkpoint that would resurrect them.
+        now = datetime.now(timezone.utc)
+        mirror.prune_receipts(now)
         if acknowledgments is not None:
+            MirrorQueue(acknowledgments, sport).prune_receipts(now)
             mirror.merge(acknowledgments)
         progress('restore-original-observations')
         if saved is not None:
@@ -689,6 +695,7 @@ def deliver_tidb(sport, directory, incoming, *, sender=None, legacy_free_state=N
                  clock=time.monotonic, budget=8 * 60):
     began = clock()
     mirror = MirrorQueue(directory, sport)
+    mirror.prune_receipts(datetime.now(timezone.utc))
     errors, failures = [], []
     try:
         validate_export(sport, incoming)
