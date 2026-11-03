@@ -181,11 +181,11 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
     started = now(); slot = half_hour_capture_slot(started); began = clock()
     if selected_slot is not None and selected_slot != slot.isoformat():
         raise ValueError('Capture slot changed after the final owner gate; do not scrape a different slot')
-    if (not isinstance(repair_schedule_ids, (tuple, list)) or len(repair_schedule_ids) > 3
+    if (not isinstance(repair_schedule_ids, (tuple, list)) or len(repair_schedule_ids) > 50
             or len(set(repair_schedule_ids)) != len(repair_schedule_ids)
-            or any(not isinstance(v, str) or not v.isascii() or not v.isdigit() or len(v) != 10
-                   for v in repair_schedule_ids) or repair_schedule_ids and sport != 'nhl'):
-        raise ValueError('Manual NHL refresh requires up to three distinct official schedule IDs')
+            or any(not isinstance(v, str) or not v.isascii() or not v.isdigit()
+                   or len(v) != (9 if sport == 'nfl' else 10) for v in repair_schedule_ids)):
+        raise ValueError('Manual refresh requires up to 50 distinct official IDs for the selected sport')
     # Finish browser work within the slot admitted by the final gate. The usual
     # phase reserve also leaves time for a capture already in progress to finish.
     deadline_seconds = min(deadline_seconds, max(0, (slot + timedelta(minutes=30) - started).total_seconds()))
@@ -262,7 +262,8 @@ def run_owner(sport, module, mirror, endpoint, token, timeout, health_output, pe
                     continue
                 current.append(game)
                 state['pending'][str(game.schedule_id)] = {'first_due': slot.isoformat(), 'game': game_value(game)}
-        current.sort(key=lambda game: (game.event_date, str(game.schedule_id)))
+        current.sort(key=lambda game: (bool(repair_schedule_ids) and not is_due(
+            game.event_date, slot, game.schedule_id), game.event_date, str(game.schedule_id)))
         work = current
         report.update(scheduled_in_window=raw_schedule_count, scheduled_in_scope=len(schedule), scheduled_due=len(current),
             scheduled_selected=len(work),

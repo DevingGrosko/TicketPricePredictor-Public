@@ -11,7 +11,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = 'c0f940ca1199a81306dfa87249912c6cca9e8991'
-PUBLICATION_SOURCE = '62bd250932f1111ce2a0c862e6017318deb5c80e'
+PUBLICATION_SOURCE = '52490e46092c9941e9874c21d7ce5d939b7f5ff8'
 
 
 def workflow(name):
@@ -47,15 +47,20 @@ class CaptureCutoverWorkflowTests(unittest.TestCase):
             self.assertIn("steps.shared-capture.outputs.attempted == 'true'",stopped)
 
     def test_targeted_refresh_cannot_be_enabled_by_a_timer_or_saved_delivery(self):
-        gate = step(job(workflow('collect-ticket-prices'),'collect-nhl'),'Select the half-hour NHL slot')
-        script = textwrap.dedent(gate.split('        run: |\n',1)[1])
-        for event, repair, delivery in [('schedule','true','false'),
-                                       ('workflow_dispatch','false','false'),
-                                       ('workflow_dispatch','true','true')]:
-            env={**os.environ,'EVENT_NAME':event,'MANUAL_REPAIR':repair,'DELIVERY_ONLY':delivery,
-                 'SHARED_CAPTURE':'true','NHL_REPAIR_SCHEDULE_IDS':'2026020327'}
-            result=subprocess.run(['bash','-e','-c',script],env=env,capture_output=True,timeout=5)
-            self.assertEqual(result.returncode,2)
+        for sport in ('nfl', 'nhl'):
+            owner = job(workflow('collect-ticket-prices'),'collect-'+sport)
+            gate = step(owner,'Select the half-hour '+sport.upper()+' slot')
+            capture = step(owner,'Attempt shared '+sport.upper()+' capture for the half-hour')
+            self.assertIn('--repair-schedule-ids "$'+sport.upper()+'_REPAIR_SCHEDULE_IDS"',capture)
+            script = textwrap.dedent(gate.split('        run: |\n',1)[1])
+            for input_sport in ('NFL', 'NHL'):
+                for event, repair, delivery in [('schedule','true','false'),
+                                               ('workflow_dispatch','false','false'),
+                                               ('workflow_dispatch','true','true')]:
+                    env={**os.environ,'EVENT_NAME':event,'MANUAL_REPAIR':repair,'DELIVERY_ONLY':delivery,
+                         'SHARED_CAPTURE':'true',input_sport+'_REPAIR_SCHEDULE_IDS':'123456789'}
+                    result=subprocess.run(['bash','-e','-c',script],env=env,capture_output=True,timeout=5)
+                    self.assertEqual(result.returncode,2)
 
     def test_recurring_defaults_retain_manual_engines_mlb_pause_and_existing_clocks(self):
         owner = workflow('collect-ticket-prices')

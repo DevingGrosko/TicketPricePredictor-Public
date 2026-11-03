@@ -46,8 +46,12 @@ on:
         type: boolean
         required: false
         default: false
+      nfl_repair_schedule_ids:
+        description: Optional comma-separated official NFL IDs (up to 50); requires explicit manual repair
+        required: false
+        default: ''
       nhl_repair_schedule_ids:
-        description: Optional comma-separated official NHL IDs (up to three); requires explicit manual repair
+        description: Optional comma-separated official NHL IDs (up to 50); requires explicit manual repair
         required: false
         default: ''
       manual_repair:
@@ -148,9 +152,10 @@ jobs:
           MANUAL_REPAIR: ${{ inputs.manual_repair }}
           DELIVERY_ONLY: ${{ inputs.delivery_only }}
           STOP_AFTER_FIRST_FAILURE: ${{ inputs.stop_after_first_failure }}
+          NFL_REPAIR_SCHEDULE_IDS: ${{ inputs.nfl_repair_schedule_ids }}
           NHL_REPAIR_SCHEDULE_IDS: ${{ inputs.nhl_repair_schedule_ids }}
         run: |
-          if [[ -n "$NHL_REPAIR_SCHEDULE_IDS" ]] && [[ "$EVENT_NAME" != 'workflow_dispatch' || "$MANUAL_REPAIR" != 'true' || "$DELIVERY_ONLY" == 'true' || "$SHARED_CAPTURE" != 'true' ]]; then
+          if [[ -n "$NHL_REPAIR_SCHEDULE_IDS$NFL_REPAIR_SCHEDULE_IDS" ]] && [[ "$EVENT_NAME" != 'workflow_dispatch' || "$MANUAL_REPAIR" != 'true' || "$DELIVERY_ONLY" == 'true' || "$SHARED_CAPTURE" != 'true' ]]; then
             echo "Targeted refresh requires an explicit live shared manual repair."
             exit 2
           fi
@@ -266,6 +271,7 @@ jobs:
         if: steps.ready.outputs.run == 'true' && env.SHARED_CAPTURE == 'true' && !inputs.delivery_only
         env:
           STOP_AFTER_FIRST_FAILURE: ${{ inputs.stop_after_first_failure }}
+          NFL_REPAIR_SCHEDULE_IDS: ${{ inputs.nfl_repair_schedule_ids }}
           SELECTED_CAPTURE_SLOT: ${{ steps.ready.outputs.capture_slot }}
           COLLECTOR_INGEST_TOKEN: ${{ secrets.COLLECTOR_INGEST_TOKEN }}
         run: |
@@ -282,6 +288,7 @@ jobs:
             --pending-dir nfl_pending --health-output nfl_remote_health.json \
             --legacy-free-state free-capture/nfl --timeout 45 \
             --selected-slot "$SELECTED_CAPTURE_SLOT" \
+            --repair-schedule-ids "$NFL_REPAIR_SCHEDULE_IDS" \
             --blocker-diagnostics "${diagnostic[@]}"
 
       - name: Deliver saved NFL observations to both stores
@@ -389,9 +396,10 @@ jobs:
           MANUAL_REPAIR: ${{ inputs.manual_repair }}
           DELIVERY_ONLY: ${{ inputs.delivery_only }}
           STOP_AFTER_FIRST_FAILURE: ${{ inputs.stop_after_first_failure }}
+          NFL_REPAIR_SCHEDULE_IDS: ${{ inputs.nfl_repair_schedule_ids }}
           NHL_REPAIR_SCHEDULE_IDS: ${{ inputs.nhl_repair_schedule_ids }}
         run: |
-          if [[ -n "$NHL_REPAIR_SCHEDULE_IDS" ]] && [[ "$EVENT_NAME" != 'workflow_dispatch' || "$MANUAL_REPAIR" != 'true' || "$DELIVERY_ONLY" == 'true' || "$SHARED_CAPTURE" != 'true' ]]; then
+          if [[ -n "$NHL_REPAIR_SCHEDULE_IDS$NFL_REPAIR_SCHEDULE_IDS" ]] && [[ "$EVENT_NAME" != 'workflow_dispatch' || "$MANUAL_REPAIR" != 'true' || "$DELIVERY_ONLY" == 'true' || "$SHARED_CAPTURE" != 'true' ]]; then
             echo "Targeted refresh requires an explicit live shared manual repair."
             exit 2
           fi
