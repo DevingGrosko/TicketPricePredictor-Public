@@ -69,6 +69,32 @@ class SharedCapturePolicyTests(unittest.TestCase):
                 self.health, self.pending, now=lambda: NOW, repair_schedule_ids=('2026020999',)), 1)
         self.assertEqual((calls, captured), ([], []))
 
+    def test_nfl_manual_refresh_prioritizes_regular_games_and_does_not_repeat(self):
+        manual = self.game('nfl', '401873001', days=10)
+        due = self.game('nfl', '401873002', days=20)
+        stack, calls, captured = self.controlled(nfl, [manual, due])
+        with stack, patch.object(nfl, 'nfl_capture_is_due', side_effect=lambda event, slot, identity:
+                                 str(identity) == '401873002'):
+            self.assertEqual(run_owner('nfl', nfl, self.mirror, 'endpoint', 'token', 45,
+                self.health, self.pending, now=lambda: NOW, repair_schedule_ids=('401873001',)), 0)
+        self.assertEqual([v for v in calls if v.startswith('capture:')],
+                         ['capture:401873002', 'capture:401873001'])
+        self.assertEqual(json.loads((self.mirror.root/'recovery/state.json').read_text())['pending'], {})
+        stack, later_calls, _ = self.controlled(nfl, [manual, due])
+        with stack, patch.object(nfl, 'nfl_capture_is_due', return_value=False):
+            self.assertEqual(run_owner('nfl', nfl, self.mirror, 'endpoint', 'token', 45,
+                self.health, self.pending, now=lambda: NOW+timedelta(minutes=30)), 0)
+        self.assertEqual(later_calls, [])
+
+    def test_manual_refresh_rejects_oversized_duplicate_or_wrong_sport_ids(self):
+        for sport, module, values in [('nfl', nfl, tuple(str(401873000+i) for i in range(51))),
+                                     ('nfl', nfl, ('401873001', '401873001')),
+                                     ('nfl', nfl, ('2026020327',)),
+                                     ('nhl', nhl, ('401873001',))]:
+            with self.subTest(sport=sport, values=values), self.assertRaises(ValueError):
+                run_owner(sport, module, self.mirror, 'endpoint', 'token', 45,
+                          self.health, self.pending, now=lambda: NOW, repair_schedule_ids=values)
+
     def test_progress_overlay_actions_exclude_page_text_unknown_controls_and_extra_rows(self):
         output = StringIO()
         with redirect_stdout(output):
