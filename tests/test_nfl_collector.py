@@ -20,6 +20,24 @@ from nfl_collector import (
 
 
 class NFLDiscoveryTests(unittest.TestCase):
+    def test_rally_pass_does_not_displace_actual_matchup_in_search(self):
+        # Vivid search lists the pregame rally before the actual game tickets.
+        page = """
+        <a href="/49ers-red-zone-rally-pass-tickets-11-29-2026/production/7036649">
+          SUN Nov 29 10:25am 49ers Red Zone Rally Pass - Seattle Seahawks at San Francisco 49ers
+        </a>
+        <a href="/san-francisco-49ers-tickets-3-3-2027/production/6495879">
+          SUN Nov 29 1:25pm Seattle Seahawks at San Francisco 49ers
+        </a>
+        """
+        rows = extract_nfl_game_rows(page, now=datetime(2026, 11, 3, tzinfo=timezone.utc))
+        self.assertEqual([row.url.rsplit('/', 1)[-1] for row in rows], ['6495879'])
+        self.assertEqual(rows[0].date_hint.isoformat(), '2026-11-29')
+        with self.assertRaisesRegex(ValueError, 'non-game event'):
+            NFLSnapshotParser.parse({'global': [{'productionName':
+                '49ers Red Zone Rally Pass - Seattle Seahawks at San Francisco 49ers',
+                'mapTitle': "Levi's Stadium", 'productionId': '7036649'}]})
+
     def test_extracts_games_and_excludes_non_game_products(self):
         now = datetime(2026, 9, 1, 12, tzinfo=timezone.utc)
         page = """
