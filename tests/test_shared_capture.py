@@ -85,9 +85,13 @@ class SharedCaptureTests(unittest.TestCase):
                 self.assertNotIn('test-token', json.dumps(record))
 
     def test_real_legacy_schedule_loops_capture_once_and_queue_before_upload_for_both_sports(self):
+        from functools import partial
+        from tools.shared_capture_policy import run_owner
+        # This tests real capture hooks, not the production end-of-slot guard.
+        fixed_now = datetime(2026, 10, 8, 12, 5, tzinfo=timezone.utc)
         for sport,module in (('nfl',nfl),('nhl',nhl)):
             with self.subTest(sport=sport):
-                value=payload(sport,'6493143' if sport=='nfl' else '7302493')
+                value=payload(sport,'6493143' if sport=='nfl' else '7302493', captured=fixed_now)
                 url,event,_captured,snapshot=collector.snapshot_from_payload(value)
                 title=value['title'];away,home=title.split(' at ')
                 game_class=module.ScheduledNFLGame if sport=='nfl' else module.ScheduledNHLGame
@@ -107,6 +111,7 @@ class SharedCaptureTests(unittest.TestCase):
                      patch.object(module,'discover_'+sport+'_games',return_value=([],[])), \
                      patch.object(module,'resolve_schedule_games',return_value=([resolution],[])), \
                      patch.object(module,'_capture_resolution',return_value=(url,event,snapshot)) as capture, \
+                     patch('tools.shared_capture_policy.run_owner', partial(run_owner, now=lambda: fixed_now)), \
                      patch('sys.stdout',StringIO()):
                     self.assertEqual(run_legacy(sport,directory,self.root/(sport+'-pending'),
                                                self.root/(sport+'-health.json')),0)

@@ -1,15 +1,12 @@
 name: Report quality audit
 on:
-  workflow_run:
-    workflows: [Deploy to PythonAnywhere]
-    types: [completed]
-    branches: [main]
+  # The full historical report scan competes with live snapshot uploads.
+  # Deployment already checks public pages; run this deeper audit explicitly.
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   audit:
-    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
